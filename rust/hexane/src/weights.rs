@@ -1,14 +1,13 @@
 //! The weight a column's index keeps for each slab, verified with Verus.
 //!
 //! The edit cursor keeps every slab's weight related to the slab by the
-//! column's weight model (`cursor::Weigh::wrel`), and each weight
-//! function names its model (`WeightFn::Model`), so the relation is
-//! concrete, and each model's `compute` is the verified computation:
+//! column's weight model (`cursor::Weigh::wrel`), and each model's
+//! `compute` is the verified computation:
 //!
 //! - [`LenModel`], a plain column's: the slab's item count.
-//! - [`PrefixModel`], a prefix column's: the item count and the sum of the
-//!   slab's values (`vsum`), computed by `prefix_core::p_slab_sum` (or its
-//!   checked twin, which panics where the sum would overflow).
+//! - the prefix and accumulator columns' (`crate::verified::sums`,
+//!   `crate::verified::acc`): the item count and the sum of the slab's
+//!   values (`vsum`), computed by `prefix_core::p_slab_sum`.
 //! - [`DeltaModel`], a delta column's: the item count and, where the
 //!   slab's running sums fit `i64`, the aggregate of its deltas
 //!   (`agg_of`), computed by `delta::agg::slab_agg`. Its domain
@@ -32,7 +31,7 @@
 use crate::attrib::Accumulate;
 use crate::btree::SlabAgg;
 #[cfg(verus_keep_ghost)]
-use crate::btree::{exact_clone, in_i64, lemma_prefix_len, SlabAggregate};
+use crate::btree::{exact_clone, in_i64, SlabAggregate};
 use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{all_ok, lemma_lens_ok, lemma_vals_own, slab_lens, vals_of};
@@ -56,13 +55,12 @@ use crate::delta::diter::{crop, lemma_crop};
 use crate::fenwick::total;
 use crate::index::IndexOps;
 use crate::iter_core::{Decode, Decoders};
-use crate::prefix::PrefixSlabWeight;
 #[cfg(verus_keep_ghost)]
 use crate::prefix_core::{lemma_vsum_cat, lemma_vsum_run, vsum};
-use crate::prefix_core::{p_slab_sum, p_slab_sum_checked, PrefixOps};
-use crate::{PackError, Run};
+#[cfg(verus_keep_ghost)]
+use crate::prefix_core::{p_slab_sum, PrefixOps};
+use crate::PackError;
 use std::marker::PhantomData;
-use std::ops::{AddAssign, SubAssign};
 use vstd::prelude::*;
 
 pub(crate) use crate::trusted::count_overflows;
@@ -273,175 +271,6 @@ impl<'a, E: Slabs + ReadsAgree<'a, X>, X: Decoders<'a, Tail = E::Tail>> LoadWeig
     }
 }
 
-/// A prefix column's weights: each slab's item count and the sum of its
-/// values, through read model `X` and prefix arithmetic `B`.
-pub struct PrefixModel<X, B>(PhantomData<(X, B)>);
-
-impl<E, X, B, P> Weigh<E, PrefixSlabWeight<P>> for PrefixModel<X, B> where
-    E: Slabs + for<'a> ReadsAgree<'a, X>,
-    X: for<'a> Decoders<'a, Tail = E::Tail>,
-    B: for<'a> PrefixOps<<<X as Decoders<'a>>::D as Decode>::Item, P = P, W = PrefixSlabWeight<P>>,
-    P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
- {
-    open spec fn wrel(w: PrefixSlabWeight<P>, s: Slab<E::Tail>) -> bool {
-        &&& w.len == s.len
-        &&& w.prefix == vsum::<_, B>(<X as Decoders<'static>>::vals(s))
-    }
-
-    #[inline(always)]
-    fn compute<I: IndexOps<PrefixSlabWeight<P>>>(s: &Slab<E::Tail>) -> (w: PrefixSlabWeight<P>) {
-        proof {
-            <E as ReadsAgree<'static, X>>::lemma_reads(*s);
-        }
-        let prefix = if s.len <= <B as PrefixOps<<<X as Decoders<'static>>::D as Decode>::Item>>::max_unchecked_len() {
-            p_slab_sum::<X, B>(s)
-        } else {
-            match p_slab_sum_checked::<X, B>(s) {
-                Some(p) => p,
-                None => {
-                    sum_overflows();
-                    unreached()
-                },
-            }
-        };
-        let w = PrefixSlabWeight { len: s.len, prefix };
-        proof {
-            I::lemma_wlen(w);
-            lemma_prefix_len(w);
-        }
-        w
-    }
-
-    #[verifier::external_body]
-    #[inline(always)]
-    fn check_set<I: IndexOps<PrefixSlabWeight<P>>>(index: &I, i: usize, w: &PrefixSlabWeight<P>, len: usize) {
-        check_total::<I, B, P, <<X as Decoders<'static>>::D as Decode>::Item>(index, i, i + 1, std::slice::from_ref(w), len)
-    }
-
-    #[verifier::external_body]
-    #[inline(always)]
-    fn check_splice<I: IndexOps<PrefixSlabWeight<P>>>(
-        index: &I,
-        start: usize,
-        end: usize,
-        new: &Vec<PrefixSlabWeight<P>>,
-        len: usize,
-    ) {
-        check_total::<I, B, P, <<X as Decoders<'static>>::D as Decode>::Item>(index, start, end, new, len)
-    }
-
-    open spec fn dom_ok(s: Seq<Slab<E::Tail>>) -> bool {
-        true
-    }
-
-    #[inline(always)]
-    fn dom_check(_slabs: &Vec<Slab<E::Tail>>, _len: usize) -> bool {
-        true
-    }
-
-    /// A column longer than one whose sums cannot overflow: its total, the
-    /// weights' sum, checked (`try_add`). Its values add nonnegative
-    /// amounts, so the total bounds every prefix sum.
-    #[inline(always)]
-    fn total_ok(ws: &[PrefixSlabWeight<P>], len: usize) -> bool {
-        if len > <B as PrefixOps<<<X as Decoders<'static>>::D as Decode>::Item>>::max_unchecked_len() {
-            let mut total = <B as PrefixOps<<<X as Decoders<'static>>::D as Decode>::Item>>::zero();
-            let mut i: usize = 0;
-            while i < ws.len()
-                decreases ws.len() - i,
-            {
-                if !<B as PrefixOps<<<X as Decoders<'static>>::D as Decode>::Item>>::try_add(&mut total, &ws[i].prefix) {
-                    return false;
-                }
-                i += 1;
-            }
-        }
-        true
-    }
-
-    proof fn lemma_dom_empty(s: Seq<Slab<E::Tail>>) {
-    }
-}
-
-impl<'a, X, B, P> Accumulate<<X::D as Decode>::Item, PrefixSlabWeight<P>> for PrefixModel<X, B> where
-    X: Decoders<'a>,
-    B: PrefixOps<<X::D as Decode>::Item, P = P, W = PrefixSlabWeight<P>>,
-    P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
- {
-    open spec fn wvals(w: PrefixSlabWeight<P>, vs: Seq<<X::D as Decode>::Item>) -> bool {
-        &&& w.len == vs.len()
-        &&& w.prefix == vsum::<_, B>(vs)
-    }
-
-    #[inline(always)]
-    fn new_zero() -> PrefixSlabWeight<P> {
-        PrefixSlabWeight { len: 0, prefix: B::zero() }
-    }
-
-    /// The run's sum checked (`try_acc_run`): data whose sums the prefix
-    /// type can't hold is rejected rather than wrapped.
-    #[inline(always)]
-    fn accumulate_run(
-        w: &mut PrefixSlabWeight<P>,
-        n: usize,
-        v: <X::D as Decode>::Item,
-        Ghost(vs): Ghost<Seq<<X::D as Decode>::Item>>,
-    ) -> Result<(), PackError> {
-        if w.len > usize::MAX - n {
-            return Err(count_overflows());
-        }
-        if !B::try_acc_run(&mut w.prefix, &Run { count: n, value: v }) {
-            return Err(prefix_sum_overflows());
-        }
-        w.len += n;
-        proof {
-            lemma_vsum_cat::<_, B>(vs, Seq::new(n as nat, |_i: int| v));
-            lemma_vsum_run::<_, B>(n as nat, v);
-        }
-        Ok(())
-    }
-}
-
-impl<'a, E, X, B, P> LoadWeigh<'a, E, X, PrefixSlabWeight<P>> for PrefixModel<X, B> where
-    E: Slabs + for<'b> ReadsAgree<'b, X>,
-    X: for<'b> Decoders<'b, Tail = E::Tail>,
-    B: for<'b> PrefixOps<<<X as Decoders<'b>>::D as Decode>::Item, P = P, W = PrefixSlabWeight<P>>,
-    P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
- {
-    open spec fn accumulates() -> bool {
-        true
-    }
-
-    #[inline(always)]
-    fn accumulates_exec() -> bool {
-        true
-    }
-
-    open spec fn may_refuse(vs: Seq<E::V>) -> bool {
-        true
-    }
-
-    open spec fn bounded(s: Seq<Slab<E::Tail>>, lo: i64, hi: i64) -> bool {
-        true
-    }
-
-    proof fn lemma_may_refuse(vs: Seq<E::V>) {
-    }
-
-    proof fn lemma_wrel(w: PrefixSlabWeight<P>, s: Slab<E::Tail>) {
-        <E as ReadsAgree<'a, X>>::lemma_reads(s);
-    }
-
-    /// The total checked (`total_ok`). Not part of the proof: it can only
-    /// fail.
-    #[inline(always)]
-    fn load_check(ws: &[PrefixSlabWeight<P>], _slabs: &[Slab<E::Tail>], len: usize, _lo: i64, _hi: i64) -> Result<(), PackError> {
-        if !<Self as Weigh<E, PrefixSlabWeight<P>>>::total_ok(ws, len) {
-            return Err(prefix_sum_overflows());
-        }
-        Ok(())
-    }
-}
 
 /// A delta column's weights: each slab's item count, the sum of its deltas
 /// (wrapping), and, where its running sums fit `i64`, their aggregate,
@@ -685,57 +514,4 @@ impl<'a, E, X, B> LoadWeigh<'a, E, X, SlabAgg> for DeltaModel<X, B> where
     }
 }
 
-/// Never returns: after a call that does not.
-#[verifier::external_body]
-#[inline(always)]
-fn unreached<A>() -> A
-    requires
-        false,
-{
-    unreachable!()
-}
-
 } // verus!
-
-/// Panic unless the column `index` indexes, with `new` in place of the
-/// weights of slabs `start..end`, sums within the prefix type, for a
-/// column of `len` items longer than one whose sums cannot overflow. Its
-/// values add nonnegative amounts, so the total bounds every prefix sum.
-#[inline(always)]
-fn check_total<I, B, P, V>(
-    index: &I,
-    start: usize,
-    end: usize,
-    new: &[PrefixSlabWeight<P>],
-    len: usize,
-) where
-    I: IndexOps<PrefixSlabWeight<P>>,
-    B: PrefixOps<V, P = P, W = PrefixSlabWeight<P>>,
-    V: Copy,
-    P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
-{
-    if len > B::max_unchecked_len() {
-        check_spliced_total::<I, B, P, V>(index, start, end, new);
-    }
-}
-
-#[cold]
-#[inline(never)]
-fn check_spliced_total<I, B, P, V>(index: &I, start: usize, end: usize, new: &[PrefixSlabWeight<P>])
-where
-    I: IndexOps<PrefixSlabWeight<P>>,
-    B: PrefixOps<V, P = P, W = PrefixSlabWeight<P>>,
-    V: Copy,
-    P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
-{
-    // the other slabs' total: it fits, as the column's did
-    let mut total = index.ix_total().prefix;
-    for i in start..end {
-        total -= index.ix_weight(i).prefix;
-    }
-    for w in new {
-        if !B::try_add(&mut total, &w.prefix) {
-            panic!("prefix sum overflows its type");
-        }
-    }
-}

@@ -8,11 +8,11 @@ use hexane::{Column, DeltaColumn};
 use std::ops::Bound::{Excluded, Unbounded};
 
 fn column() -> Column<u64> {
-    Column::from_values((0..10).collect())
+    Column::from_values(&(0..10).collect::<Vec<_>>())
 }
 
 fn deltas() -> DeltaColumn<u64> {
-    DeltaColumn::from_values((0..10).collect())
+    DeltaColumn::from_values(&(0..10).collect::<Vec<_>>())
 }
 
 #[test]

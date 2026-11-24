@@ -2,18 +2,18 @@
 //! implementing [`SlabAggregate`], so the same tree can back multiple
 //! column types:
 //!
-//! * `DeltaColumn` uses `SlabBTree<SlabAgg>` with min/max
-//!   pruning for value queries.
-//! * `PrefixColumn` uses `SlabBTree<PrefixSlabWeight<P>>` as a direct
-//!   replacement for the Fenwick BIT — stores len + prefix sum per slab.
+//! * a plain column uses `SlabBTree<usize>`, the slabs' lengths;
+//! * `DeltaColumn` uses `SlabBTree<SlabAgg>` with min/max pruning for
+//!   value queries;
+//! * the prefix and accumulator columns use the sums of their slabs
+//!   (`SumWeight`, `AccWeight`).
 //!
 //! Each leaf holds up to `B` slab aggregates in slab-index order.  Each
 //! internal node holds up to `B` child entries, where each entry carries
 //! the child's merged aggregate and its slab count.
 //!
-//! Mutation API ([`splice`](SlabBTree::splice)) matches what
-//! `Column::splice_inner` produces: a slab-range to replace + a stream
-//! of new aggregates.
+//! Mutation API ([`splice_vec`](SlabBTree::splice_vec)): a slab-range to
+//! replace, and the new aggregates.
 //!
 //! Deletion underflow: emptied nodes are removed (cascading upward), a
 //! single-child root chain is collapsed, and underfull *leaves* merge
@@ -36,9 +36,8 @@
 //! `valid`, and the value search yields, in order, exactly the slabs whose
 //! min/max running sums meet the range.  Only the `IntoIterator` wrappers
 //! around `splice_vec` and `from_vec` and the `Iterator` wrappers around
-//! `ValueSearch` are unverified.  `merge`'s laws are proved for `SlabAgg` and `usize`; for
-//! `PrefixSlabWeight<P>` they, and the prefix arithmetic, are assumed of
-//! the user's `P` (`axiom_prefix_add`).
+//! `ValueSearch` are unverified.  `merge`'s laws are proved for each
+//! aggregate.
 
 // Verus has no specs for `Vec::is_empty` or `usize::is_multiple_of`, and
 // ghost arguments make some signatures long.
@@ -48,10 +47,10 @@
     clippy::too_many_arguments
 )]
 
-use crate::prefix::PrefixSlabWeight;
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::ops::{Add, AddAssign, Range, SubAssign};
+#[cfg(test)]
+use std::ops::Range;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -158,7 +157,7 @@ pub trait SlabAggregate: Clone + Default + std::fmt::Debug + Sized {
 // ── SlabAgg (used by DeltaColumn) ───────────────────────────────────────────
 
 /// Running min/max of a delta column's prefix-sum range.  The specific
-/// aggregate used by `DeltaColumn`'s default `IndexedDeltaWeightFn` for
+/// aggregate a delta column's index keeps, for
 /// value-range pruning.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct SlabAgg {
@@ -264,7 +263,7 @@ impl SlabAggregate for SlabAgg {
     }
 }
 
-// ── SlabAggregate for usize (LenWeight) ─────────────────────────────────────
+// ── SlabAggregate for usize (a plain column's lengths) ──────────────────────
 
 impl SlabAggregate for usize {
     open spec fn spec_len(&self) -> nat {
@@ -313,26 +312,6 @@ impl SlabAggregate for usize {
     }
 }
 
-// ── SlabAggregate for PrefixSlabWeight ──────────────────────────────────────
-
-/// `+=` on a prefix type `P`.  `P` comes from the column's user (e.g.
-/// automerge's mark sets), so this is the one place the tree trusts code
-/// it doesn't verify: `P`'s `+=` must be associative, never overflow, and
-/// have `P::default()` as its identity — see the axioms below.
-pub uninterp spec fn prefix_add<P>(a: P, b: P) -> P;
-
-/// `P::default()`.
-pub uninterp spec fn prefix_zero<P>() -> P;
-
-#[verifier::external_body]
-pub proof fn axiom_prefix_add<P>(a: P, b: P, c: P)
-    ensures
-        prefix_add(prefix_add(a, b), c) == prefix_add(a, prefix_add(b, c)),
-        prefix_add(prefix_zero(), a) == a,
-        prefix_add(a, prefix_zero()) == a,
-{
-}
-
 /// A count's length, as an aggregate: the count.
 ///
 /// `SlabWeight::lemma_weight_len` of `usize` calls this and does not prove it in place.
@@ -347,85 +326,13 @@ pub(crate) proof fn lemma_count_len(w: usize)
 {
 }
 
-/// A prefix weight's length, as an aggregate: its item count.
-pub(crate) proof fn lemma_prefix_len<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign>(w: PrefixSlabWeight<P>)
-    ensures
-        w.spec_len() == w.len as nat,
-{
-}
-
-/// A prefix weight's sum, as an aggregate: its `prefix`.
-pub(crate) proof fn lemma_prefix_sum<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign + Add<Output = P> + for<'a> AddAssign<&'a P>>(w: PrefixSlabWeight<P>)
-    ensures
-        w.spec_prefix() == w.prefix,
-{
-}
-
-impl<P> SlabAggregate for PrefixSlabWeight<P>
-where
-    P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
-{
-    closed spec fn spec_len(&self) -> nat {
-        self.len as nat
-    }
-
-    closed spec fn spec_merge(l: Self, r: Self) -> Self {
-        PrefixSlabWeight { len: (l.len + r.len) as usize, prefix: prefix_add(l.prefix, r.prefix) }
-    }
-
-    closed spec fn merge_ok(l: Self, r: Self) -> bool {
-        l.len + r.len <= usize::MAX
-    }
-
-    closed spec fn spec_empty() -> Self {
-        PrefixSlabWeight { len: 0, prefix: prefix_zero() }
-    }
-
-    // Trusted: `clone` + `+=` compute `prefix_add` (see above).
-    #[verifier::external_body]
-    fn merge(l: &Self, r: &Self) -> Self {
-        let mut out = l.clone();
-        out += r.clone();
-        out
-    }
-
-    fn len(&self) -> usize {
-        self.len
-    }
-
-    // Trusted: `P::default()` is `prefix_zero`.
-    #[verifier::external_body]
-    fn empty() -> Self {
-        Self::default()
-    }
-
-    proof fn lemma_empty(a: Self) {
-        axiom_prefix_add(a.prefix, a.prefix, a.prefix);
-    }
-
-
-    proof fn lemma_merge_len(a: Self, b: Self) {
-    }
-
-    proof fn lemma_assoc(a: Self, b: Self, c: Self) {
-        axiom_prefix_add(a.prefix, b.prefix, c.prefix);
-    }
-
-    open spec fn plain() -> bool {
-        true
-    }
-
-    proof fn lemma_plain(a: Self, b: Self) {
-    }
-}
-
 /// Aggregate that additionally carries a prefix-sum value per slab,
 /// enabling [`find_slab_at_item`](SlabBTree::find_slab_at_item) and
 /// [`find_slab_at_prefix`](SlabBTree::find_slab_at_prefix) to work
 /// aggregate-agnostically.
 ///
-/// Implemented by [`PrefixSlabWeight<P>`](crate::prefix::PrefixSlabWeight)
-/// (prefix lives in `.prefix`) and [`SlabAgg`] (prefix lives in `.total`).
+/// Implemented by [`SlabAgg`] (prefix lives in `.total`) and the weights
+/// of the prefix and accumulator columns.
 ///
 /// For verification, prefix addition is given as mathematics
 /// (`prefix_plus`) with laws tying it to `merge`.
@@ -436,10 +343,8 @@ pub trait PrefixAggregate: SlabAggregate {
     /// [`add_prefix`](Self::add_prefix), and by reference, so that a
     /// large non-scalar prefix (e.g. a `HashMap`-backed mark set) is not
     /// cloned at each level of a descent. What a weight asks of its
-    /// prefix type is the weight's to say: `PrefixSlabWeight<P>` asks
-    /// std's operators of `P`, and those two functions of it are `+=`
-    /// and `P::default()`; a weight of the verified API gives verified
-    /// functions and asks for no operator.
+    /// prefix type is the weight's to say: each gives verified functions
+    /// and asks for no operator.
     ///
     /// `Ord` is not required here either. The "find slab whose prefix
     /// reaches target" search is provided in a separate impl block
@@ -532,61 +437,6 @@ impl PrefixAggregate for SlabAgg {
     }
 }
 
-impl<P> PrefixAggregate for PrefixSlabWeight<P>
-where
-    P: Clone
-        + Default
-        + std::fmt::Debug
-        + AddAssign
-        + SubAssign
-        + Add<Output = P>
-        + for<'a> AddAssign<&'a P>,
-{
-    type Prefix = P;
-
-    closed spec fn spec_prefix(&self) -> P {
-        self.prefix
-    }
-
-    open spec fn prefix_ok(&self) -> bool {
-        true
-    }
-
-    open spec fn prefix_zero() -> P {
-        prefix_zero::<P>()
-    }
-
-    open spec fn prefix_plus(a: P, b: P) -> P {
-        prefix_add(a, b)
-    }
-
-    open spec fn prefix_plus_ok(a: P, b: P) -> bool {
-        true
-    }
-
-    fn prefix(&self) -> &P {
-        &self.prefix
-    }
-
-    // Trusted: `P::default()` is `prefix_zero` (see `prefix_add`).
-    #[verifier::external_body]
-    fn zero_prefix() -> P {
-        P::default()
-    }
-
-    // Trusted: `P`'s `+=` is `prefix_add`.
-    #[verifier::external_body]
-    fn add_prefix(acc: &mut P, x: &P) {
-        *acc += x;
-    }
-
-    proof fn lemma_prefix_empty(x: P) {
-    }
-
-    proof fn lemma_prefix_merge(a: Self, b: Self) {
-    }
-}
-
 /// A prefix aggregate whose prefixes can be compared, for
 /// [`find_slab_at_prefix`](SlabBTree::find_slab_at_prefix).  Nothing is
 /// assumed of the order: the search's contract is stated in terms of
@@ -615,39 +465,6 @@ impl OrdPrefix for SlabAgg {
 
     fn plus_prefix(a: &i64, b: &i64) -> i64 {
         *a + *b
-    }
-}
-
-/// `a <= b` on a prefix type `P` (its `Ord`).
-pub uninterp spec fn prefix_leq<P>(a: P, b: P) -> bool;
-
-impl<P> OrdPrefix for PrefixSlabWeight<P>
-where
-    P: Clone
-        + Default
-        + std::fmt::Debug
-        + AddAssign
-        + SubAssign
-        + Add<Output = P>
-        + for<'a> AddAssign<&'a P>
-        + Ord,
-{
-    open spec fn prefix_le(a: P, b: P) -> bool {
-        prefix_leq(a, b)
-    }
-
-    // Trusted only to name `P`'s `<=`.
-    #[verifier::external_body]
-    fn le_prefix(a: &P, b: &P) -> bool {
-        a <= b
-    }
-
-    // Trusted: `clone` + `+=` compute `prefix_add`.
-    #[verifier::external_body]
-    fn plus_prefix(a: &P, b: &P) -> P {
-        let mut r = a.clone();
-        r += b;
-        r
     }
 }
 
@@ -4218,33 +4035,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
         }
     }
 
-    /// Slab `slab_idx`'s aggregate. Unspecified: only overflow checks read
-    /// it (`IndexOps::ix_weight`), and they can only panic.
-    #[verifier::external_body]
-    pub(crate) fn slab_agg(&self, slab_idx: usize) -> A
-        requires
-            self.wf(),
-            slab_idx < self@.len(),
-    {
-        let mut remaining = slab_idx;
-        let mut id = self.root;
-        loop {
-            match self.nodes[id as usize].as_ref().expect("freed node id") {
-                Node::Leaf(l) => return l.aggs[remaining].clone(),
-                Node::Internal(n) => {
-                    let mut next = None;
-                    for c in &n.children {
-                        if remaining < c.slab_count {
-                            next = Some(c.id);
-                            break;
-                        }
-                        remaining -= c.slab_count;
-                    }
-                    id = next.expect("slab_idx should have been bounds-checked");
-                }
-            }
-        }
-    }
 
     /// Aggregate of all slabs in the tree.
     pub(crate) fn root_agg(&self) -> (r: A)
@@ -6305,6 +6095,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
     // ── Arena helpers ───────────────────────────────────────────────────
 
     /// Replace slabs `range` with `new_aggs`.
+    #[cfg(test)]
     pub(crate) fn splice<I: IntoIterator<Item = A>>(&mut self, range: Range<usize>, new_aggs: I) {
         let new: Vec<A> = new_aggs.into_iter().collect();
         self.splice_vec(range.start, range.end, new);
@@ -6312,6 +6103,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
 
     // ── Bulk construction ───────────────────────────────────────────────
 
+    #[cfg(test)]
     pub(crate) fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self {
         Self::from_vec(iter.into_iter().collect())
     }
@@ -6423,8 +6215,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
     }
 }
 
-// ── Value-range queries (SlabAgg-specific) ──────────────────────────────────
+// ── Value-range queries (SlabAgg-specific), for the tests ───────────────────
 
+#[cfg(test)]
 impl SlabBTree<SlabAgg> {
     pub(crate) fn find_by_value(&self, target: i64) -> FindByValue<'_> {
         FindByValue(ValueSearch::new(self, target, target))
@@ -6437,8 +6230,10 @@ impl SlabBTree<SlabAgg> {
 
 /// The slabs that may hold `target`: `(slab_idx, items_before_slab,
 /// prefix_before_slab)`, in order.
+#[cfg(test)]
 pub struct FindByValue<'a>(ValueSearch<'a>);
 
+#[cfg(test)]
 impl Iterator for FindByValue<'_> {
     type Item = (usize, usize, i64);
 
@@ -6449,8 +6244,10 @@ impl Iterator for FindByValue<'_> {
 
 /// The slabs that may hold a value in `lo..=hi`: `(slab_idx,
 /// items_before_slab, prefix_before_slab)`, in order.
+#[cfg(test)]
 pub struct FindByValueRange<'a>(ValueSearch<'a>);
 
+#[cfg(test)]
 impl Iterator for FindByValueRange<'_> {
     type Item = (usize, usize, i64);
 
@@ -6711,12 +6508,6 @@ mod tests {
 
     // ── Prefix-sum B-tree smoke test ────────────────────────────────────
 
-    use crate::prefix::PrefixSlabWeight;
-
-    fn psw(len: usize, prefix: i64) -> PrefixSlabWeight<i64> {
-        PrefixSlabWeight { len, prefix }
-    }
-
     #[test]
     fn update_slab_single_slab_no_descend() {
         let mut tree = SlabBTree::<SlabAgg>::from_iter(vec![simple_agg(10, 3)]);
@@ -6747,36 +6538,6 @@ mod tests {
         tree.update_slab(25, simple_agg(100, 1));
         // Total went from 50 to 50 - 1 + 100 = 149.
         assert_eq!(tree.root_agg().total, 149);
-    }
-
-    #[test]
-    fn prefix_btree_find_slab_at_item() {
-        // 10 slabs, each len=5, prefix values chosen to be distinct.
-        let weights: Vec<_> = (0..10).map(|i| psw(5, (i + 1) as i64 * 10)).collect();
-        let tree = SlabBTree::from_iter(weights.clone());
-        assert_eq!(tree.len(), 10);
-        // Item 0 is in slab 0; nothing before → (0, 0, 0).
-        assert_eq!(tree.find_slab_at_item(0).decompose(), (0, 0, 0));
-        // Item 5 is the start of slab 1 → prefix = weights[0].prefix = 10,
-        // items_before = 5.
-        assert_eq!(tree.find_slab_at_item(5).decompose(), (1, 10, 5));
-        // Item 24 is inside slab 4 → prefix = sum of slabs 0..=3 = 100,
-        // items_before = 20.
-        assert_eq!(tree.find_slab_at_item(24).decompose(), (4, 100, 20));
-    }
-
-    #[test]
-    fn prefix_btree_find_slab_at_prefix() {
-        let weights: Vec<_> = (0..10).map(|i| psw(5, (i + 1) as i64 * 10)).collect();
-        let tree = SlabBTree::from_iter(weights);
-        // Prefix sum of slab 0 is 10; target=10 lands in slab 0 (≤ 10).
-        assert_eq!(tree.find_slab_at_prefix(&10), (0, 0, 0));
-        // Target 15: crosses into slab 1 (0+10 < 15 <= 0+10+20=30).
-        assert_eq!(tree.find_slab_at_prefix(&15), (1, 10, 5));
-        // Target 100: prefix_before slab 3 = 60; slab 3 ends at 100; target=100 ≤ 100 → slab 3.
-        assert_eq!(tree.find_slab_at_prefix(&100), (3, 60, 15));
-        // Target past total (sum = 550): one-past-end.
-        assert_eq!(tree.find_slab_at_prefix(&9999), (10, 550, 50));
     }
 
     // ── Fuzz: find_slab, find_slab_at_item, find_slab_at_prefix, root_agg ──
@@ -6948,148 +6709,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fuzz_btree_with_prefix_weights() {
-        use crate::prefix::PrefixSlabWeight;
-        type W = PrefixSlabWeight<u64>;
-        type Tree = SlabBTree<W>;
-
-        let mut rng = SmallRng::seed_from_u64(0xCAFEBABE);
-
-        fn rand_weight(rng: &mut SmallRng) -> W {
-            let len = rng.random_range(1..=8);
-            let prefix = rng.random_range(0..50);
-            W { len, prefix }
-        }
-
-        for trial in 0..500 {
-            let mut reference: Vec<W> = (0..10).map(|_| rand_weight(&mut rng)).collect();
-            let mut tree = Tree::from_iter(reference.clone());
-
-            for step in 0..200 {
-                let len = reference.len();
-                let op = rng.random_range(0..4);
-                match op {
-                    0 => {
-                        let at = rng.random_range(0..=len);
-                        let count = rng.random_range(1..=3);
-                        let new: Vec<_> = (0..count).map(|_| rand_weight(&mut rng)).collect();
-                        tree.splice(at..at, new.clone());
-                        reference.splice(at..at, new);
-                    }
-                    1 if len > 1 => {
-                        let at = rng.random_range(0..len);
-                        let count = rng.random_range(1..=(len - at).min(3));
-                        tree.splice(at..at + count, std::iter::empty());
-                        reference.drain(at..at + count);
-                    }
-                    2 if len > 0 => {
-                        let at = rng.random_range(0..len);
-                        let new = rand_weight(&mut rng);
-                        tree.update_slab(at, new);
-                        reference[at] = new;
-                    }
-                    _ if len > 0 => {
-                        let at = rng.random_range(0..len);
-                        let del = rng.random_range(1..=(len - at).min(2));
-                        let ins = rng.random_range(1..=3);
-                        let new: Vec<_> = (0..ins).map(|_| rand_weight(&mut rng)).collect();
-                        tree.splice(at..at + del, new.clone());
-                        reference.splice(at..at + del, new);
-                    }
-                    _ => {}
-                }
-
-                assert_eq!(
-                    tree.len(),
-                    reference.len(),
-                    "trial={trial} step={step}: len"
-                );
-                tree.check_invariants();
-
-                // Verify root aggregate matches
-                let expected_root = reference.iter().copied().fold(W::default(), |mut acc, w| {
-                    acc += w;
-                    acc
-                });
-                let root = tree.root_agg();
-                assert_eq!(
-                    root.len, expected_root.len,
-                    "trial={trial} step={step}: root_agg.len"
-                );
-                assert_eq!(
-                    root.prefix, expected_root.prefix,
-                    "trial={trial} step={step}: root_agg.prefix"
-                );
-
-                let total_items: usize = reference.iter().map(|w| w.len).sum();
-                let total_prefix: u64 = reference.iter().map(|w| w.prefix).sum();
-
-                // find_by_prefix (positional)
-                if total_items > 0 {
-                    let pos = rng.random_range(0..total_items);
-                    let got = tree.find_by_prefix(pos);
-                    let mut items = 0;
-                    let mut expected = None;
-                    for (i, w) in reference.iter().enumerate() {
-                        if pos < items + w.len {
-                            expected = Some((i, items));
-                            break;
-                        }
-                        items += w.len;
-                    }
-                    assert_eq!(
-                        got, expected,
-                        "trial={trial} step={step}: find_by_prefix({pos})"
-                    );
-                }
-
-                // find_slab_at_item
-                if total_items > 0 {
-                    let idx = rng.random_range(0..total_items);
-                    let found = tree.find_slab_at_item(idx);
-                    let mut exp_prefix = 0u64;
-                    let mut exp_items = 0;
-                    let mut exp_si = reference.len();
-                    for (i, w) in reference.iter().enumerate() {
-                        if idx < exp_items + w.len {
-                            exp_si = i;
-                            break;
-                        }
-                        exp_prefix += w.prefix;
-                        exp_items += w.len;
-                    }
-                    assert_eq!(
-                        (found.index, found.prefix, found.pos),
-                        (exp_si, exp_prefix, exp_items),
-                        "trial={trial} step={step}: find_slab_at_item({idx})"
-                    );
-                }
-
-                // find_slab_at_prefix
-                if total_prefix > 0 {
-                    let target = rng.random_range(1..=total_prefix);
-                    let (si, prefix_before, items_before) = tree.find_slab_at_prefix(&target);
-                    let mut exp_prefix = 0u64;
-                    let mut exp_items = 0;
-                    let mut exp_si = reference.len();
-                    for (i, w) in reference.iter().enumerate() {
-                        if exp_prefix + w.prefix >= target {
-                            exp_si = i;
-                            break;
-                        }
-                        exp_prefix += w.prefix;
-                        exp_items += w.len;
-                    }
-                    assert_eq!(
-                        (si, prefix_before, items_before),
-                        (exp_si, exp_prefix, exp_items),
-                        "trial={trial} step={step}: find_slab_at_prefix({target})"
-                    );
-                }
-            }
-        }
-    }
     // ── Underflow regression tests ──────────────────────────────────────
     //
     // These pin the three bugs found in the deletion-underflow audit:

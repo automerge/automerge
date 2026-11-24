@@ -5,8 +5,8 @@
 //! `DeltaEncoder` wrote them, so its bytes then failed to load (in debug
 //! builds, it sometimes panicked on the arithmetic instead).
 
-use hexane::delta::DeltaEncoder;
 use hexane::DeltaColumn;
+use hexane::DeltaEncoder;
 
 fn encode(vals: &[i64]) -> Vec<u8> {
     let mut e = DeltaEncoder::<i64>::new();

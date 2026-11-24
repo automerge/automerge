@@ -1,9 +1,8 @@
-//! Byte strings as values of the verified public API, verified with
-//! Verus.
+//! Byte strings as values of a column, verified with Verus.
 //!
 //! A column of `Vec<u8>` holds byte strings. On the wire each is its
 //! length, as an unsigned number of the column's codec, and then its
-//! bytes: what [`Column<Vec<u8>>`](crate::Column) writes. A column gives
+//! bytes. A column gives
 //! one as a slice borrowed from its slab and takes one as a slice
 //! (`&[u8]`); a specification has it as its bytes (`Seq<u8>`). A column
 //! of `Option<Vec<u8>>` holds byte strings and nulls.

@@ -1,6 +1,5 @@
-//! Accumulator columns of the verified public API: columns kept with
-//! what their values add up to in a type of the client's own, verified
-//! with Verus.
+//! Accumulator columns: columns kept with what their values add up to in
+//! a type of the client's own, verified with Verus.
 //!
 //! A prefix column ([`PrefixColumn`](super::PrefixColumn))
 //! adds its values up as integers, in one of this crate's integer
@@ -10,10 +9,8 @@
 //! values add up to. A set of the marks that are open at a position is
 //! one, where a value opens a mark or closes it.
 //!
-//! [`PrefixColumn`](crate::PrefixColumn) reaches the arithmetic of such
-//! a type through a trusted bridge, which states that its `+` is
-//! associative and that its `-` undoes it, and leaves Verus to take
-//! that on trust. Here the client *proves* those laws of its type
+//! The prefix core asks of such a type that its `+` is associative and
+//! that its `-` undoes it: the client *proves* those laws of its type
 //! ([`VGroup`]), and what the column answers is proved from them.
 //!
 //! An accumulator column is a [`Column`] kept with an

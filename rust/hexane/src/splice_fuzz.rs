@@ -8,7 +8,7 @@
 //! missed it, and the reasons are worth keeping written down — they are
 //! what this harness is built around.
 //!
-//! 1. **Self-consistency is not correctness.** [`validate_column`] checks
+//! 1. **Self-consistency is not correctness.** `check_invariants` checks
 //!    `total_len == Σ slab.len` and that each slab's metadata matches its
 //!    own bytes. A slab holding a duplicated run satisfies all of that: it
 //!    honestly contains the extra items and the totals add up. Only an
@@ -32,7 +32,13 @@
 //!
 //! On failure the op sequence is shrunk and printed as a compact literal
 //! that can be pasted into a regression test.
+//!
+//! The targets are the verified API's columns. A delta column shows
+//! neither where its slabs end nor its structure (it has no
+//! `slab_lens` and no `check_invariants`): its positions are drawn
+//! uniformly, and its oracles are the model and the round trip.
 
+use crate::tests::Lend;
 use crate::{Column, ColumnValueRef, DeltaColumn, PrefixColumn};
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
@@ -72,53 +78,35 @@ pub(crate) trait FuzzTarget: Sized {
     fn gen(rng: &mut SmallRng, n: usize) -> Vec<Self::Val>;
 }
 
-fn column_boundaries<T, C, WF, Idx>(col: &Column<T, C, WF, Idx>) -> Vec<usize>
-where
-    T: ColumnValueRef,
-    C: crate::Codec,
-    WF: crate::column::WeightFn<T, C>,
-    Idx: crate::index::ColumnIndex<WF::Weight>,
-{
+/// Cumulative slab boundaries of a column.
+fn column_boundaries<V: ColumnValueRef<C>, C: crate::Codec, K: crate::VIndex<V, C>>(
+    col: &Column<V, C, K>,
+) -> Vec<usize> {
     let mut acc = 0;
-    col.core
-        .slabs()
-        .iter()
-        .map(|s| {
-            acc += s.len;
+    col.slab_lens()
+        .into_iter()
+        .map(|len| {
+            acc += len;
             acc
         })
         .collect()
 }
 
-/// The structural half of the oracle: totals agree and every slab's
-/// metadata matches the bytes it actually holds.
-fn check_column<T, C, WF, Idx>(col: &Column<T, C, WF, Idx>, cap: bool)
-where
-    T: ColumnValueRef,
-    C: crate::Codec,
-    WF: crate::column::WeightFn<T, C>,
-    Idx: crate::index::ColumnIndex<WF::Weight>,
-{
-    use crate::encoding::ColumnEncoding;
-    let sum: usize = col.core.slabs().iter().map(|s| s.len).sum();
-    assert_eq!(
-        col.core.len(),
-        sum,
-        "total_len {} vs Σ slab.len {sum}",
-        col.core.len()
-    );
-    for (i, slab) in col.core.slabs().iter().enumerate() {
-        assert!(
-            !cap || slab.segments <= col.core.max_segments(),
-            "slab {i}: {} segments exceeds max {}",
-            slab.segments,
-            col.core.max_segments()
-        );
-        let info = T::Encoding::<C>::validate_encoding(&slab.data)
-            .unwrap_or_else(|e| panic!("slab {i}: invalid encoding: {e}"));
-        assert_eq!(slab.len, info.len, "slab {i}: len");
-        assert_eq!(slab.segments, info.segments, "slab {i}: segments");
+/// The structural half of the oracle: `check_invariants` (the totals
+/// agree, every slab's metadata matches the bytes it holds, no slab is
+/// over its budget and no two should have been merged, and the index
+/// counts the slabs). Where the budget can't be kept (`cap` is false)
+/// that check would fail for it alone, and only the saved bytes are
+/// checked.
+fn check_column<V: ColumnValueRef<C>, C: crate::Codec, K: crate::VIndex<V, C>>(
+    col: &Column<V, C, K>,
+    cap: bool,
+) {
+    if cap {
+        col.check_invariants();
     }
+    col.validate_encoding()
+        .unwrap_or_else(|e| panic!("the column saves bytes that are not valid: {e}"));
 }
 
 // ── the harness ─────────────────────────────────────────────────────────────
@@ -361,13 +349,17 @@ macro_rules! plain_column {
                 Column::len(self)
             }
             fn splice(&mut self, pos: usize, del: usize, vals: &[$ty]) {
-                Column::splice(self, pos, del, vals.iter().cloned())
+                Column::splice(self, pos, del, vals.iter().map(<$ty>::lend))
             }
             fn to_model(&self) -> Vec<$ty> {
-                self.iter().collect()
+                self.iter().map(<$ty>::keep).collect()
             }
             fn round_trip(&self) -> Vec<$ty> {
-                Column::<$ty>::load(&self.save()).unwrap().iter().collect()
+                Column::<$ty>::load(&self.save())
+                    .unwrap()
+                    .iter()
+                    .map(<$ty>::keep)
+                    .collect()
             }
             fn boundaries(&self) -> Vec<usize> {
                 column_boundaries(self)
@@ -445,16 +437,16 @@ impl FuzzTarget for Column<Option<String>> {
         Column::len(self)
     }
     fn splice(&mut self, pos: usize, del: usize, vals: &[Self::Val]) {
-        Column::splice(self, pos, del, vals.iter().cloned())
+        Column::splice(self, pos, del, vals.iter().map(Option::<String>::lend))
     }
     fn to_model(&self) -> Vec<Self::Val> {
-        self.iter().map(|v| v.map(|s| s.to_string())).collect()
+        self.iter().map(Option::<String>::keep).collect()
     }
     fn round_trip(&self) -> Vec<Self::Val> {
         Column::<Option<String>>::load(&self.save())
             .unwrap()
             .iter()
-            .map(|v| v.map(|s| s.to_string()))
+            .map(Option::<String>::keep)
             .collect()
     }
     fn boundaries(&self) -> Vec<usize> {
@@ -494,12 +486,13 @@ impl FuzzTarget for DeltaColumn<i64> {
             .iter()
             .collect()
     }
+    /// (A delta column does not show where its slabs end.)
     fn boundaries(&self) -> Vec<usize> {
-        column_boundaries(&self.col)
+        Vec::new()
     }
-    fn check_internal(&self, cap: bool) {
-        check_column(&self.col, cap)
-    }
+    /// (Nor has it `check_invariants`: the model and the round trip are
+    /// its oracles.)
+    fn check_internal(&self, _cap: bool) {}
     fn gen(rng: &mut SmallRng, n: usize) -> Vec<i64> {
         // both smooth deltas (well compressed) and jumps (literals)
         let mut out = Vec::with_capacity(n);
@@ -532,20 +525,19 @@ impl FuzzTarget for PrefixColumn<bool> {
         PrefixColumn::splice(self, pos, del, vals.iter().cloned())
     }
     fn to_model(&self) -> Vec<bool> {
-        self.values().iter().collect()
+        self.iter().collect()
     }
     fn round_trip(&self) -> Vec<bool> {
         PrefixColumn::<bool>::load(&self.save())
             .unwrap()
-            .values()
             .iter()
             .collect()
     }
     fn boundaries(&self) -> Vec<usize> {
-        column_boundaries(&self.col)
+        column_boundaries(self)
     }
     fn check_internal(&self, cap: bool) {
-        check_column(&self.col, cap)
+        check_column(self, cap)
     }
     fn gen(rng: &mut SmallRng, n: usize) -> Vec<bool> {
         runs_of(rng, n, |r| r.random_bool(0.5))

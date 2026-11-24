@@ -1,18 +1,17 @@
-//! Strings as values of the verified public API, verified with Verus.
+//! Strings as values of a column, verified with Verus.
 //!
 //! A column of `String` holds strings, and one of `Option<String>`
 //! strings and nulls (`None`), as a column of `Option<Vec<u8>>` holds
 //! byte strings and nulls. On the wire each string is a byte string
 //! (`bytes`): the length of its UTF-8 bytes, as an unsigned number of the
-//! column's codec, and then those bytes. That is what
-//! [`Column<String>`](crate::Column) writes. A column gives one as a
+//! column's codec, and then those bytes. A column gives one as a
 //! `&str` borrowed from its slab and takes one as a `&str` (as an
 //! `Option<&str>` where it may be null); a specification has it as its
 //! characters (`Seq<char>`, Verus's view of a `str`).
 //!
 //! A load refuses bytes that are not UTF-8 where a string should be, with
-//! [`PackError::InvalidUtf8`](crate::PackError::InvalidUtf8) as
-//! `Column<String>` does. What is read from a column after that was
+//! [`PackError::InvalidUtf8`](crate::PackError::InvalidUtf8). What is read
+//! from a column after that was
 //! checked by the load, and is checked again as
 //! it is read: this module has no `unsafe`, so it asks the standard
 //! library for the `str` of the bytes (`core::str::from_utf8`), which

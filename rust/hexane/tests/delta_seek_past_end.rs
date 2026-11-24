@@ -8,7 +8,7 @@
 use hexane::DeltaColumn;
 
 fn column() -> DeltaColumn<u64> {
-    DeltaColumn::from_values(vec![1, 2, 3])
+    DeltaColumn::from_values(&[1, 2, 3])
 }
 
 #[test]

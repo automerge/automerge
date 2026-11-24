@@ -28,11 +28,11 @@ fn rand_bools(n: usize) -> Vec<bool> {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn build_v1(n: usize, ms: usize) -> hexane::Column<u64> {
-    hexane::Column::from_values_with_max_segments(rand_vals(n), ms)
+    hexane::Column::from_values_with_max_segments(&rand_vals(n), ms)
 }
 
 fn build_v1_bool(n: usize, ms: usize) -> hexane::Column<bool> {
-    hexane::Column::from_values_with_max_segments(rand_bools(n), ms)
+    hexane::Column::from_values_with_max_segments(&rand_bools(n), ms)
 }
 
 // ── Bulk load u64 100k ───────────────────────────────────────────────────────
@@ -47,43 +47,43 @@ mod bulk_load_u64 {
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn ms_4(b: Bencher) {
         let v = rand_vals(N);
-        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(v.clone(), 4));
+        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(&v, 4));
     }
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn ms_8(b: Bencher) {
         let v = rand_vals(N);
-        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(v.clone(), 8));
+        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(&v, 8));
     }
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn ms_16(b: Bencher) {
         let v = rand_vals(N);
-        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(v.clone(), 16));
+        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(&v, 16));
     }
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn ms_32(b: Bencher) {
         let v = rand_vals(N);
-        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(v.clone(), 32));
+        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(&v, 32));
     }
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn ms_64(b: Bencher) {
         let v = rand_vals(N);
-        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(v.clone(), 64));
+        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(&v, 64));
     }
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn ms_128(b: Bencher) {
         let v = rand_vals(N);
-        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(v.clone(), 128));
+        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(&v, 128));
     }
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn ms_256(b: Bencher) {
         let v = rand_vals(N);
-        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(v.clone(), 256));
+        b.bench_local(|| hexane::Column::<u64>::from_values_with_max_segments(&v, 256));
     }
 }
 

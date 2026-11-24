@@ -11,8 +11,8 @@ fn sum(values: &[u64]) -> u128 {
 #[test]
 fn nth_past_end_counts_the_rest() {
     let values = vec![1u64, 2, 3];
-    let col = PrefixColumn::<u64>::from_values(values.clone());
-    let mut it = col.iter();
+    let col = PrefixColumn::<u64>::from_values(&values);
+    let mut it = col.prefix_iter();
     it.set_max(10);
     assert!(it.nth(5).is_none());
     assert_eq!(it.pos(), 3);
@@ -22,14 +22,14 @@ fn nth_past_end_counts_the_rest() {
 #[test]
 fn nth_past_end_across_slabs() {
     let values: Vec<u64> = (0..2000).map(|i| (i % 13) + 1).collect();
-    let col = PrefixColumn::<u64>::from_values(values.clone());
+    let col = PrefixColumn::<u64>::from_values(&values);
     for start in [0, 1, 700, 1999] {
-        let mut by_next = col.iter();
+        let mut by_next = col.prefix_iter();
         by_next.set_max(5000);
         by_next.advance_by(start);
         while by_next.next().is_some() {}
 
-        let mut it = col.iter();
+        let mut it = col.prefix_iter();
         it.set_max(5000);
         it.advance_by(start);
         assert!(it.nth(2500).is_none());
@@ -42,8 +42,8 @@ fn nth_past_end_across_slabs() {
 #[test]
 fn nth_past_end_keeps_the_reset_offset() {
     let values: Vec<u64> = (0..2000).map(|i| (i % 7) + 1).collect();
-    let col = PrefixColumn::<u64>::from_values(values.clone());
-    let mut it = col.iter();
+    let col = PrefixColumn::<u64>::from_values(&values);
+    let mut it = col.prefix_iter();
     it.set_max(5000);
     it.advance_by(300);
     it.reset_prefix();

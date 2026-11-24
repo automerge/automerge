@@ -308,17 +308,6 @@ impl<'a, V: VAccumulated> PrefixOps<Get<'a, V>> for AccOf<V> {
     }
 
     #[inline(always)]
-    fn try_acc_run(t: &mut V::Acc, run: &Run<Get<'a, V>>) -> bool {
-        let n = run.count;
-        let p = V::to_acc(run.value);
-        proof {
-            lemma_reps::<V::Acc>(n as nat, p);
-        }
-        t.add_times(&p, n);
-        true
-    }
-
-    #[inline(always)]
     fn zero() -> V::Acc {
         <V::Acc as VAccum>::new_zero()
     }
@@ -340,17 +329,6 @@ impl<'a, V: VAccumulated> PrefixOps<Get<'a, V>> for AccOf<V> {
         a.add_acc(b);
     }
 
-    #[inline(always)]
-    fn max_unchecked_len() -> usize {
-        usize::MAX
-    }
-
-    /// Never asked: an accumulator column has no total to check
-    /// (`total_ok`).
-    #[inline(always)]
-    fn try_add(_t: &mut V::Acc, _b: &V::Acc) -> bool {
-        true
-    }
 }
 
 /// The sum the shared proofs speak of is what the values add up to.

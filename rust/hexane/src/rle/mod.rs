@@ -1,102 +1,31 @@
+//! The verified core of an RLE column: the format's model (`model`),
+//! reading (`read`, `dec`), writing (`enc`, `writer`, `state`), cutting
+//! and merging slabs (`cut`, `merge`, `postfix`), and edits (`edit`).
+//!
+//! The encoding (shared with v0) is a sequence of runs:
+//!
+//!   Repeat run : signed_leb128( count > 0 )  packed_value
+//!   Literal run: signed_leb128( -n      )    v0 v1 … v(n-1)
+//!   Null run   : signed_leb128( 0       )    unsigned_leb128( count )
+
 pub(crate) mod cut;
 pub(crate) mod dec;
-mod decoder;
-pub mod edit;
+pub(crate) mod edit;
 pub(crate) mod enc;
 pub(crate) mod lift;
-mod load;
 pub(crate) mod merge;
 pub(crate) mod model;
 pub(crate) mod postfix;
 pub(crate) mod read;
 pub(crate) mod size;
-pub(crate) mod writer;
-pub use load::RleLoadIter;
-pub(crate) mod splice;
 pub(crate) mod state;
-#[cfg(test)]
-mod tests;
 pub(crate) mod unique;
+pub(crate) mod writer;
 
-use crate::encoder::RleEncoder;
-pub use decoder::RleDecoder;
-pub(crate) use decoder::RleDecoderState;
-pub(crate) use load::rle_validate_encoding;
-use splice::{rle_merge, splice_slab};
-
-use std::marker::PhantomData;
 use vstd::prelude::*;
 
-use crate::PackError;
-
-type Slab = crate::column::Slab<RleTail>;
-use crate::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
-use crate::Run;
-use crate::{AsColumnRef, Codec, ColumnValueRef, Leb128, RleValue};
-
-// ── Wire-format helpers ───────────────────────────────────────────────────────
-//
-// The encoding (shared with v0) is a sequence of runs:
-//
-//   Repeat run : signed_leb128( count > 0 )  packed_value
-//   Literal run: signed_leb128( -n      )    v0 v1 … v(n-1)
-//   Null run   : signed_leb128( 0       )    unsigned_leb128( count )
-
-// ── RleEncoding ──────────────────────────────────────────────────────────────
-
-/// RLE encoding strategy — used for all non-boolean column value types.
-///
-/// This is a zero-sized type; all state lives in the slab bytes.
-/// `C` is the varint codec used for run headers and value payloads.
-pub struct RleEncoding<T: RleValue, C: Codec = Leb128>(PhantomData<fn() -> (T, C)>);
-
-impl<T: RleValue, C: Codec> Default for RleEncoding<T, C> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-/// Compute the RleTail for a slab by scanning to the last segment.
-#[cfg(test)]
-pub(crate) fn compute_rle_tail<T: RleValue, C: Codec>(data: &[u8]) -> RleTail {
-    if data.is_empty() {
-        return RleTail::default();
-    }
-    let mut pos = 0;
-    let mut last_start = 0;
-    let mut lit_tail: u32 = 0;
-    while pos < data.len() {
-        last_start = pos;
-        let (cb, raw) = C::read_signed(&data[pos..]).unwrap();
-        match raw {
-            n if n > 0 => {
-                let vl = T::value_len::<C>(&data[pos + cb..]).unwrap();
-                lit_tail = 0;
-                pos += cb + vl;
-            }
-            n if n < 0 => {
-                let total = (-n) as usize;
-                let mut sb = pos + cb;
-                let mut last_vl = 0;
-                for _ in 0..total {
-                    last_vl = T::value_len::<C>(&data[sb..]).unwrap();
-                    sb += last_vl;
-                }
-                lit_tail = last_vl as u32;
-                pos = sb;
-            }
-            _ => {
-                let (ncb, _) = C::read_unsigned(&data[pos + cb..]).unwrap();
-                lit_tail = 0;
-                pos += cb + ncb;
-            }
-        }
-    }
-    RleTail {
-        bytes: (data.len() - last_start) as u32,
-        lit_tail,
-    }
-}
+/// A slab of an RLE column: its bytes, counts and tail.
+pub(crate) type Slab = crate::column::Slab<RleTail>;
 
 verus! {
 
@@ -117,127 +46,3 @@ pub struct RleTail {
 }
 
 } // verus!
-
-/// Validate an RLE slab's len, segments, and tail. Panics on mismatch.
-#[cfg(debug_assertions)]
-fn validate_rle_slab<T: RleValue, C: Codec>(slab: &Slab) {
-    let info = rle_validate_encoding::<T, C>(&slab.data)
-        .unwrap_or_else(|e| panic!("rle slab encoding invalid: {e}"));
-    assert_eq!(slab.len, info.len, "rle slab len mismatch");
-    assert_eq!(slab.segments, info.segments, "rle slab segments mismatch");
-    assert_eq!(slab.tail, info.tail, "rle slab tail mismatch");
-}
-
-impl<T, C> ColumnEncoding for RleEncoding<T, C>
-where
-    C: Codec,
-    T: RleValue + ColumnValueRef<Encoding<C> = RleEncoding<T, C>>,
-{
-    type Codec = C;
-    type Value = T;
-    type Tail = RleTail;
-    type State = crate::rle::RleDecoderState;
-
-    fn state_at(slab: &crate::rle::Slab, at: usize) -> Self::State {
-        let mut d = RleDecoder::<T, C>::new(&slab.data);
-        d.advance_by(at);
-        d.suspend()
-    }
-
-    fn state_peek<'s>(slab: &'s crate::rle::Slab, state: &Self::State) -> Option<T::Get<'s>> {
-        RleDecoder::<T, C>::resume(&slab.data, state).next()
-    }
-
-    fn state_advance(slab: &crate::rle::Slab, state: &mut Self::State, n: usize) {
-        let mut d = RleDecoder::<T, C>::resume(&slab.data, state);
-        d.advance_by(n);
-        *state = d.suspend();
-    }
-
-    fn fill(len: usize, value: T::Get<'_>) -> Slab {
-        // verified; `Column::fill` makes no slab for `len == 0`
-        edit::fill::<state::WOps<T, T, C>>(state::RleCow::Ref(value), len)
-    }
-
-    fn merge_slabs(a: &mut Slab, b: Slab) {
-        if a.len == 0 {
-            *a = b;
-        } else if b.len > 0 {
-            rle_merge::<T, C>(a, &b);
-        }
-    }
-
-    fn last_run(slab: &Slab) -> Option<Run<T::Get<'_>>> {
-        if slab.len == 0 {
-            return None;
-        }
-        // Decode just the last segment using the tail metadata.
-        // The tail gives us the byte offset of the last segment.
-        let mut dec = Self::slab_decoder(&slab.data, crate::sealed::Trusted(()));
-        let mut last_val = None;
-        let mut last_count = 0;
-        while let Some(run) = dec.next_run() {
-            last_val = Some(run.value);
-            last_count = run.count;
-        }
-        Some(Run {
-            count: last_count,
-            value: last_val?,
-        })
-    }
-
-    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<RleTail>, PackError> {
-        rle_validate_encoding::<T, C>(slab)
-    }
-
-    fn save_slabs(slabs: &[Slab], total: usize, out: &mut Vec<u8>) {
-        // verified
-        edit::save_slabs::<state::WOps<T, T, C>>(slabs, total, out)
-    }
-
-    fn splice_slab<V: AsColumnRef<T>>(
-        slab: &mut Slab,
-        index: usize,
-        del: usize,
-        values: impl Iterator<Item = (V, usize)>,
-        max_segments: usize,
-    ) -> (Vec<Slab>, usize) {
-        assert!(index <= slab.len, "splice index beyond the slab");
-        let slab_del = del.min(slab.len - index);
-        let overflow_del = del - slab_del;
-        (
-            splice_slab::<T, V, C>(slab, index, slab_del, values, max_segments),
-            overflow_del,
-        )
-    }
-
-    type Decoder<'a> = RleDecoder<'a, T, C>;
-    type ReadModel = crate::rle::dec::RleReads<crate::rle::model::Ops<T, C>>;
-
-    fn decoder(slab: &[u8]) -> RleDecoder<'_, T, C> {
-        // bytes from outside a column: where decoding them unchecked could
-        // break memory safety (a `str` that isn't UTF-8), check them first
-        if T::UNPACK_TRUSTS_INPUT {
-            if let Err(e) = rle_validate_encoding::<T, C>(slab) {
-                panic!("decoder: the bytes are not a valid column: {e}");
-            }
-        }
-        RleDecoder::new(slab)
-    }
-
-    fn slab_decoder(slab: &[u8], _: crate::sealed::Trusted) -> RleDecoder<'_, T, C> {
-        RleDecoder::new(slab)
-    }
-
-    type Encoder<'a> = RleEncoder<'a, T, C>;
-
-    fn encoder<'a>() -> Self::Encoder<'a> {
-        RleEncoder::new()
-    }
-
-    type LoadIter<'a> = load::RleLoadIter<'a, T, C>;
-
-    fn load_iter(data: &[u8], max_segments: usize) -> load::RleLoadIter<'_, T, C> {
-        load::RleLoadIter::new(data, max_segments)
-    }
-}

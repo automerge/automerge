@@ -8,7 +8,7 @@
 //! from the first on. [`find_first`](DeltaColumn::find_first)
 //! gives the first place of a value. The values need be in no order.
 //!
-//! The search is [`FindByRange`](crate::FindByRange)'s, the shared one
+//! The search is [`FindByRange`]'s, the shared one
 //! of `delta/dfind.rs` (`d_find_new`, `d_find_next`): the column's index
 //! keeps the least and the greatest value of each slab, so a slab that
 //! can hold no value within the bounds is passed over whole, and the

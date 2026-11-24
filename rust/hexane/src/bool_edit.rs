@@ -2494,8 +2494,8 @@ pub struct BoolEdit<C = crate::Leb128> {
 /// against the bool format: a slab is well-formed when `bslab_ok`, and
 /// holds the values its bytes encode.
 ///
-/// Public only because `BoolEncoding<C>`'s `SlabEdit::Model` names it;
-/// this module is not.
+/// Public only because the verified API's value models name it; this
+/// module is not.
 pub struct BoolModel<C>(PhantomData<C>);
 
 
@@ -2704,7 +2704,7 @@ pub(crate) fn save_slabs<C: CountsOf>(slabs: &[BSlab], total: usize, out: &mut V
 }
 
 /// A slab of `len` copies of `value`: a count of `len`, after a zero
-/// count of `false`s if `value` is `true` (`ColumnEncoding::fill`).
+/// count of `false`s if `value` is `true`.
 #[inline]
 pub(crate) fn fill<C: CountsOf>(len: usize, value: bool) -> (s: BSlab)
     requires
@@ -3028,8 +3028,7 @@ fn advance_long<C: CountsOf>(s: &BSlab, st: &mut BoolDecoderState, n: usize, pos
 }
 
 /// Carry `n` of the slab's values through the rebuild, telling `f` each
-/// run: [`Visitor::pass`](crate::cursor::Visitor::pass) for bool slabs,
-/// which the encoding's `EditSlab::pass` forwards to.
+/// run: [`Visitor::pass`](crate::cursor::Visitor::pass) for bool slabs.
 #[inline(always)]
 pub(crate) fn pass<C: CountsOf, G: Visit<bool>>(e: &mut BoolEdit<C>, s: &BSlab, n: usize, f: &mut G) -> (left: usize)
     requires

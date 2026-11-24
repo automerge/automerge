@@ -1,8 +1,6 @@
-//! The delta encoder of the verified API: [`DeltaEncoder`] and
-//! [`DeltaEncoderState`], which write the bytes of a delta
-//! column from values given one after another. They mirror
-//! [`DeltaEncoder`](crate::DeltaEncoder) and
-//! [`DeltaEncoderState`](crate::delta::DeltaEncoderState).
+//! The delta encoder: [`DeltaEncoder`] and [`DeltaEncoderState`], which
+//! write the bytes of a delta column from values given one after
+//! another.
 //!
 //! A delta column keeps each number as its difference from the number
 //! before it, and its saved form is that of the column of the
@@ -15,7 +13,7 @@
 //! Differences are taken wrapping and read wrapping, so the bytes are
 //! the encoding whatever numbers are given. But a delta column holds no
 //! values that span 2^63 or more, and no load takes their bytes: so
-//! `finish` panics for such values, as the old encoder does, and what it
+//! `finish` panics for such values, and what it
 //! returns from promises that there are none (`delta_span_ok`).
 //!
 //! This file is a specification, to be read as the guide to reviewing
@@ -254,8 +252,8 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaEncoderState<'a, T, C> {
     /// before the state wrote to it, the encoding of the values given,
     /// which is the bytes a delta column of those values saves.
     ///
-    /// This panics if two of the numbers given are 2^63 or more apart,
-    /// as the old encoder does: a delta column holds no such values.
+    /// This panics if two of the numbers given are 2^63 or more apart: a
+    /// delta column holds no such values.
     #[inline(always)]
     pub fn finish(self, buf: &mut Vec<u8>)
         requires
@@ -272,7 +270,7 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaEncoderState<'a, T, C> {
 
 /// A delta encoder: values go in one after another, and the bytes of a
 /// delta column of them come out. It mirrors
-/// [`DeltaEncoder`](crate::DeltaEncoder).
+/// [`DeltaEncoder`].
 ///
 /// What an encoder has to be to be used is `wf`: every encoder made
 /// here is, and stays so through every call that returns.
@@ -376,8 +374,7 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaEncoder<'a, T, C> {
         self.append_n_impl(value, n)
     }
 
-    /// [`append`](Self::append) by another name, as the old encoder has
-    /// it.
+    /// [`append`](Self::append) by another name.
     #[inline(always)]
     pub fn append_owned(&mut self, value: T)
         requires
@@ -408,8 +405,8 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaEncoder<'a, T, C> {
     /// which a column of those values saves and which loads as them.
     ///
     /// Like every method that writes the values out, this panics if two
-    /// of the numbers given are 2^63 or more apart, as the old encoder
-    /// does: a delta column holds no such values.
+    /// of the numbers given are 2^63 or more apart: a delta column holds
+    /// no such values.
     #[inline(always)]
     pub fn save(self) -> (r: Vec<u8>)
         requires

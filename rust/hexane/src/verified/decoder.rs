@@ -2,10 +2,8 @@
 //! verified with Verus.
 //!
 //! It runs the slab decoders that a column's iterator runs (`rle::dec`,
-//! `bool_wire`) and that [`RleDecoder`](crate::rle::RleDecoder) and
-//! [`BoolDecoder`](crate::bool::BoolDecoder) run, on a saved column's bytes as
-//! they are: no column is built, and nothing is assumed that a column
-//! does not assume.
+//! `bool_wire`), on a saved column's bytes as they are: no column is
+//! built, and nothing is assumed that a column does not assume.
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each
@@ -118,9 +116,7 @@ pub open spec fn scan_taken<S>(o: Seq<S>, max: int, skipped: int, count: int) ->
 
 /// A decoder of a saved column of values of type `V`, its numbers
 /// written with the codec `C`: it gives the column's values one after
-/// another from the bytes as they are, without a column in between, as
-/// [`RleDecoder`](crate::rle::RleDecoder) and
-/// [`BoolDecoder`](crate::bool::BoolDecoder) do.
+/// another from the bytes as they are, without a column in between.
 ///
 /// It is a `std::iter::Iterator`. What it has left to give is in a
 /// specification `items()`, and as values `rest()`; Verus's
@@ -130,10 +126,9 @@ pub open spec fn scan_taken<S>(o: Seq<S>, max: int, skipped: int, count: int) ->
 /// (`Column::values`), which are the values of the column or
 /// the encoder that saved them.
 ///
-/// [`new`](Self::new) stands for the old API's
-/// [`decoder`](crate::decoder) and [`decoder_in`](crate::decoder_in),
-/// and [`try_new`](Self::try_new) for [`try_decoder`](crate::try_decoder)
-/// and [`try_decoder_in`](crate::try_decoder_in).
+/// [`decoder`](fn@super::decoder) and [`decoder_in`] are
+/// [`new`](Self::new) by other names, and [`try_decoder`]
+/// and [`try_decoder_in`] [`try_new`](Self::try_new).
 ///
 /// A value that borrows (a byte string or a string) borrows from the
 /// bytes, for `'a`.
@@ -261,8 +256,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec> Decoder<'a, V, C> {
     ///
     /// The decoder moves past what it passed and the run it found. If
     /// it found a value that comes after the target, it has moved past
-    /// that value's run too (`scan_taken`), as the old API's `scan_for`
-    /// has.
+    /// that value's run too (`scan_taken`).
     #[inline(always)]
     pub fn scan_for<'b>(&mut self, target: Get<'b, V>, max: usize) -> (r: (usize, usize))
         ensures

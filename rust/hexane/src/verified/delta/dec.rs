@@ -2,9 +2,8 @@
 //! verified with Verus.
 //!
 //! It reads the differences a saved delta column holds with the slab
-//! decoder that [`DeltaDecoder`](crate::delta::DeltaDecoder) reads them
-//! with, from the bytes as they are, and adds them up as it goes: no
-//! column is built.
+//! decoder of the column underneath, from the bytes as they are, and adds
+//! them up as it goes: no column is built.
 //!
 //! What it speaks of is the whole saved column (`column()`) and how
 //! far into it the decoder stands (`pos()`), so that a run of
@@ -57,7 +56,7 @@ verus! {
 /// A decoder of a saved delta column of values of type `T`, its
 /// numbers written with the codec `C`: it gives the column's values
 /// one after another from the bytes as they are, without a column in
-/// between, as [`DeltaDecoder`](crate::delta::DeltaDecoder) does.
+/// between.
 ///
 /// It is a `std::iter::Iterator`. The values of the whole saved column
 /// are a specification `column()`, how many of them the decoder has
@@ -131,7 +130,7 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaDecoder<'a, T, C> {
     /// A decoder of the saved delta column `bytes`, which are read
     /// through first: an error unless they are a saved column of the
     /// column underneath, and an error unless the values are the
-    /// type's, by the check the old API's `try_new` makes.
+    /// type's.
     ///
     /// The check adds the differences up exactly, run by run: a run is
     /// taken if its first and its last value are the type's and

@@ -53,7 +53,7 @@ fn initial_values() -> Vec<u64> {
 /// Bulk-build a column from `N` values.  Visible in the flamegraph.
 #[inline(never)]
 fn do_build(values: &[u64]) -> Column<u64> {
-    Column::<u64>::from_values(values.to_vec())
+    Column::<u64>::from_values(values)
 }
 
 /// Run `OPS` random-position insert splices, each inserting `K` values.

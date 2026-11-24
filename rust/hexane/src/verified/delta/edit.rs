@@ -272,7 +272,7 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaEdit<'a, T, C> {
     /// Keep the values up to the one at `to` of the original column, and
     /// stand there; at the end, where `to` is past it. A cursor only
     /// goes forward: where `to` is before the place it stands at, it
-    /// stays there (as the old API's cursor of a delta column does).
+    /// stays there.
     #[inline(always)]
     pub fn seek(&mut self, to: usize) -> (r: &mut Self)
         requires

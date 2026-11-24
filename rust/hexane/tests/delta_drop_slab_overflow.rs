@@ -8,7 +8,7 @@ use hexane::{DeltaColumn, LoadOpts};
 
 /// `vals` with a slab per value, then `vals` without item `idx`.
 fn remove_with_a_slab_each(vals: Vec<i64>, idx: usize) {
-    let bytes = DeltaColumn::<i64>::from_values(vals.clone()).save();
+    let bytes = DeltaColumn::<i64>::from_values(&vals).save();
     let mut col =
         DeltaColumn::<i64>::load_with(&bytes, LoadOpts::new().with_max_segments(2)).unwrap();
     assert_eq!(col.slab_count(), vals.len());

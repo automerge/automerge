@@ -11,9 +11,9 @@
 //! The searches compare and divide sums, so they need a model of the
 //! prefix type as numbers: each prefix value stands for a natural number
 //! (`pnum`), sums that fit the type are the numbers' sums, `<=` is the
-//! numbers' order, and so on (`PrefixOrd`). For the unverified API that
-//! model is trusted: it is what unsigned integers do, and the searches are
-//! only offered for prefix types that are (`UnsignedPrefix`).
+//! numbers' order, and so on (`PrefixOrd`). The sums of the prefix
+//! columns prove it of their types, which are unsigned integers
+//! (`UnsignedPrefix`).
 
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::assign_op_pattern)]
@@ -43,9 +43,8 @@ use crate::index::lemma_plain_valid;
 use crate::trusted::past_usize;
 verus! {
 
-/// An unsigned prefix type's arithmetic and order, as numbers: for the
-/// unverified API, the trusted bridge to `T::Prefix`'s `<=`, `/` and
-/// `try_into`.
+/// An unsigned prefix type's arithmetic and order, as numbers, which its
+/// implementation proves (`SumOf`).
 pub(crate) trait PrefixOrd<V: Copy>: PrefixOps<V> {
     /// The number a prefix value stands for.
     spec fn pnum(p: Self::P) -> nat;
@@ -954,7 +953,7 @@ fn p_target<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
     }
 }
 
-/// [`PrefixIter::advance_prefix`](crate::prefix::PrefixIter::advance_prefix):
+/// [`PrefixIter::advance_prefix`](crate::PrefixIter::advance_prefix):
 /// past `n` units of the running sum, the item holding the next one.
 #[verifier::spinoff_prover]
 pub(crate) fn p_advance<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(

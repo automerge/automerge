@@ -105,8 +105,7 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
                 ranges.push(sps[i].range.start..sps[i].range.end);
                 i += 1;
             }
-            // the old API's measure of which way pays (its
-            // `COPY_INVERT_FACTOR` is 1)
+            // the measure of which way pays (with a factor of 1)
             let invert = dst.invert_pays(&from, ranges.as_slice(), sps.len(), 1);
             let mut f = NoVisit::<T::L> { seen: Ghost(Seq::empty()) };
             dcopy::copy(&mut dst, &list, &mut from, invert, T::lo(), T::hi(), &mut f);

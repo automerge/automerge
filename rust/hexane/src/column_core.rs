@@ -42,10 +42,7 @@
 #![allow(clippy::len_zero)]
 
 #[cfg(verus_keep_ghost)]
-use crate::btree::{
-    axiom_prefix_add, lemma_prefix_len, lemma_prefix_sum, prefix_add, prefix_zero, PrefixAggregate,
-    SlabAggregate,
-};
+use crate::btree::{PrefixAggregate, SlabAggregate};
 use crate::btree::{SlabAgg, SlabBTree};
 use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
@@ -85,20 +82,17 @@ use crate::index::IndexOps;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::lens_ok;
 use crate::iter_core::{Decode, Decoders, ICore};
-use crate::prefix::PrefixSlabWeight;
 #[cfg(verus_keep_ghost)]
 use crate::prefix_core::{before, ix_ok, vsum};
-use crate::prefix_core::{p_prefix, p_sum_range, PrefixOps};
 #[cfg(verus_keep_ghost)]
 use crate::prefix_search::found_at;
-use crate::prefix_search::{p_index_for_prefix, PrefixOrd};
 use crate::remap::{Encodes, Mapping};
 #[cfg(verus_keep_ghost)]
 use crate::splices::applied;
 use crate::splices::{wrong_columns, Normalized};
-use crate::weights::{CopyWeigh, DeltaModel, PrefixModel};
+use crate::weights::{CopyWeigh, DeltaModel};
 use std::marker::PhantomData;
-use std::ops::{Add, AddAssign, Range, SubAssign};
+use std::ops::Range;
 use vstd::prelude::*;
 
 use crate::trusted::budget_too_small;
@@ -235,20 +229,6 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         }
     }
 
-    /// An empty column with segment budget `max_segments`; panics if
-    /// that is below 2.
-    pub(crate) fn new(max_segments: usize) -> (r: Self)
-        ensures
-            r.ready(),
-            r@.len() == 0,
-            r.budget() == max_segments,
-            r.count() == 0,
-    {
-        if max_segments < 2 {
-            budget_too_small();
-        }
-        Self::with_budget(max_segments)
-    }
 
     /// An empty column with segment budget `max_segments`, which is at
     /// least 2: `new` for a caller that has proved so, and cannot panic.
@@ -1061,7 +1041,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
 /// (`weights::CopyWeigh`).
 impl<E: Slabs, W: Clone, I: IndexOps<W>, G: CopyWeigh<E, W>> ColumnCore<E, W, I, G> {
     /// Parts of their own for the same column: a clone of the slabs and
-    /// a clone of the index, as the old API's `clone` makes them.
+    /// a clone of the index.
     #[inline]
     fn dup_parts(p: &Parts<E::Tail, I>, Ghost(max): Ghost<usize>) -> (r: Parts<E::Tail, I>)
         requires
@@ -1105,8 +1085,7 @@ impl<E: Slabs, W: Clone, I: IndexOps<W>, G: CopyWeigh<E, W>> ColumnCore<E, W, I,
     }
 
     /// A column of its own with the same values, budget and edit
-    /// counter. It runs what the old API's `clone` runs: the slab
-    /// vector's `clone` and the index's.
+    /// counter: the slab vector's `clone` and the index's.
     pub(crate) fn duplicate(&self) -> (r: Self)
         ensures
             r.ready() == self.ready(),
@@ -1125,99 +1104,6 @@ impl<E: Slabs, W: Clone, I: IndexOps<W>, G: CopyWeigh<E, W>> ColumnCore<E, W, I,
             max_segments: self.max_segments,
             _p: PhantomData,
         }
-    }
-}
-
-/// A prefix column's core: its weights hold each slab's item count and
-/// sum (`weights::PrefixModel`), so the prefix readers' invariant
-/// (`ix_ok`) follows from the type invariant.
-impl<E, X, B, P> ColumnCore<E, PrefixSlabWeight<P>, SlabBTree<PrefixSlabWeight<P>>, PrefixModel<X, B>> where
-    E: Slabs + for<'a> ReadsAgree<'a, X>,
-    X: for<'a> Decoders<'a, Tail = E::Tail>,
-    B: for<'a> PrefixOps<<<X as Decoders<'a>>::D as Decode>::Item, P = P, W = PrefixSlabWeight<P>>,
-    P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign + Add<Output = P> + for<'b> AddAssign<&'b P>,
- {
-    /// The prefix readers' view of the column invariant, from the type
-    /// invariant: the index is well-formed and each weight holds its
-    /// slab's item count and the sum of its values.
-    #[inline(always)]
-    fn prefix_index(&self) -> (ix: &SlabBTree<PrefixSlabWeight<P>>)
-        ensures
-            ix.wf(),
-            ix_ok::<X, B>(ix@, self.slabs_spec()),
-            lens_ok::<X>(self.slabs_spec()),
-            total(slab_lens(self.slabs_spec())) <= usize::MAX,
-            self.slabs_spec().len() < usize::MAX,
-    {
-        let ix = self.index();
-        if self.slabs().len() == usize::MAX {
-            too_many_slabs();
-        }
-        proof {
-            use_type_invariant(self);
-            let s = self.slabs_spec();
-            lemma_lens_ok::<E, X>(s);
-            lemma_btree_index(*ix);
-            assert forall|i: int| 0 <= i < s.len() implies {
-                &&& #[trigger] ix@[i].spec_len() == s[i].len
-                &&& ix@[i].spec_prefix() == vsum::<_, B>(<X as Decoders<'static>>::vals(s[i]))
-            } by {
-                lemma_prefix_len(ix@[i]);
-                lemma_prefix_sum(ix@[i]);
-                assert(<PrefixModel<X, B> as Weigh<E, PrefixSlabWeight<P>>>::wrel(ix.ws()[i], s[i]));
-            }
-        }
-        ix
-    }
-
-    /// The sum of the values before item `index` (all of them, past the
-    /// end): `p_prefix`, from the type invariant.
-    #[inline(always)]
-    pub(crate) fn prefix_before(&self, index: usize) -> (r: P)
-        ensures
-            r == vsum::<_, B>(before::<X>(self.slabs_spec(), index as int)),
-    {
-        let ix = self.prefix_index();
-        p_prefix::<X, B>(self.slabs(), ix, index)
-    }
-
-    /// The sum of the values in `start..end` (`start < end`): what, added
-    /// to the sum before `start`, gives the sum before `end`. `p_sum_range`
-    /// over an iterator on the whole column, from the type invariant.
-    #[inline(always)]
-    pub(crate) fn sum_range(&self, start: usize, end: usize) -> (r: P)
-        requires
-            start < end,
-        ensures
-            prefix_add(vsum::<_, B>(before::<X>(self.slabs_spec(), start as int)), r)
-                == vsum::<_, B>(before::<X>(self.slabs_spec(), end as int)),
-    {
-        let ix = self.prefix_index();
-        let len = self.len();
-        let mut core = self.reader::<X>(0, len);
-        let mut total = <B as PrefixOps<<<X as Decoders<'static>>::D as Decode>::Item>>::zero();
-        let mut base = <B as PrefixOps<<<X as Decoders<'static>>::D as Decode>::Item>>::zero();
-        self.lemma_column();
-        proof {
-            core.lemma_here::<X>(self.slabs_spec());
-            let v = crate::iter_core::vals_of::<X>(self.slabs_spec());
-            assert(v.take(0) =~= Seq::<<X::D as Decode>::Item>::empty());
-            axiom_prefix_add(prefix_zero::<P>(), prefix_zero::<P>(), prefix_zero::<P>());
-        }
-        p_sum_range::<X, B>(&mut core, self.slabs(), Some(ix), start, end, &mut total, &mut base);
-        total
-    }
-
-    /// The first position whose sum before it reaches `target`:
-    /// `p_index_for_prefix`, from the type invariant.
-    #[inline(always)]
-    pub(crate) fn index_for_prefix(&self, target: P) -> (r: usize)
-        where B: for<'a> PrefixOrd<<<X as Decoders<'a>>::D as Decode>::Item>, P: Ord
-        ensures
-            found_at::<_, B>(crate::iter_core::vals_of::<X>(self.slabs_spec()), target, r as int),
-    {
-        let ix = self.prefix_index();
-        p_index_for_prefix::<X, B>(self.slabs(), ix, target)
     }
 }
 

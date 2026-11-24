@@ -4,11 +4,11 @@
 use hexane::{Codec, Column, Leb128};
 
 fn signed(n: i64, out: &mut Vec<u8>) {
-    out.extend_from_slice(Leb128::encode_signed(n).as_bytes());
+    Leb128::put_i(n, out);
 }
 
 fn unsigned(n: u64, out: &mut Vec<u8>) {
-    out.extend_from_slice(Leb128::encode_unsigned(n).as_bytes());
+    Leb128::put_u(n, out);
 }
 
 #[test]

@@ -1,5 +1,4 @@
-//! A column's load, run by run ([`Column::load_iter`]), as the
-//! old API's [`Column::load_iter`](crate::Column::load_iter) gives it.
+//! A column's load, run by run ([`Column::load_iter`]).
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each
@@ -30,9 +29,7 @@ use imp::*;
 
 verus! {
 
-/// A column's load in progress, run by run, as the old API's
-/// [`ColumnLoadIter`](crate::ColumnLoadIter) is: [`try_next_run`]
-/// gives the saved column's runs in turn while its slabs are cut
+/// A column's load in progress, run by run: [`try_next_run`] gives the saved column's runs in turn while its slabs are cut
 /// underneath, and [`finalize`] reads the rest and gives the column.
 ///
 /// What it has given so far is `given()`; and the column `finalize`
@@ -166,7 +163,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     /// [`load_with`](Self::load_with) would. Pulling runs is not needed:
     /// `load_iter(bytes, opts).finalize()` is a plain load.
     ///
-    /// A slab holds two runs or more: [`Column`](crate::Column) panics
+    /// A slab holds two runs or more: [`Column`] panics
     /// when asked for fewer, and here that is a `requires`.
     #[inline(always)]
     pub fn load_iter<'a, F: MaybeFill<Get<'a, V>>>(bytes: &'a [u8], opts: LoadOpts<F>) -> (r: ColumnLoadIter<'a, V, C, K>)

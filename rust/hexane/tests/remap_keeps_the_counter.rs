@@ -8,7 +8,7 @@ use hexane::Column;
 
 #[test]
 fn a_state_from_before_a_remap_does_not_resume() {
-    let mut col = Column::<u64>::from_values((0..10).collect());
+    let mut col = Column::<u64>::from_values(&(0..10).collect::<Vec<_>>());
     let mut it = col.iter();
     it.nth(2);
     let state = it.suspend();
@@ -21,7 +21,7 @@ fn a_state_from_before_a_remap_does_not_resume() {
 
 #[test]
 fn a_remap_alone_ends_suspended_states() {
-    let mut col = Column::<u64>::from_values((0..10).collect());
+    let mut col = Column::<u64>::from_values(&(0..10).collect::<Vec<_>>());
     let mut it = col.iter();
     it.nth(2);
     let state = it.suspend();
@@ -31,7 +31,7 @@ fn a_remap_alone_ends_suspended_states() {
 
 #[test]
 fn a_state_suspended_after_the_remap_resumes() {
-    let mut col = Column::<u64>::from_values((0..10).collect());
+    let mut col = Column::<u64>::from_values(&(0..10).collect::<Vec<_>>());
     col.remap(|x| x * 2);
     let mut it = col.iter();
     it.nth(2);

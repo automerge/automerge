@@ -1,6 +1,6 @@
 //! The public edit cursor's state, verified with Verus.
 //!
-//! [`crate::edit::Edit`] holds an [`EditCore`]: the column's parts, taken
+//! [`crate::Edit`] holds an [`EditCore`]: the column's parts, taken
 //! out of its core, and the verified cursor over them (`cursor::Cursor`).
 //! Its invariant (`EditCore::inv`) is the cursor's: it stands in the
 //! parts, which are a column (`Cursor::ok`), at a value or the end
@@ -19,6 +19,16 @@
 //! (they allocate): the state would have to be boxed and moved out and
 //! back for each step, which costs a few instructions per step (3-13% on
 //! the cheapest steps).
+
+/// The carry budget of an edit cursor, in runs: how many runs it carries
+/// through an open rebuild before it closes the rebuild instead.
+///
+/// Carrying costs a decode and a push per run; closing costs a partition,
+/// a byte splice and an index update, and leaves the skipped bytes where
+/// they are. In runs rather than items because that is what the work is:
+/// a long span of one value is carried for nothing, the same span of
+/// distinct values is better memmoved.
+pub(crate) const RUN_BUDGET: usize = 8;
 
 use crate::column::Slab;
 use crate::column_core::{ColumnCore, Parts};

@@ -41,7 +41,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     /// # Panics
     ///
     /// Where splices are out of order or out of bounds, which the
-    /// `requires` rules out of a verified caller (in the old words); and
+    /// `requires` rules out of a verified caller; and
     /// where the column's kind of index is not kept for the values it
     /// would hold (`VKeeps::keeps`), as for `splice`.
     #[inline(always)]

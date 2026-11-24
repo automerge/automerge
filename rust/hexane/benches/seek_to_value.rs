@@ -40,7 +40,7 @@ fn targets(vals: &[u64]) -> Vec<u64> {
 fn column(bencher: Bencher, shape: &str) {
     let vals = values(shape);
     let targets = targets(&vals);
-    let col: Column<u64> = Column::from_values(vals);
+    let col: Column<u64> = Column::from_values(&vals);
     bencher.bench_local(|| {
         for t in &targets {
             let mut iter = col.iter();
@@ -53,7 +53,7 @@ fn column(bencher: Bencher, shape: &str) {
 fn delta(bencher: Bencher, shape: &str) {
     let vals = values(shape);
     let targets = targets(&vals);
-    let col: DeltaColumn<u64> = DeltaColumn::from_values(vals);
+    let col: DeltaColumn<u64> = DeltaColumn::from_values(&vals);
     bencher.bench_local(|| {
         for t in &targets {
             let mut iter = col.iter();

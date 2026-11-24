@@ -7,13 +7,13 @@ use hexane::PrefixColumn;
 
 #[test]
 fn the_total_through_usize_max_is_everything() {
-    let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3]);
+    let col = PrefixColumn::<u64>::from_values(&[1, 2, 3]);
     assert_eq!(col.get_total(usize::MAX), 6);
 }
 
 #[test]
 fn other_totals_are_unchanged() {
-    let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3]);
+    let col = PrefixColumn::<u64>::from_values(&[1, 2, 3]);
     assert_eq!(col.get_total(0), 1);
     assert_eq!(col.get_total(2), 6);
     assert_eq!(col.get_total(10), 6);

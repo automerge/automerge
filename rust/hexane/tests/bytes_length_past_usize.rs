@@ -5,7 +5,7 @@
 //! encoding of a value loads as that value, and the encoding is no longer
 //! canonical.
 
-use hexane::{Column, RleValue};
+use hexane::Column;
 
 /// A literal run of one value (header -1), whose length header is
 /// 2^32 + 3 and which is followed by three bytes.
@@ -13,20 +13,18 @@ fn long_header() -> Vec<u8> {
     vec![0x7f, 0x83, 0x80, 0x80, 0x80, 0x10, b'a', b'b', b'c']
 }
 
-fn rejects<T: RleValue>() {
-    let data = long_header();
-    assert!(Column::<T>::load(&data).is_err());
-    assert!(Column::<Option<T>>::load(&data).is_err());
-}
-
 #[test]
 fn a_string_length_past_usize_is_rejected() {
-    rejects::<String>();
+    let data = long_header();
+    assert!(Column::<String>::load(&data).is_err());
+    assert!(Column::<Option<String>>::load(&data).is_err());
 }
 
 #[test]
 fn a_bytes_length_past_usize_is_rejected() {
-    rejects::<Vec<u8>>();
+    let data = long_header();
+    assert!(Column::<Vec<u8>>::load(&data).is_err());
+    assert!(Column::<Option<Vec<u8>>>::load(&data).is_err());
 }
 
 /// The three bytes alone, with the length 3, still load.

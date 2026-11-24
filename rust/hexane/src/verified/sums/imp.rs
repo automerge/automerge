@@ -613,18 +613,6 @@ impl<'a, V: PrefixValue> PrefixOps<Get<'a, V>> for SumOf<V> {
     }
 
     #[inline(always)]
-    fn try_acc_run(t: &mut V::Sum, run: &Run<Get<'a, V>>) -> bool {
-        let n = run.count;
-        let p = V::to_part(run.value);
-        proof {
-            V::Sum::lemma_as_int(p);
-            lemma_reps::<V::Sum>(n as nat, p);
-        }
-        *t = (*t).w_add(p.w_mul(n));
-        true
-    }
-
-    #[inline(always)]
     fn zero() -> V::Sum {
         V::Sum::zero()
     }
@@ -644,16 +632,6 @@ impl<'a, V: PrefixValue> PrefixOps<Get<'a, V>> for SumOf<V> {
         *a = (*a).w_add(*b);
     }
 
-    #[inline(always)]
-    fn max_unchecked_len() -> usize {
-        usize::MAX
-    }
-
-    #[inline(always)]
-    fn try_add(t: &mut V::Sum, b: &V::Sum) -> bool {
-        *t = (*t).w_add(*b);
-        true
-    }
 }
 
 /// The sum the shared proofs speak of is the sum of the values,
@@ -699,8 +677,8 @@ pub(crate) proof fn lemma_sum_diff<P: VSum>(base: P, t: P, a: int, b: int)
 
 /// The sums of a column of `V` as numbers, where they are never
 /// negative: what the shared search by sum takes of them (`PrefixOrd`).
-/// That a prefix type's sums and order are its numbers' is trusted of
-/// the old API's types; of these it is proved.
+/// That a prefix type's sums and order are its numbers' is proved of
+/// these types.
 impl<'a, V: PrefixValue> PrefixOrd<Get<'a, V>> for SumOf<V> where V::Sum: UnsignedPrefix {
     open spec fn pnum(p: V::Sum) -> nat {
         p.as_int() as nat

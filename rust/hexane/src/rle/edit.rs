@@ -1,6 +1,6 @@
 //! Progressive editing of a single RLE slab.
 //!
-//! [`RleEdit`] is the slab half of a column cursor: it opens a rebuild at
+//! `RleRebuild` is the slab half of a column cursor: it opens a rebuild at
 //! one item, takes any mix of *pass* (carry the slab's own items
 //! through), *insert* and *delete* moving forward, and closes by carrying
 //! the untouched tail wholesale.
@@ -22,7 +22,6 @@
 use crate::cursor::Slabs;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{lemma_concat_append, lemma_vals_cat, lemma_vals_unit, vals_of};
-use crate::edit::{EditSlab, SlabEdit};
 #[cfg(verus_keep_ghost)]
 use crate::rle::cut::{lemma_lit_tail_le, slab_ok};
 #[cfg(verus_keep_ghost)]
@@ -42,7 +41,6 @@ use crate::rle::state::*;
 use crate::rle::writer::*;
 use crate::rle::writer::{add, merge_tail, tail_rec, Rebuilt, Splice};
 use crate::rle::{RleTail, Slab};
-use crate::{AsColumnRef, Codec, RleValue};
 use std::marker::PhantomData;
 #[allow(unused_imports)]
 use vstd::prelude::*;
@@ -511,8 +509,7 @@ impl<M: WriteOps<'static>> Edit<M> {
 
 // ── The cursor's slab model ────────────────────────────────────────────────
 
-/// An RLE slab rebuild in progress: RLE columns' `SlabEdit::Edit`
-/// (`RleEdit`).
+/// An RLE slab rebuild in progress.
 pub struct RleRebuild<M: WriteOps<'static>> {
     pub(crate) e: Edit<M>,
 }
@@ -523,7 +520,7 @@ pub struct RleRebuild<M: WriteOps<'static>> {
 /// bytes encode, owned. `L` is the column's writer ops: one type for
 /// every lifetime a slab is borrowed for, owning its values as itself.
 ///
-/// Public only because RLE columns' `SlabEdit::Model` names it; this
+/// Public only because the verified API's value models name it; this
 /// module is not.
 pub struct RleModel<L>(PhantomData<L>);
 
@@ -542,7 +539,7 @@ proof fn lemma_slab_of<'a, O: RleOps<'a>>(s: Slab, vals: Seq<O::V>)
     lemma_meta_of::<O>(slab_bytes(s), vals, slab_segments(s) as int, slab_tail_of(s));
 }
 
-/// A slab of `len` copies of `value` (`ColumnEncoding::fill`): what a
+/// A slab of `len` copies of `value`: what a
 /// fresh writer writes for them.
 #[inline]
 pub(crate) fn fill<'s, L>(value: <L as WriteOps<'s>>::Cow, len: usize) -> (s: Slab)
@@ -1119,8 +1116,7 @@ impl<L> Slabs for RleModel<L> where L: for<'s> Lift<'s, W = L> {
 }
 
 /// Carry `n` of the slab's values through the rebuild, at most `runs`
-/// pushes, telling `f` each run: `Visitor::pass` for RLE slabs, which the
-/// encoding's `EditSlab::pass` forwards to.
+/// pushes, telling `f` each run: `Visitor::pass` for RLE slabs.
 #[inline(always)]
 pub(crate) fn pass<'s, L, G>(e: &mut RleRebuild<L>, s: &'s Slab, n: usize, runs: usize, f: &mut G) -> (left: usize)
     where L: for<'t> Lift<'t, W = L>, G: Visit<VOf<'s, L>>,
@@ -1230,259 +1226,3 @@ pub(crate) fn discard<'s, L, G>(e: &mut RleRebuild<L>, s: &'s Slab, n: usize, f:
 }
 
 } // verus!
-
-// Outside `verus!`: a closure is a visitor that calls itself.
-impl<V, F: FnMut(V, usize)> Visit<V> for F {
-    #[cfg(verus_keep_ghost)]
-    fn seen(&self) -> Seq<V> {
-        unimplemented!()
-    }
-
-    #[inline(always)]
-    fn visit(&mut self, v: V, n: usize) {
-        self(v, n)
-    }
-}
-
-/// A rebuild in progress within one RLE slab, verified with Verus (`Edit`,
-/// and what the column cursor does with it: `RleModel`).
-pub type RleEdit<T, C> = RleRebuild<WOps<T, T, C>>;
-
-impl<M: WriteOps<'static>> Default for RleRebuild<M> {
-    fn default() -> Self {
-        RleRebuild { e: Edit::new() }
-    }
-}
-
-impl<T: RleValue, C: Codec> RleEdit<T, C> {
-    /// An idle rebuild pointed at item `at`, for tests with no cursor to
-    /// hold one across slabs.
-    #[cfg(test)]
-    pub(crate) fn open(slab: &Slab, at: usize) -> Self {
-        let mut e = Self::default();
-        e.reset(slab, at, usize::MAX);
-        e
-    }
-}
-
-// Forwards to the verified RLE slab model; the column cursor calls the
-// model directly, and reaches `pass`, `insert` and `delete` through here.
-impl<T: RleValue, C: Codec> EditSlab for RleEdit<T, C> {
-    type Tail = RleTail;
-    type Value = T;
-    type State = RleDecoderState;
-
-    fn reset(&mut self, slab: &Slab, at: usize, max_segments: usize) {
-        <RleModel<WOps<T, T, C>> as Slabs>::reset(self, slab, at, max_segments)
-    }
-
-    /// Carry `n` of the slab's items through the rebuild unchanged,
-    /// spending at most `runs` pushes. Returns what it declined to carry;
-    /// closing the rebuild is the only sensible answer to that.
-    ///
-    /// The budget is in runs because that is what the work is: carrying a
-    /// 10,000-item run costs one push, ten literals cost ten.
-    fn pass<F>(&mut self, slab: &Slab, n: usize, runs: usize, f: &mut F) -> usize
-    where
-        F: FnMut(T::Get<'_>, usize),
-    {
-        pass::<WOps<T, T, C>, F>(self, slab, n, runs, f)
-    }
-
-    /// Insert `n` copies of `value` at the cursor.
-    fn insert<V: AsColumnRef<T>>(&mut self, value: V, n: usize) {
-        if n == 0 {
-            return;
-        }
-        let value = T::to_owned(value.as_column_ref());
-        self.e.insert_cow(RleCow::Owned(value), n);
-    }
-
-    /// Drop `n` of the slab's items at the cursor.
-    fn delete<F>(&mut self, slab: &Slab, n: usize, f: &mut F)
-    where
-        F: FnMut(T::Get<'_>, usize),
-    {
-        debug_assert!(n <= slab.len, "delete past the end of the slab");
-        discard::<WOps<T, T, C>, F>(self, slab, n, f)
-    }
-
-    fn read_state(&self) -> &RleDecoderState {
-        self.e.dec()
-    }
-
-    /// Finish: carry the slab's remaining bytes through wholesale, write
-    /// the rebuilt region back, and return any slabs the rebuild spilled
-    /// into (to be inserted after this one).
-    fn close(&mut self, slab: &mut Slab) -> Vec<Slab> {
-        <RleModel<WOps<T, T, C>> as Slabs>::close(self, slab)
-    }
-}
-
-/// The slab-level operations a column cursor drives. Implemented here
-/// for the RLE encoding; an encoding without an implementation simply
-/// has no cursor (nothing outside this module requires one yet).
-impl<T, C> SlabEdit for crate::rle::RleEncoding<T, C>
-where
-    T: RleValue,
-    C: Codec,
-    T: crate::ColumnValueRef<Encoding<C> = Self>,
-{
-    type Edit = RleEdit<T, C>;
-    type Model = RleModel<WOps<T, T, C>>;
-    type Loader<'a> = crate::rle::cut::Load<'a, WOps<T, T, C>>;
-    type Recoder<'a> = crate::rle::enc::REncoder<'a, WOps<T, T, C>>;
-
-    #[inline(always)]
-    fn owned_in<'a>(v: T) -> crate::rle::state::RleCow<'a, T, T> {
-        crate::rle::state::RleCow::Owned(v)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::codec::Leb128;
-    use crate::encoding::EncoderApi;
-    use crate::rle::RleDecoder;
-    use crate::Encoder;
-
-    fn slab_of(vals: &[u64]) -> Slab {
-        Encoder::<u64>::encode_slab(vals.iter().copied())
-    }
-
-    fn values(slab: &Slab) -> Vec<u64> {
-        RleDecoder::<u64, Leb128>::new(&slab.data).collect()
-    }
-
-    /// open → pass → insert → close, against the same edit expressed as
-    /// a plain `Vec` splice.
-    fn check(input: &[u64], script: impl Fn(&mut RleEdit<u64, Leb128>, &Slab), want: Vec<u64>) {
-        let mut slab = slab_of(input);
-        let orig = slab.clone();
-        let mut e = RleEdit::<u64, Leb128>::open(&orig, 0);
-        script(&mut e, &orig);
-        e.close(&mut slab);
-        assert_eq!(values(&slab), want, "values");
-        assert_eq!(slab.len, want.len(), "len");
-        // the encoding must be canonical: re-encoding the same values
-        // from scratch produces the same bytes
-        let fresh = slab_of(&want);
-        assert_eq!(slab.data, fresh.data, "bytes");
-        assert_eq!(slab.segments, fresh.segments, "segments");
-    }
-
-    #[test]
-    fn insert_at_front() {
-        check(&[1, 1, 2, 3], |e, _s| e.insert(9u64, 1), {
-            let mut v = vec![9u64];
-            v.extend([1, 1, 2, 3]);
-            v
-        });
-    }
-
-    #[test]
-    fn pass_then_insert() {
-        check(
-            &[1, 1, 2, 3],
-            |e, s| {
-                e.pass(s, 2, usize::MAX, &mut |_, _| {});
-                e.insert(9u64, 1);
-            },
-            vec![1, 1, 9, 2, 3],
-        );
-    }
-
-    #[test]
-    fn two_inserts_one_pass() {
-        check(
-            &[1, 1, 1, 1, 1, 1],
-            |e, s| {
-                e.pass(s, 1, usize::MAX, &mut |_, _| {});
-                e.insert(7u64, 1);
-                e.pass(s, 2, usize::MAX, &mut |_, _| {});
-                e.insert(8u64, 2);
-            },
-            vec![1, 7, 1, 1, 8, 8, 1, 1, 1],
-        );
-    }
-
-    #[test]
-    fn delete_then_insert() {
-        check(
-            &[1, 2, 3, 4, 5],
-            |e, s| {
-                e.pass(s, 1, usize::MAX, &mut |_, _| {});
-                e.delete(s, 2, &mut |_, _| {});
-                e.insert(9u64, 1);
-            },
-            vec![1, 9, 4, 5],
-        );
-    }
-
-    #[test]
-    fn extends_a_run() {
-        check(
-            &[5, 5, 5, 5],
-            |e, s| {
-                e.pass(s, 2, usize::MAX, &mut |_, _| {});
-                e.insert(5u64, 3);
-            },
-            vec![5, 5, 5, 5, 5, 5, 5],
-        );
-    }
-
-    #[test]
-    fn append_at_end() {
-        let mut slab = slab_of(&[1, 2, 3]);
-        let orig = slab.clone();
-        let mut e = RleEdit::<u64, Leb128>::open(&orig, 3);
-        e.insert(4u64, 1);
-        e.close(&mut slab);
-        assert_eq!(values(&slab), vec![1, 2, 3, 4]);
-    }
-
-    #[test]
-    fn delete_only() {
-        check(
-            &[1, 2, 3, 4],
-            |e, s| {
-                e.pass(s, 1, usize::MAX, &mut |_, _| {});
-                e.delete(s, 2, &mut |_, _| {});
-            },
-            vec![1, 4],
-        );
-    }
-
-    /// Every single edit must land on the canonical encoding of the values
-    /// it leaves: bytes, length and segments, as encoding them afresh would.
-    #[test]
-    fn matches_the_canonical_encoding() {
-        let input: Vec<u64> = vec![1, 1, 1, 2, 3, 3, 4, 5, 5, 5, 6, 7, 8, 8];
-        for at in 0..=input.len() {
-            for del in 0..=(input.len() - at).min(3) {
-                for ins in [vec![], vec![9u64], vec![9, 9], vec![3, 3, 3]] {
-                    let mut a = slab_of(&input);
-                    let orig = a.clone();
-                    let mut e = RleEdit::<u64, Leb128>::open(&orig, at);
-                    e.delete(&orig, del, &mut |_, _| {});
-                    for v in &ins {
-                        e.insert(*v, 1);
-                    }
-                    e.close(&mut a);
-
-                    let mut want = input.clone();
-                    want.splice(at..at + del, ins.iter().copied());
-                    let b = slab_of(&want);
-                    assert_eq!(values(&a), want, "values at={at} del={del} ins={ins:?}");
-                    assert_eq!(a.data, b.data, "bytes at={at} del={del} ins={ins:?}");
-                    assert_eq!(a.len, b.len, "len at={at} del={del} ins={ins:?}");
-                    assert_eq!(
-                        a.segments, b.segments,
-                        "segments at={at} del={del} ins={ins:?}"
-                    );
-                }
-            }
-        }
-    }
-}

@@ -1,13 +1,11 @@
-//! The value types of the verified public API, verified with Verus.
+//! The value types, verified with Verus.
 //!
-//! [`Column`](crate::Column) reaches a value type through the trusted
-//! bridges `Ops` and `WOps`, which state what the type's packing code
-//! does and leave Verus to take it on trust. Here the same contracts
+//! The RLE core reaches a value type through contracts
 //! ([`RleOps`](crate::rle::model::RleOps), [`WriteOps`](crate::rle::model::WriteOps),
-//! [`Lift`](crate::rle::lift::Lift)) are *proved*: for every type that
-//! says how it packs ([`RleValue`]), over every codec ([`Codec`]), and for
-//! `Option`s of them. So a column over these types rests on no trusted
-//! value code.
+//! [`Lift`](crate::rle::lift::Lift)) that say what its packing code does.
+//! They are *proved* here: for every type that says how it packs
+//! ([`RleValue`]), over every codec ([`Codec`]), and for `Option`s of
+//! them. So a column over these types rests on no trusted value code.
 //!
 //! [`RleValue`] is proved for `u64` and `i64`, which are the codec's own
 //! numbers, and for every type that says how it is one of those
@@ -50,8 +48,7 @@ verus! {
 /// A value that packs as one to ten bytes: how, with that specified and
 /// proved. The types are this crate's numbers (`u64` and `i64`), those
 /// that say which of these they are ([`VNewtype`]), and a client's own
-/// with an encoding of its own, as a client of the old API writes
-/// [`RleValue`](crate::RleValue)'s `pack` and `try_unpack` for its type.
+/// with an encoding of its own.
 ///
 /// The proofs about a column of the type rest on what this trait's
 /// functions ensure, its laws. Verus checks them for a client it is run

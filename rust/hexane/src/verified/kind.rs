@@ -81,9 +81,9 @@ impl<V: ColumnValueRef<C>, C: Codec> VIndex<V, C> for LenIndex {
 }
 
 /// The index of a plain column kept as a Fenwick tree (a binary indexed
-/// tree) of the slabs' counts, as the old API's
-/// [`BitIndex`](crate::index::BitIndex)`<usize>` keeps it, in place of
-/// the B-tree of [`LenIndex`]. A column says the same of its values with
+/// tree) of the slabs' counts
+/// (`BitIndex<usize>`), in place of the B-tree
+/// of [`LenIndex`]. A column says the same of its values with
 /// either, and saves the same bytes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LenBitIndex;

@@ -20,7 +20,7 @@
 //! `base_pos()` up to the iterator add up to (`sum_to`), for the sums
 //! of a prefix column fit the type they are kept in.
 //!
-//! The moves are [`PrefixIter`](crate::PrefixIter)'s, the shared ones of
+//! The moves are [`PrefixIter`]'s, the shared ones of
 //! `prefix_core.rs` (`p_next`, `p_nth`, `p_next_run_from`, `p_delta_nth`,
 //! `p_reset`) and `prefix_search.rs` (`p_advance`), instantiated with
 //! the verified sums: a long move asks the column's index for the slab
@@ -709,7 +709,7 @@ impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> wher
     ///
     /// An iterator of no column (`default()`) has no index to ask: it
     /// finds nothing, and its window is closed where it stands.
-    /// ([`PrefixIter`](crate::PrefixIter)'s leaves the window of such
+    /// ([`PrefixIter`]'s leaves the window of such
     /// an iterator as it is.)
     #[inline(always)]
     pub fn advance_prefix(&mut self, n: V::Sum) -> (r: Option<PrefixSeek<'a, V>>)
@@ -1240,8 +1240,7 @@ impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
     }
 
     /// A lookahead: the iterator wrapped so that the item it gives next
-    /// can be looked at first ([`Unshift::peek`]), as the old
-    /// API's `Shiftable::unshift` gives.
+    /// can be looked at first ([`Unshift::peek`]).
     #[inline(always)]
     pub fn unshift(self) -> (r: Unshift<Self>)
         ensures
@@ -1252,7 +1251,7 @@ impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
     }
 
     /// The items of each of `ranges` of the column, one range after
-    /// another, as the old API's `Shiftable::ranges` gives them (what is
+    /// another (what is
     /// left of the iterator's own window is dropped). The ranges ascend
     /// and do not overlap (they may touch), and start where the iterator
     /// stands or later.

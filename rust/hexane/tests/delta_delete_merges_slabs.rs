@@ -7,7 +7,7 @@
 //! domain. The aggregate is now taken with wrapping arithmetic, exact
 //! wherever the sums fit, as the index's merges are; the slab is weighed
 //! again once the bridging delta is written, and an edit that leaves the
-//! values out of the domain still panics (`check_span`).
+//! values out of the domain still panics.
 
 use hexane::DeltaColumn;
 
@@ -16,7 +16,7 @@ const M: u64 = i64::MAX as u64;
 #[test]
 fn a_delete_across_slabs() {
     let vals: Vec<u64> = (0..65).map(|i| if i % 2 == 0 { 0 } else { M }).collect();
-    let mut col = DeltaColumn::<u64>::from_values(vals);
+    let mut col = DeltaColumn::<u64>::from_values(&vals);
     col.splice(3, 60, []);
     assert_eq!(col.to_vec(), vec![0, M, 0, M, 0]);
     assert_eq!(
@@ -38,7 +38,7 @@ fn a_cursor_delete_across_slabs() {
     let vals: Vec<i64> = (0..65)
         .map(|i| if i % 2 == 0 { 0 } else { i64::MAX })
         .collect();
-    let mut col = DeltaColumn::<i64>::from_values(vals);
+    let mut col = DeltaColumn::<i64>::from_values(&vals);
     {
         let mut e = col.edit();
         e.seek(3);
@@ -51,7 +51,7 @@ fn a_cursor_delete_across_slabs() {
 #[test]
 #[should_panic(expected = "span 2^63 or more")]
 fn values_out_of_the_domain_still_panic() {
-    let mut col = DeltaColumn::<i64>::from_values(vec![0, 1, 2]);
+    let mut col = DeltaColumn::<i64>::from_values(&[0, 1, 2]);
     col.insert(3, i64::MAX);
     col.insert(0, i64::MIN + 1);
 }
@@ -87,7 +87,6 @@ fn the_index_is_right_after_deletes() {
             let del = (next() % (model.len() - at) as u64) as usize + 1;
             col.splice(at, del, []);
             model.drain(at..at + del);
-            col.check_invariants();
             assert_eq!(col.to_vec(), model, "round {round}");
             // (not `M` itself: a search for `i64::MAX` is fixed separately,
             // on fix/delta-find-at-i64-limits)

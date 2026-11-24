@@ -5,8 +5,7 @@
 //! run of the wrong length. No column can hold that many values, so an
 //! encoder now panics instead.
 
-use hexane::encoder::{BoolEncoder, RleEncoder};
-use hexane::Leb128;
+use hexane::Encoder;
 
 /// Appends that bring the count to `usize::MAX - 1`; each run fits an
 /// `i64` on any target.
@@ -15,7 +14,7 @@ const HALF: usize = usize::MAX / 2;
 #[test]
 #[should_panic(expected = "encoder too long to append to")]
 fn an_rle_encoder_past_usize_max_values_panics() {
-    let mut e = RleEncoder::<u64>::new();
+    let mut e = Encoder::<u64>::new();
     e.append_n(1, HALF);
     e.append_n(2, HALF);
     e.append_n(3, 2);
@@ -24,7 +23,7 @@ fn an_rle_encoder_past_usize_max_values_panics() {
 #[test]
 #[should_panic(expected = "encoder too long to append to")]
 fn an_rle_encoder_past_usize_max_values_panics_one_at_a_time() {
-    let mut e = RleEncoder::<u64>::new();
+    let mut e = Encoder::<u64>::new();
     e.append_n(1, HALF);
     e.append_n(2, HALF);
     e.append(3);
@@ -34,7 +33,7 @@ fn an_rle_encoder_past_usize_max_values_panics_one_at_a_time() {
 #[test]
 #[should_panic(expected = "encoder too long to append to")]
 fn a_bool_encoder_past_usize_max_values_panics() {
-    let mut e = BoolEncoder::<Leb128>::new();
+    let mut e = Encoder::<bool>::new();
     e.append_n(true, HALF);
     e.append_n(false, HALF);
     e.append_n(true, 2);
@@ -43,11 +42,11 @@ fn a_bool_encoder_past_usize_max_values_panics() {
 /// Nearly `usize::MAX` values are still counted.
 #[test]
 fn an_encoder_of_nearly_usize_max_values_counts_them() {
-    let mut e = RleEncoder::<u64>::new();
+    let mut e = Encoder::<u64>::new();
     e.append_n(1, HALF - 1);
     e.append_n(2, HALF - 1);
     assert_eq!(e.len(), usize::MAX - 3);
-    let mut b = BoolEncoder::<Leb128>::new();
+    let mut b = Encoder::<bool>::new();
     b.append_n(true, HALF - 1);
     b.append_n(false, HALF - 1);
     assert_eq!(b.len(), usize::MAX - 3);
@@ -58,7 +57,7 @@ fn an_encoder_of_nearly_usize_max_values_counts_them() {
 #[test]
 #[should_panic(expected = "encoder too long to append to")]
 fn a_run_past_usize_max_values_panics() {
-    let mut e = RleEncoder::<u64>::new();
+    let mut e = Encoder::<u64>::new();
     e.append_n(5, 3_000_000_000);
     e.append_n(5, 3_000_000_000);
 }

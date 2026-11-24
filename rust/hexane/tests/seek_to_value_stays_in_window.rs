@@ -10,7 +10,7 @@ use hexane::Column;
 
 #[test]
 fn a_seek_past_the_window_stays_in_it() {
-    let col = Column::<u64>::from_values(vec![1, 2, 4, 4, 5]);
+    let col = Column::<u64>::from_values(&[1, 2, 4, 4, 5]);
     // 5 lies past the window: where it would go is the window's end
     let mut it = col.iter_range(0..3);
     assert_eq!(it.seek_to_value(5, 0..5), 3..3);
@@ -25,7 +25,7 @@ fn a_seek_past_the_window_stays_in_it() {
 
 #[test]
 fn a_seek_inside_the_window_is_unchanged() {
-    let col = Column::<u64>::from_values(vec![1, 2, 4, 4, 5]);
+    let col = Column::<u64>::from_values(&[1, 2, 4, 4, 5]);
     let mut it = col.iter();
     assert_eq!(it.seek_to_value(4, 0..5), 2..4);
     assert_eq!(it.pos(), 2);

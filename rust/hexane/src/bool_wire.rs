@@ -360,11 +360,10 @@ proof fn lemma_no_parse_len<K: CountOps>(data: Seq<u8>, cs: Seq<u64>)
     }
 }
 
-/// A slab's summary: its runs, values, and last count's byte length.
+/// A slab's summary: its runs and values.
 pub struct BoolInfo {
     pub segments: usize,
     pub len: usize,
-    pub tail: u8,
 }
 
 
@@ -380,7 +379,6 @@ pub(crate) fn validate<K: CountOps>(data: &[u8]) -> (r: Result<BoolInfo, PackErr
                 &&& bool_valid::<K>(data@)
                 &&& i.segments == bool_counts::<K>(data@).len()
                 &&& i.len == counts_len(bool_counts::<K>(data@))
-                &&& i.tail == counts_tail::<K>(bool_counts::<K>(data@))
             },
             Err(_) => !bool_valid::<K>(data@),
         },
@@ -399,13 +397,12 @@ pub(crate) fn validate<K: CountOps>(data: &[u8]) -> (r: Result<BoolInfo, PackErr
             assert(bool_parses::<K>(cs, data@));
             lemma_counts::<K>(cs, data@);
         }
-        return Ok(BoolInfo { segments: 0, len: 0, tail: 0 });
+        return Ok(BoolInfo { segments: 0, len: 0 });
     }
     let mut byte_pos: usize = 0;
     let mut run_index: usize = 0;
     let mut value = false;
     let mut len: usize = 0;
-    let mut last_cb: u8 = 0;
     while byte_pos < data.len()
         invariant
             byte_pos <= data@.len(), data@.len() > 0,
@@ -413,7 +410,6 @@ pub(crate) fn validate<K: CountOps>(data: &[u8]) -> (r: Result<BoolInfo, PackErr
             run_index == cs.len(), value == run_value(cs.len() as int), len == counts_len(cs),
             forall|i: int| 1 <= i < cs.len() ==> #[trigger] cs[i] > 0,
             cs.len() > 0 && cs.last() == 0 ==> cs.len() == 1 && byte_pos < data@.len(),
-            cs.len() > 0 ==> last_cb == K::enc(cs.last()).len(),
             byte_pos == data@.len() ==> cs.len() > 0,
         decreases data@.len() - byte_pos,
     {
@@ -460,7 +456,6 @@ pub(crate) fn validate<K: CountOps>(data: &[u8]) -> (r: Result<BoolInfo, PackErr
         proof {
             lemma_bytes_len::<K>(c1);
         }
-        last_cb = cb as u8;
         byte_pos = next_pos;
         value = !value;
         run_index = run_index + 1;
@@ -478,7 +473,7 @@ pub(crate) fn validate<K: CountOps>(data: &[u8]) -> (r: Result<BoolInfo, PackErr
         assert(bool_parses::<K>(cs, data@));
         lemma_counts::<K>(cs, data@);
     }
-    Ok(BoolInfo { segments: run_index, len, tail: last_cb })
+    Ok(BoolInfo { segments: run_index, len })
 }
 
 // ── Loading ─────────────────────────────────────────────────────────────────
@@ -522,15 +517,6 @@ fn new_bslab(data: &[u8], len: usize, segments: usize, tail: u8) -> (s: BSlab)
     crate::column::Slab { data: vstd::slice::slice_to_vec(data), len, segments, tail }
 }
 
-#[inline(always)]
-fn bslab_len_of(s: &BSlab) -> (n: usize)
-    ensures n == bslab_len(*s),
-{
-    proof {
-        reveal(bslab_len);
-    }
-    s.len
-}
 
 /// A valid bool slab with its metadata.
 pub(crate) open spec fn bslab_ok<K: CountOps>(s: BSlab) -> bool {
@@ -1015,13 +1001,6 @@ impl<'a> BoolLoad<'a> {
         ensures n == self.done_slabs().len(),
     {
         self.slabs.len()
-    }
-
-    pub(crate) fn completed_slab_len(&self, i: usize) -> (n: usize)
-        requires i < self.done_slabs().len(),
-        ensures n == bslab_len(self.done_slabs()[i as int]),
-    {
-        bslab_len_of(&self.slabs[i])
     }
 
     /// The next run, or `None` at the end of the input.
@@ -2499,14 +2478,14 @@ fn merge_append<K: CountOps>(
 }
 
 /// The counts a codec writes, for code that names columns by their codec
-/// (`BoolEncoding<C>`) but is verified over [`CountOps`].
+/// but is verified over [`CountOps`].
 pub trait CountsOf {
     type K: CountOps;
 }
 
 /// Forward iterator over all items in a single boolean-encoded slab.
 ///
-/// Created by `BoolEncoding::decoder`.  Each run yields the same value
+/// Each run yields the same value
 /// in O(1) per item; advancing between runs reads one LEB128 count.
 ///
 /// The decoding is verified with Verus (`BDec`): on a valid slab it
@@ -2521,8 +2500,8 @@ pub struct BoolDecoder<'a, C = crate::Leb128> {
 /// verified against the bool format: a slab is well-formed when
 /// `bslab_ok`, and holds the values its bytes encode.
 ///
-/// Public only because `BoolEncoding<C>`'s `ColumnEncoding::ReadModel`
-/// names it; this module is not.
+/// Public only because the verified API's value models name it; this
+/// module is not.
 pub struct BoolReads<C>(PhantomData<C>);
 
 impl<'a, C: CountsOf> Decode for BoolDecoder<'a, C> {
@@ -2732,36 +2711,3 @@ fn slice_from(v: &[u8], n: usize) -> (s: &[u8])
 
 
 } // verus!
-
-/// [`CountOps`] for codec `C`: the trusted bridge from the verified bool
-/// code to the codec's own.
-///
-/// Public only because `BoolEncoding<C>`'s slab model names it; this
-/// module is not.
-pub struct Counts<C>(std::marker::PhantomData<C>);
-
-impl<C: crate::Codec> CountsOf for C {
-    type K = Counts<C>;
-}
-
-// Outside `verus!`, so Verus takes it on trust; its spec items exist only
-// when Verus compiles the crate.
-impl<C: crate::Codec> CountOps for Counts<C> {
-    #[cfg(verus_keep_ghost)]
-    fn enc(_n: u64) -> Seq<u8> {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn axiom_enc(_a: u64, _b: u64, _s: Seq<u8>, _t: Seq<u8>) {}
-
-    #[inline(always)]
-    fn put_count(n: usize, buf: &mut Vec<u8>) {
-        C::put_count(n, buf);
-    }
-
-    #[inline(always)]
-    fn read_count(data: &[u8]) -> Option<(usize, usize)> {
-        C::read_count(data)
-    }
-}

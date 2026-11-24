@@ -20,18 +20,6 @@
 //! standard library: the module docs of `hexane::verified` ("What is
 //! trusted") say which of those it uses.
 //!
-//! The old API takes more on trust, in code that no function of the
-//! verified API runs, and that is left where it is: its bridges to a
-//! value type's and a codec's own code (`rle::model::Ops`,
-//! `rle::state::WOps` and their kin, outside `verus!`); the sums of a
-//! prefix column of a client's type `P` (`btree::axiom_prefix_add`,
-//! `prefix_core::axiom_prefix_sub`, and `PrefixSlabWeight`'s operations in
-//! `btree.rs`, `prefix.rs` and `weights.rs`, among them a helper that
-//! panics, `weights::unreached`); the order of a client's comparison
-//! (`iter_core::Cmp`); and the weights of the Fenwick index that only its
-//! overflow checks read (`index`'s `ix_weight` and `ix_total`, and
-//! `btree`'s `slab_agg`).
-
 #![allow(dead_code)]
 
 use crate::column::Splice;
@@ -217,7 +205,7 @@ pub(crate) fn recycle_buf(buf: &mut Vec<u8>, mut bytes: Vec<u8>) {
 #[verifier::external_body]
 #[inline(always)]
 pub(crate) fn carry_budget() -> usize {
-    crate::edit::RUN_BUDGET
+    crate::edit_core::RUN_BUDGET
 }
 
 // ── The helpers that panic: each says why, and does not return ─────────────
@@ -673,7 +661,7 @@ pub(crate) fn splice_failed(e: PackError)
 /// (`Column::loadable`): that the values `vs` save
 /// to bytes too long for it, or are more than a column counts. The
 /// words are those of the `unwrap` in
-/// [`EncoderApi::into_column`](crate::EncoderApi::into_column).
+/// [`Encoder::into_column`](crate::Encoder::into_column).
 #[verifier::external_body]
 #[cold]
 #[inline(never)]

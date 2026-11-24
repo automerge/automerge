@@ -1,12 +1,10 @@
-//! The sums of a column's values, for the prefix columns of the verified
-//! public API, verified with Verus.
+//! The sums of a column's values, for the prefix columns, verified with
+//! Verus.
 //!
 //! A prefix column answers what the values before a position add up to.
-//! [`PrefixColumn`](crate::PrefixColumn) reaches the arithmetic of the
-//! sums through a trusted bridge, which states that a prefix type's `+`
-//! is associative and that its `-` undoes it, and leaves Verus to take
-//! that on trust. Here the sums are of this crate's integer types
-//! ([`VSum`]), and what the trusted bridge assumes is *proved* of them.
+//! The sums are of this crate's integer types ([`VSum`]), and the laws
+//! the prefix core asks of their arithmetic (`+` is associative, and `-`
+//! undoes it) are *proved* of them.
 //!
 //! What a value adds to a sum is an integer (`PrefixValue::amount`), and
 //! the sum of some values is the sum of those integers (`summed`): a

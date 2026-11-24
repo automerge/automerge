@@ -606,53 +606,9 @@ impl BEncoder {
         v
     }
 
-    /// Flush, and take the encoding as one slab: its bytes, len, run count
-    /// and tail.
-    pub(crate) fn take_slab<K: CountOps>(&mut self) -> (r: (Vec<u8>, usize, usize, u8))
-        requires old(self).inv::<K>(), old(self).slabs@.len() == 0,
-        ensures ({
-            let cs = bool_counts::<K>(r.0@);
-            &&& bool_valid::<K>(r.0@) && bool_values::<K>(r.0@) == old(self).values::<K>()
-            &&& r.1 == counts_len(cs) && r.2 == cs.len() && r.3 == counts_tail::<K>(cs)
-        }),
-    {
-        proof {
-            lemma_pre_len(self.state.cs@);
-            lemma_vals_len(self.state.cs@, 0);
-        }
-        let ghost c0 = self.state.cs@;
-        let ghost cs0 = self.state.cs@;
-        let n0 = self.data.len();
-        self.state.finish::<K>(&mut self.data);
-        proof {
-            assert(self.state.cs@ =~= cs0 + self.state.cs@.skip(cs0.len() as int));
-            lemma_concat::<K>(cs0, self.state.cs@.skip(cs0.len() as int));
-            if old(self).state.cur_count > 0 {
-                let x = old(self).state.cur_count as u64;
-                K::axiom_enc(x, x, Seq::empty(), Seq::empty());
-                lemma_bytes_push::<K>(cs0, x);
-            }
-        }
-        let tail = (self.data.len() - n0) as u8;
-        let mut bytes = Vec::new();
-        core::mem::swap(&mut self.data, &mut bytes);
-        proof {
-            let x = old(self).state.cur_count as u64;
-            K::axiom_enc(x, x, Seq::empty(), Seq::empty());
-            lemma_bytes_push::<K>(c0, x);
-            lemma_finished_slab::<K>(self.state, bytes@);
-            assert(bslabs_values::<K>(Seq::<BSlab>::empty()) =~= Seq::<bool>::empty());
-            assert(old(self).values::<K>() =~= self.state.vals@);
-            if self.state.cs@.len() == 0 {
-                assert(bytes@.len() == n0 - n0);
-            }
-        }
-        (bytes, self.state.len, self.state.segments, tail)
-    }
 
-    /// Flush, and give the encoding: the bytes of
-    /// [`take_slab`](Self::take_slab) and no more, of an encoder that is
-    /// done with.
+    /// Flush, and give the encoding of the values written, of an encoder
+    /// that is done with.
     #[inline]
     pub(crate) fn into_bytes<K: CountOps>(self) -> (r: Vec<u8>)
         requires self.inv::<K>(), self.slabs@.len() == 0,

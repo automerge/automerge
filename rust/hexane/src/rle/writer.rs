@@ -127,13 +127,6 @@ pub(crate) fn merge_tail(w: WPos, prefix: usize, middle: usize, postfix: usize, 
     }
 }
 
-/// A slab's recorded length.
-#[inline(always)]
-pub(crate) fn slab_len_of(s: &Slab) -> (n: usize)
-    ensures n == slab_len(*s),
-{
-    s.len
-}
 
 /// A tail record for a merge that ignores it.
 #[inline(always)]

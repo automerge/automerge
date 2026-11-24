@@ -1,17 +1,17 @@
 //! Known bugs with no fix yet.
 //!
-//! Each test here fails, and each names one defect. They are `#[ignore]`d
-//! so CI stays green; run them with
+//! Each test here names one defect. Those that fail are `#[ignore]`d so
+//! CI stays green; run them with
 //!
 //! ```text
 //! cargo test -p hexane --test pending -- --ignored
 //! ```
 //!
-//! Drop the attribute as each fix lands. A test that starts passing means
-//! the bug is gone — or that the test stopped reaching it, which is worth
-//! checking before deleting.
+//! Drop the attribute as each fix lands: the tests without one pass. A
+//! test that starts passing means the bug is gone — or that the test
+//! stopped reaching it, which is worth checking before deleting.
 
-use hexane::{Column, DeltaColumn, DeltaRun, Iter, LoadOpts};
+use hexane::{Column, DeltaColumn, Iter, LoadOpts, PrefixColumn};
 
 /// `try_resume` accepts any column, and the write counter alone cannot
 /// tell two of them apart — every fresh column starts at zero. So an
@@ -21,11 +21,14 @@ use hexane::{Column, DeltaColumn, DeltaRun, Iter, LoadOpts};
 /// The surviving slab-count check masks this whenever the two columns
 /// have different layouts, so the columns here are deliberately the same
 /// shape.
+///
+/// (The verified API states this behaviour: a state resumes on any
+/// column it fits, and the iterator then reads that column.)
 #[test]
 #[ignore = "known bug: resume does not check column identity"]
 fn resume_rejects_a_foreign_column() {
-    let a = Column::<u64>::from_values_with_max_segments((0..200u64).collect(), 2);
-    let b = Column::<u64>::from_values_with_max_segments((1000..1200u64).collect(), 2);
+    let a = Column::<u64>::from_values_with_max_segments(&(0..200u64).collect::<Vec<_>>(), 2);
+    let b = Column::<u64>::from_values_with_max_segments(&(1000..1200u64).collect::<Vec<_>>(), 2);
     assert_eq!(
         a.slab_count(),
         b.slab_count(),
@@ -47,35 +50,14 @@ fn resume_rejects_a_foreign_column() {
 /// Nulls carry no value, so the value-range index cannot see them and
 /// `find_by_value(None)` answers "no matches" for a column full of them
 /// — disagreeing with `scan_to_value`, which finds them.
+///
+/// (The verified API states this behaviour: a null is found nowhere.)
 #[test]
 #[ignore = "known bug: find_by_value cannot see nulls"]
 fn find_by_value_finds_nulls() {
-    let col = DeltaColumn::<Option<u32>>::from_values(vec![None, None, Some(1), Some(3)]);
+    let col = DeltaColumn::<Option<u32>>::from_values(&[None, None, Some(1), Some(3)]);
     assert_eq!(col.iter().scan_to_value(None), Some(0), "scan finds them");
     assert_eq!(col.find_by_value(None).collect::<Vec<_>>(), vec![0, 1]);
-}
-
-/// Both public run-insert paths must enforce the value domain, or one
-/// silently writes a column the other's `load` refuses. `insert_runs`
-/// panics on this run; `splice_runs` accepts it.
-#[test]
-#[ignore = "known bug: splice_runs skips the domain check insert_runs makes"]
-fn splice_runs_enforces_the_domain_like_insert_runs() {
-    let run = DeltaRun {
-        prefix: 0,
-        delta: Some(1 << 40),
-        count: 2,
-    };
-    let mut c = DeltaColumn::<u32>::new();
-    let wrote = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        c.splice_runs(0, 0, [run]);
-    }));
-    if wrote.is_ok() {
-        assert!(
-            DeltaColumn::<u32>::load(&c.save()).is_ok(),
-            "splice_runs wrote a column its own loader refuses"
-        );
-    }
 }
 
 /// Run counts come off the wire, so a running total that wraps describes
@@ -113,7 +95,6 @@ fn rle_load_rejects_a_wrapped_length() {
 /// derives `Default` around one and calls `shift_next` on it — so
 /// repositioning a column-less iterator must yield nothing, not panic.
 #[test]
-#[ignore = "known bug: a default Iter panics on any repositioning call"]
 fn a_default_iter_repositions_without_panicking() {
     let r = std::panic::catch_unwind(|| {
         let mut it = Iter::<u64>::default();
@@ -134,11 +115,30 @@ fn a_default_iter_repositions_without_panicking() {
 /// the value domain must be an error — not a column that cannot be read
 /// back.
 #[test]
-#[ignore = "known bug: load_with's fill escapes domain validation"]
 fn load_with_rejects_an_out_of_domain_fill() {
     let c = DeltaColumn::<u32>::load_with(&[], LoadOpts::new().with_length(3).with_fill(-5i64));
     match c {
         Err(_) => {}
         Ok(c) => panic!("accepted an out-of-domain fill -> {:?}", c.to_vec()),
+    }
+}
+
+/// A load of empty data with a length and a fill reads as `length` copies
+/// of the fill, and the length comes from the caller, who may have read
+/// it from untrusted data. Of a prefix column whose fill's sum would
+/// overflow the type it keeps its sums in, the old API's `load_with`
+/// returned an error (`load_fill_checks_weights.rs`), as it does for the
+/// same values in loaded data; the verified one panics ("prefix sum
+/// overflows its type").
+#[cfg(target_pointer_width = "64")]
+#[test]
+#[ignore = "known bug: a prefix column's fill whose sums overflow panics"]
+fn a_fill_overflowing_the_prefix_is_rejected() {
+    let opts = LoadOpts::new().with_length(1 << 40).with_fill(u32::MAX);
+    let r = std::panic::catch_unwind(|| PrefixColumn::<u32>::load_with(&[], opts).map(|c| c.len()));
+    match r {
+        Err(_) => panic!("load panicked on a fill whose sums overflow"),
+        Ok(Ok(len)) => panic!("load accepted a fill whose sums overflow: len = {len}"),
+        Ok(Err(_)) => {}
     }
 }

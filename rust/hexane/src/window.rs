@@ -1,5 +1,5 @@
 //! The repositioning iterators' contract and the adapters built on it
-//! ([`crate::shift`]), verified with Verus.
+//! ([`Shiftable`](crate::Shiftable)), verified with Verus.
 //!
 //! An iterator, as the adapters see it (`Stream`), gives items that each
 //! stand for one or more values (`spans`) of a fixed sequence (`vals`),
@@ -17,18 +17,15 @@
 //! `Ranges`, over any iterator, run adapters included, which gives what
 //! stands for the values of each range in turn; and `Unshift`, which
 //! gives its lookahead and then what its inner iterator has left, and,
-//! over a unit iterator (`ItemPerValue`), after `shift(range)` exactly
-//! the values in `range`.
+//! over an iterator whose items each stand for one value, after
+//! `shift(range)` exactly the values in `range`.
 //!
-//! Trusted: that every iterator keeps the contract (`Stream`, `Window`;
-//! implemented in `shift` for every `Iterator` and every `Shiftable`),
-//! and is unit where it is `ItemPerValue` (what `Unshift::shift`
-//! requires) or a `Shiftable` that keeps the provided moves. The crate's
-//! own iterators move by their verified cores (`ICore::shift` and the
-//! prefix and delta versions), whose specifications are the contract's,
-//! and the run adapters by theirs (`ICore::shift_run`,
-//! `diter::d_shift_run`); the run adapters are not `ItemPerValue`, so an
-//! `Unshift` over one cannot be shifted.
+//! An iterator is given the contract (`Stream`, `Window`) by a view of it
+//! (`crate::verified::shift`'s `ShiftView`), whose model is the
+//! iterator's `Shiftable` specification, proved of each of the crate's
+//! iterators and by a client of its own: nothing here is trusted. The run
+//! adapters' items are not each one value, so an `Unshift` over one
+//! cannot be shifted.
 
 #[cfg(verus_keep_ghost)]
 use crate::cursor::lemma_concat_append;
@@ -36,6 +33,7 @@ use crate::cursor::lemma_concat_append;
 use crate::iter_core::{lemma_window_past, past, window};
 #[cfg(verus_keep_ghost)]
 use crate::rle::writer::concat;
+#[cfg(verus_keep_ghost)]
 use std::ops::Range;
 #[allow(unused_imports)]
 use vstd::prelude::*;
@@ -181,17 +179,6 @@ pub(crate) proof fn lemma_unit_state<S: Stream + ?Sized>(s: &S)
     lemma_flat_unit::<S>(s.items());
 }
 
-/// Moving `n + 1` items on a unit iterator moves `n + 1` values on.
-pub(crate) proof fn lemma_unit_take<S: Stream + ?Sized>(xs: Seq<S::Item>, n: int)
-    requires
-        S::unit(),
-        0 <= n <= xs.len(),
-    ensures
-        flat::<S>(xs.take(n)).len() == n,
-{
-    lemma_flat_unit::<S>(xs.take(n));
-}
-
 /// A `Shiftable` iterator: what it has left is the window `at()..end()`
 /// of its values, and it moves the window. Trusted, for every
 /// `Shiftable` (`shift`); its provided methods are proved below.
@@ -218,16 +205,6 @@ pub(crate) trait Window: Stream {
             final(self).vals() == old(self).vals(),
             final(self).at() == old(self).at(),
             final(self).end() == if end >= old(self).at() { end as int } else { old(self).at() },
-    ;
-
-    /// `Shiftable::advance_to`: advance so that the value at `target`
-    /// comes next; at or past it already, stay.
-    fn w_advance_to(&mut self, target: usize)
-        ensures
-            final(self).vals() == old(self).vals(),
-            final(self).left() == past(old(self).left(), target - old(self).at()),
-            target <= old(self).at() ==> final(self).at() == old(self).at(),
-            old(self).at() < target <= old(self).at() + old(self).left().len() ==> final(self).at() == target,
     ;
 
     /// `Shiftable::shift`: the window moves to `start..end`, only forwards.
@@ -266,174 +243,6 @@ pub(crate) trait Window: Stream {
 
 // ── Shiftable's provided methods ───────────────────────────────────────────
 
-/// `Shiftable::advance_to`: advance so that the value at `target` comes
-/// next; at or past it already, stay. Keeps `Window::w_advance_to`'s
-/// contract.
-#[inline]
-pub(crate) fn advance_to<W: Window + ?Sized>(w: &mut W, target: usize)
-    requires
-        W::unit(),
-    ensures
-        final(w).vals() == old(w).vals(),
-        final(w).left() == past(old(w).left(), target - old(w).at()),
-        target <= old(w).at() ==> final(w).at() == old(w).at(),
-        old(w).at() < target <= old(w).at() + old(w).left().len() ==> final(w).at() == target,
-{
-    proof {
-        lemma_unit_state::<W>(w);
-    }
-    let pos = w.w_pos();
-    if target > pos {
-        let ghost it = w.items();
-        w.s_nth(target - pos - 1);
-        proof {
-            lemma_unit_state::<W>(w);
-            if target - pos - 1 < it.len() {
-                lemma_unit_take::<W>(it, target - pos);
-            }
-        }
-    }
-}
-
-/// `Shiftable::advance_by`: move `amount` values on.
-#[inline]
-pub(crate) fn advance_by<W: Window + ?Sized>(w: &mut W, amount: usize)
-    requires
-        W::unit(),
-    ensures
-        final(w).vals() == old(w).vals(),
-        final(w).left() == past(old(w).left(), amount as int),
-        amount <= old(w).left().len() ==> final(w).at() == old(w).at() + amount,
-{
-    proof {
-        lemma_unit_state::<W>(w);
-    }
-    if amount > 0 {
-        let ghost o = w.left();
-        w.s_nth(amount - 1);
-        proof {
-            lemma_unit_state::<W>(w);
-            if amount <= o.len() {
-                lemma_unit_take::<W>(o, amount as int);
-            }
-            if amount > o.len() {
-                assert(w.left() =~= Seq::<W::Item>::empty());
-            }
-        }
-    }
-}
-
-/// `Shiftable::shift`: `set_max(end)`, then `advance_to(start)` (the
-/// iterator's own, which may be faster). Keeps `Window::w_shift`'s
-/// contract.
-#[inline]
-pub(crate) fn shift<W: Window + ?Sized>(w: &mut W, start: usize, end: usize)
-    ensures
-        final(w).vals() == old(w).vals(),
-        final(w).left() == window(
-            old(w).vals(),
-            if start <= old(w).at() { old(w).at() } else { start as int },
-            end as int,
-        ),
-        start <= old(w).at() ==> final(w).at() == old(w).at(),
-        old(w).at() < start <= end && start <= old(w).vals().len() ==> final(w).at() == start,
-{
-    let ghost (v, p) = (w.vals(), w.at());
-    w.w_set_max(end);
-    proof {
-        w.lemma_window();
-        w.lemma_left();
-        if end < p {
-            assert(window(v, p, p) =~= window(v, p, end as int));
-        }
-        if start > p {
-            lemma_window_past(v, p, end as int, start - p);
-        }
-    }
-    w.w_advance_to(start);
-}
-
-/// `Shiftable::shift_next`: `set_max(end)`, then the value at `start`.
-/// Keeps `Window::w_shift_next`'s contract.
-#[inline]
-pub(crate) fn shift_next<W: Window + ?Sized>(w: &mut W, start: usize, end: usize) -> (r: Option<W::Item>)
-    requires
-        W::unit(),
-        start >= old(w).at(),
-    ensures
-        final(w).vals() == old(w).vals(),
-        ({
-            let x = window(old(w).vals(), start as int, end as int);
-            &&& x.len() > 0 ==> {
-                &&& r == Some(x[0])
-                &&& final(w).left() == x.skip(1)
-                &&& final(w).at() == start + 1
-            }
-            &&& x.len() == 0 ==> r is None && final(w).left().len() == 0
-        }),
-{
-    let ghost (v, p) = (w.vals(), w.at());
-    w.w_set_max(end);
-    let ghost o1 = w.left();
-    proof {
-        w.lemma_window();
-        w.lemma_left();
-        lemma_unit_state::<W>(w);
-        if end < p {
-            assert(window(v, p, p) =~= window(v, p, end as int));
-        }
-        lemma_window_past(v, p, end as int, start - p);
-    }
-    let pos = w.w_pos();
-    let r = w.s_nth(start - pos);
-    proof {
-        lemma_unit_state::<W>(w);
-        if start - p < o1.len() {
-            lemma_unit_take::<W>(o1, start - p + 1);
-        }
-        let (x, n) = (window(v, start as int, end as int), start - p);
-        if n < o1.len() {
-            assert(x =~= o1.skip(n));
-            assert(x.skip(1) =~= o1.skip(n + 1));
-        }
-    }
-    r
-}
-
-/// `Shiftable::seek_to`: the value at `at`, moving past it; `None`, moving
-/// nowhere, if `at` is behind the iterator.
-#[inline]
-pub(crate) fn seek_to<W: Window + ?Sized>(w: &mut W, at: usize) -> (r: Option<W::Item>)
-    requires
-        W::unit(),
-    ensures
-        final(w).vals() == old(w).vals(),
-        at < old(w).at() ==> r is None && final(w).left() == old(w).left() && final(w).at() == old(w).at(),
-        at >= old(w).at() ==> {
-            let (o, k) = (old(w).left(), at - old(w).at());
-            &&& k < o.len() ==> r == Some(o[k]) && final(w).left() == o.skip(k + 1) && final(w).at() == at + 1
-            &&& k >= o.len() ==> r is None && final(w).left().len() == 0
-        },
-{
-    proof {
-        lemma_unit_state::<W>(w);
-    }
-    let pos = w.w_pos();
-    if at >= pos {
-        let ghost o = w.left();
-        let r = w.s_nth(at - pos);
-        proof {
-            lemma_unit_state::<W>(w);
-            if at - pos < o.len() {
-                lemma_unit_take::<W>(o, at - pos + 1);
-            }
-        }
-        r
-    } else {
-        None
-    }
-}
-
 /// `Shiftable::ranges`: the window emptied, so that the first `next`
 /// takes the first range.
 #[inline]
@@ -452,133 +261,11 @@ pub(crate) fn empty_window<W: Window + ?Sized>(w: &mut W)
 
 // ── Ranges ─────────────────────────────────────────────────────────────────
 
-/// The ranges a caller gives `Shiftable::ranges`: nothing is assumed of
-/// them; `given` is the ranges given so far, and `ended` that they ended.
-pub(crate) trait RangeList {
-    spec fn given(&self) -> Seq<Range<usize>>;
-
-    spec fn ended(&self) -> bool;
-
-    fn next_range(&mut self) -> (r: Option<Range<usize>>)
-        ensures
-            match r {
-                Some(x) => final(self).given() == old(self).given().push(x),
-                None => final(self).given() == old(self).given() && final(self).ended(),
-            },
-    ;
-}
-
 /// The values of each range of `rs`, in turn.
 pub open spec fn windows<V>(v: Seq<V>, rs: Seq<Range<usize>>) -> Seq<V> {
     concat(rs.map_values(|r: Range<usize>| window(v, r.start as int, r.end as int)))
 }
 
-/// What a `Ranges` gives: what is left of the window it is in, then the
-/// values of each range it takes, in turn. A range starting behind the
-/// iterator panics (`ranges_out_of_order`).
-pub(crate) open spec fn ranges_give<W: Window, L: RangeList>(w: W, l0: L, l: L) -> Seq<W::Item> {
-    w.left() + windows(w.vals(), l.given().skip(l0.given().len() as int))
-}
-
-
-/// `Ranges::next`: the next value of the window, or of the next range
-/// with any. With what it gives over the call (`ranges_give`, from the
-/// ranges it takes): the first, and the rest left.
-#[verifier::exec_allows_no_decreases_clause]
-pub(crate) fn ranges_next<W: Window, L: RangeList>(w: &mut W, l: &mut L) -> (r: Option<W::Item>)
-    ensures
-        final(w).vals() == old(w).vals(),
-        ({
-            let g = ranges_give(*old(w), *old(l), *final(l));
-            match r {
-                Some(x) => {
-                    let n = W::spans(x).len() as int;
-                    &&& 0 < n <= g.len()
-                    &&& W::spans(x) == g.take(n)
-                    &&& final(w).left() == g.skip(n)
-                },
-                None => g.len() == 0 && final(l).ended() && final(w).left().len() == 0,
-            }
-        }),
-{
-    let ghost (w0, l0) = (*w, *l);
-    loop
-        invariant
-            w0 == *old(w),
-            l0 == *old(l),
-            w.vals() == w0.vals(),
-            l0.given().len() <= l.given().len(),
-            l.given().subrange(0, l0.given().len() as int) == l0.given(),
-            ranges_give(w0, l0, *l) == w.left(),
-    {
-        let ghost (w1, l1) = (*w, *l);
-        proof {
-            w1.lemma_items();
-        }
-        if let Some(x) = w.s_next() {
-            proof {
-                // the first item stands for the first values left
-                w.lemma_items();
-                lemma_flat_first::<W>(w1.items());
-                assert(w1.items().skip(1) == w.items());
-                assert(W::spans(x).len() > 0) by {
-                    assert(x == w1.items()[0]);
-                }
-            }
-            return Some(x);
-        }
-        proof {
-            w.lemma_items();
-            assert(w1.items().map_values(|x: W::Item| W::spans(x)) =~= Seq::<Seq<W::Item>>::empty());
-            assert(w.items().map_values(|x: W::Item| W::spans(x)) =~= Seq::<Seq<W::Item>>::empty());
-        }
-        let ghost t = l1.given().skip(l0.given().len() as int);
-        let r = match l.next_range() {
-            Some(r) => r,
-            None => {
-                proof {
-                    assert(l.given().skip(l0.given().len() as int) =~= t);
-                }
-                return None;
-            },
-        };
-        if r.start < w.w_pos() {
-            ranges_out_of_order();
-        }
-        w.w_shift(r.start, r.end);
-        proof {
-            let v = w0.vals();
-            let t1 = l.given().skip(l0.given().len() as int);
-            assert(t1 =~= t.push(r));
-            assert(t1.map_values(|r: Range<usize>| window(v, r.start as int, r.end as int)) =~= t.map_values(
-                |r: Range<usize>| window(v, r.start as int, r.end as int),
-            ) + seq![window(v, r.start as int, r.end as int)]);
-            lemma_concat_append(
-                t.map_values(|r: Range<usize>| window(v, r.start as int, r.end as int)),
-                seq![window(v, r.start as int, r.end as int)],
-            );
-            assert(concat(seq![window(v, r.start as int, r.end as int)]) =~= window(
-                v,
-                r.start as int,
-                r.end as int,
-            )) by {
-                let one = seq![window(v, r.start as int, r.end as int)];
-                assert(one.drop_last() =~= Seq::<Seq<W::Item>>::empty());
-                assert(concat(Seq::<Seq<W::Item>>::empty()) == Seq::<W::Item>::empty());
-                assert(concat(one) == concat(one.drop_last()) + one.last());
-            }
-            // nothing was left before the range: all of it is the range's
-            assert(w1.left().len() == 0);
-            assert(w0.left() + windows(v, t) =~= Seq::<W::Item>::empty());
-            assert(ranges_give(w0, l0, *l) =~= (w0.left() + windows(v, t)) + window(
-                v,
-                r.start as int,
-                r.end as int,
-            ));
-            assert(l.given().subrange(0, l0.given().len() as int) =~= l0.given());
-        }
-    }
-}
 
 // ── Unshift ────────────────────────────────────────────────────────────────
 
@@ -745,7 +432,7 @@ pub(crate) fn u_nth<S: Stream>(inner: &mut S, next: &mut Option<S::Item>, hidden
 }
 
 /// `Unshift::shift`, over an iterator whose items each stand for one
-/// value (`ItemPerValue`): the lookahead becomes the value at `start`,
+/// value: the lookahead becomes the value at `start`,
 /// and the window ends at `end`. The lookahead's own value may start the
 /// range, and is then kept (hidden while the range is empty, for a later
 /// one starting there); a range further back panics

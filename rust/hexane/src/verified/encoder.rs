@@ -2,9 +2,8 @@
 //! verified with Verus.
 //!
 //! It runs the cores that a column's `remap` runs (`rle::enc`,
-//! `bool_enc`) and that [`RleEncoder`](crate::encoder::RleEncoder) and
-//! [`BoolEncoder`](crate::encoder::BoolEncoder) run, through the model's
-//! `Streams`, and nothing is assumed that a column does not assume.
+//! `bool_enc`), through the model's `Streams`, and nothing is assumed
+//! that a column does not assume.
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each
@@ -43,10 +42,8 @@ use imp::*;
 verus! {
 
 /// An encoder of values of type `V`: it takes values one after another
-/// and gives the saved column of them, without a column in between, as
-/// [`RleEncoder`](crate::encoder::RleEncoder) and
-/// [`BoolEncoder`](crate::encoder::BoolEncoder) do. Its numbers are
-/// written with the codec `C`.
+/// and gives the saved column of them, without a column in between. Its
+/// numbers are written with the codec `C`.
 ///
 /// It is specified by the values it has been given (`enc@`, each as a
 /// column has it), and what it saves is specified as a column's save
@@ -140,14 +137,8 @@ impl<'a, V: ColumnValueRef<C>, C: Codec> Encoder<'a, V, C> {
     /// them), and [`into_column`](Self::into_column) builds a column of
     /// that budget from them, without reading the bytes again.
     ///
-    /// `Column`'s encoder gets a budget from the setter
-    /// [`EncoderApi::max_segments`](crate::EncoderApi::max_segments),
-    /// which has to be called before anything is appended, or from the
-    /// builder [`EncoderApi::with_max_segments`](crate::EncoderApi::with_max_segments):
-    /// what `RleEncoder::new().with_max_segments(max)` gives there, this
-    /// gives here. It requires a budget of at least 2, as a column's
-    /// [`with_max_segments`](Column::with_max_segments) does;
-    /// the old ones panic on less.
+    /// It requires a budget of at least 2, as a column's
+    /// [`with_max_segments`](Column::with_max_segments) does.
     #[inline(always)]
     pub fn with_max_segments(max_segments: usize) -> (r: Self)
         requires
@@ -162,9 +153,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec> Encoder<'a, V, C> {
 
     /// An encoder that has been given nothing, with the segment budget
     /// of a column that was made without one, which is 64:
-    /// [`with_max_segments`](Self::with_max_segments) of that. It is
-    /// what [`EncoderApi::with_segments`](crate::EncoderApi::with_segments)
-    /// gives of `Column`'s encoder.
+    /// [`with_max_segments`](Self::with_max_segments) of that.
     #[inline(always)]
     pub fn with_segments() -> (r: Self)
         ensures
@@ -316,9 +305,8 @@ impl<'a, V: ColumnValueRef<C>, C: Codec> Encoder<'a, V, C> {
     /// [`save_to_unless`](Column::save_to_unless). One with a
     /// budget writes nothing only if every value is `value`, and may
     /// write the values though every one is: it does once it has cut a
-    /// slab, as [`EncoderApi::save_to_unless`](crate::EncoderApi::save_to_unless)
-    /// does. When it cuts is tested against the old encoder and not
-    /// proved: with a budget of 2 or 3, equal values other than `bool`
+    /// slab. When it cuts is tested (against hexane's earlier encoder,
+    /// whose digests the tests keep) and not proved: with a budget of 2 or 3, equal values other than `bool`
     /// given in more than one call are cut apart, and are then written;
     /// given in one call, or of `bool`, or with a budget of 4 or more,
     /// they were not cut in what was tried.
@@ -420,8 +408,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec> Encoder<'a, V, C> {
     /// ones. `f` has to accept every value given, and need accept no
     /// other. If `f` panics, `out` is as it was.
     ///
-    /// It is [`RleEncoder::save_to_and_remap`](crate::encoder::RleEncoder::save_to_and_remap),
-    /// and here an encoder of `bool` has it too. The values are read
+    /// An encoder of `bool` has it too. The values are read
     /// from what the encoder has written: no column is made of them,
     /// as [`into_column`](Self::into_column) and then a column's
     /// [`remap`](Column::remap) would make two.
@@ -456,8 +443,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec> Encoder<'a, V, C> {
     /// If nothing was written, `f` gave `unless` for every value given.
     /// And if `f` can give nothing but `unless` for the values given,
     /// nothing is written, whether the encoder has a segment budget or
-    /// not: what `f` gives goes to an encoder without one. It is
-    /// [`RleEncoder::save_to_unless_and_remap`](crate::encoder::RleEncoder::save_to_unless_and_remap).
+    /// not: what `f` gives goes to an encoder without one.
     #[inline(always)]
     pub fn save_to_unless_and_remap<F: Fn(V) -> V>(self, out: &mut Vec<u8>, unless: Get<'a, V>, f: F) -> (r: Range<
         usize,
@@ -491,8 +477,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec> Encoder<'a, V, C> {
     /// With a segment budget
     /// ([`with_max_segments`](Self::with_max_segments)) the column is
     /// built from the slabs the encoder cut, and has that budget.
-    /// Without one the values are saved and the bytes loaded, as
-    /// [`EncoderApi::into_column`](crate::EncoderApi::into_column) does.
+    /// Without one the values are saved and the bytes loaded.
     ///
     /// Panics if the values are more than a column counts (`usize::MAX
     /// - 3`), or, without a budget, if they save to 4 GiB or more: a

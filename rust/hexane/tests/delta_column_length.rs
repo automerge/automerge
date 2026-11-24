@@ -12,14 +12,13 @@ use hexane::{Column, DeltaColumn, DeltaRun, PackError};
 /// a 1 and a -1 between them: values 0 and 1, more than `i64::MAX` items.
 fn long_bytes() -> Vec<u8> {
     let mut col = Column::<i64>::new();
-    {
-        let mut e = col.edit();
-        e.insert_run(0i64, 1 << 62);
-        e.insert(1i64);
-        e.insert_run(0i64, 1 << 62);
-        e.insert(-1i64);
-        e.insert_run(0i64, 1 << 62);
-    }
+    let mut e = col.edit();
+    e.insert_run(0, 1 << 62);
+    e.insert(1);
+    e.insert_run(0, 1 << 62);
+    e.insert(-1);
+    e.insert_run(0, 1 << 62);
+    e.finish();
     col.save()
 }
 
@@ -39,7 +38,9 @@ fn load_rejects_more_than_i64_max_items() {
 #[test]
 fn load_accepts_i64_max_items() {
     let mut col = Column::<i64>::new();
-    col.edit().insert_run(0i64, i64::MAX as usize);
+    let mut e = col.edit();
+    e.insert_run(0, i64::MAX as usize);
+    e.finish();
     let c = DeltaColumn::<i64>::load(&col.save()).unwrap();
     assert_eq!(c.len(), i64::MAX as usize);
 }
@@ -53,7 +54,7 @@ fn splice_past_i64_max_items_panics() {
         delta: Some(delta),
         count,
     };
-    c.splice_runs(0, 0, [run(0, 0, 1 << 62)]);
+    c.splice_runs(0, 0, &[run(0, 0, 1 << 62)]);
     // a 1, then 2^62 more of it: values 0 and 1, 2^63 + 1 items
-    c.splice_runs(1 << 62, 0, [run(0, 1, 1), run(1, 0, 1 << 62)]);
+    c.splice_runs(1 << 62, 0, &[run(0, 1, 1), run(1, 0, 1 << 62)]);
 }

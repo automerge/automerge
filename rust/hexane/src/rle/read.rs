@@ -1426,16 +1426,10 @@ pub(crate) proof fn lemma_segments_le<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>)
     }
 }
 
-/// What load needs of a slab: its value count, its segment count, and
-/// its tail.
+/// What load needs of a slab: its value count and its segment count.
 pub(crate) struct Summary {
     pub(crate) len: usize,
     pub(crate) segments: usize,
-    /// byte length of the last group
-    pub(crate) tail_bytes: u32,
-    /// byte length of the last value, if the last group is a literal;
-    /// else 0
-    pub(crate) lit_tail: u32,
 }
 
 /// The last group fits a slab's tail record: under 4 GiB.
@@ -1452,8 +1446,6 @@ pub(crate) fn validate<'a, O: RleOps<'a>>(data: &'a [u8]) -> (r: Result<Summary,
                 &&& parses::<O>(gs, data@) && tail_fits::<O>(gs)
                 &&& s.len == groups_len(gs)
                 &&& s.segments == groups_segments(gs)
-                &&& s.tail_bytes == tail_bytes_of::<O>(gs)
-                &&& s.lit_tail == lit_tail_of::<O>(gs)
             },
             Err(_) => forall|gs: Seq<Group<O::V>>| #[trigger] parses::<O>(gs, data@) ==> !tail_fits::<O>(gs),
         },
@@ -1462,7 +1454,6 @@ pub(crate) fn validate<'a, O: RleOps<'a>>(data: &'a [u8]) -> (r: Result<Summary,
     let mut segments: usize = 0;
     // where the last group, or the literal being read, starts
     let mut start: usize = 0;
-    let mut lit_tail: usize = 0;
     loop
         invariant
             rd.inv(), rd.data() == data@,
@@ -1471,7 +1462,6 @@ pub(crate) fn validate<'a, O: RleOps<'a>>(data: &'a [u8]) -> (r: Result<Summary,
             rd.in_lit() ==> start == groups_bytes::<O>(rd.groups()).len(),
             !rd.in_lit() && rd.groups().len() > 0 ==> start == groups_bytes::<O>(rd.groups().drop_last()).len(),
             !rd.in_lit() && rd.groups().len() == 0 ==> start == 0,
-            !rd.in_lit() ==> lit_tail == lit_tail_of::<O>(rd.groups()),
         decreases data.len() - rd.spec_pos(),
     {
         let ghost r0 = rd;
@@ -1514,12 +1504,7 @@ pub(crate) fn validate<'a, O: RleOps<'a>>(data: &'a [u8]) -> (r: Result<Summary,
                         }
                     }
                 }
-                return Ok(Summary {
-                    len,
-                    segments,
-                    tail_bytes: (data.len() - start) as u32,
-                    lit_tail: lit_tail as u32,
-                });
+                return Ok(Summary { len, segments });
             },
             Ok(Some(seg)) => {
                 proof {
@@ -1537,19 +1522,17 @@ pub(crate) fn validate<'a, O: RleOps<'a>>(data: &'a [u8]) -> (r: Result<Summary,
                         }
                         segments += 1;
                         start = at;
-                        lit_tail = 0;
                     },
                     Seg::LitHead { .. } => {
                         start = at;
                     },
-                    Seg::Lit { bytes, .. } => {
+                    Seg::Lit { .. } => {
                         proof {
                             if !rd.in_lit() {
                                 assert(rd.groups().drop_last() =~= r0.groups());
                             }
                         }
                         segments += 1;
-                        lit_tail = bytes;
                     },
                 }
             },

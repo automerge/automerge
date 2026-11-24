@@ -5,9 +5,10 @@
 //! (`DeltaDecoder::<u32>` on a delta of -1 gives 4294967295). automerge
 //! runs them over the bytes of documents it loads. `try_decoder` and
 //! `DeltaDecoder::try_new` check the bytes first, as `Column::load` does,
-//! and return an error instead.
+//! and return an error instead. (`decoder` and `DeltaDecoder::new` now
+//! require bytes that are a saved column.)
 
-use hexane::{Column, ColumnValueRef, DeltaColumn, DeltaDecoder, DeltaValue};
+use hexane::{Column, ColumnValueRef, DeltaColumn, DeltaDecoder, DeltaValue, Get};
 
 fn next(seed: &mut u64) -> u64 {
     *seed ^= *seed << 13;
@@ -45,9 +46,9 @@ fn malformed_bytes_are_an_error() {
     for bytes in [&[0x02, 0xff][..], &[0x02, 0x80], &[0x05, 0x01, 0x80]] {
         assert!(hexane::try_decoder::<bool>(bytes).is_err(), "{bytes:x?}");
     }
-    assert!(hexane::leb128::try_decoder::<u64>(&[0x05]).is_err());
+    assert!(hexane::leb128::Decoder::<u64>::try_new(&[0x05]).is_err());
     #[cfg(feature = "bijou64")]
-    assert!(hexane::bijou::try_decoder::<u64>(&[0x05]).is_err());
+    assert!(hexane::bijou::Decoder::<u64>::try_new(&[0x05]).is_err());
 }
 
 #[test]
@@ -76,7 +77,7 @@ fn deltas_out_of_the_domain_are_an_error() {
     assert!(DeltaDecoder::<i64>::try_new(&two_max).is_err());
     assert!(DeltaDecoder::<Option<i64>>::try_new(&two_max).is_err());
     // big deltas whose running sums fit are fine
-    let fits = hexane::DeltaEncoder::<i64>::encode(vec![i64::MAX, 0, i64::MAX, 5]);
+    let fits = hexane::DeltaEncoder::<i64>::encode([i64::MAX, 0, i64::MAX, 5]);
     assert_eq!(
         DeltaDecoder::<i64>::try_new(&fits)
             .unwrap()
@@ -90,7 +91,7 @@ fn deltas_out_of_the_domain_are_an_error() {
 fn agrees_with_load<T>(bytes: &[u8])
 where
     T: ColumnValueRef + std::fmt::Debug,
-    for<'a> T::Get<'a>: PartialEq<T::Get<'a>> + std::fmt::Debug,
+    for<'a> Get<'a, T>: PartialEq + std::fmt::Debug,
 {
     let loaded = Column::<T>::load(bytes);
     let checked = hexane::try_decoder::<T>(bytes);
@@ -167,7 +168,8 @@ fn checked_decoders_agree_with_load() {
             mutants(&mut seed, col.save(), &mut cases);
             let col: Column<bool> = vals.iter().map(|&v| v % 2 == 0).collect();
             mutants(&mut seed, col.save(), &mut cases);
-            let col: Column<String> = vals.iter().map(|v| v.to_string()).collect();
+            let strs: Vec<String> = vals.iter().map(|v| v.to_string()).collect();
+            let col: Column<String> = strs.iter().map(String::as_str).collect();
             mutants(&mut seed, col.save(), &mut cases);
             let col: DeltaColumn<i64> = vals.iter().map(|&v| v as i64).collect();
             mutants(&mut seed, col.save(), &mut cases);

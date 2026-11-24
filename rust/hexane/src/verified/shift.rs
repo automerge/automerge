@@ -1,15 +1,13 @@
-//! Repositioning the verified iterators, as the old API's `Shiftable`
-//! repositions its own: the trait [`Shiftable`], and the adapters
-//! [`Unshift`] (a lookahead) and [`Ranges`] (several
-//! windows, one after another).
+//! Repositioning the iterators: the trait [`Shiftable`], and the adapters
+//! [`Unshift`] (a lookahead) and [`Ranges`] (several windows, one after
+//! another).
 //!
 //! The adapters are `window.rs`'s, which are proved against its model of
-//! an iterator (its traits `Stream` and `Window`). Every `Iterator` has
-//! that model by a trusted bridge, for the old API. A verified iterator
-//! is given it instead by a view of it that is no iterator
-//! (`ShiftView`), whose model is the iterator's `Shiftable`
-//! specification, proved of each iterator here: nothing trusted stands
-//! between the adapters and the iterator.
+//! an iterator (its traits `Stream` and `Window`). An iterator is given
+//! that model by a view of it that is no iterator (`ShiftView`), whose
+//! model is the iterator's `Shiftable` specification, proved of each
+//! iterator here: nothing trusted stands between the adapters and the
+//! iterator.
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each
@@ -44,12 +42,10 @@ pub(crate) use imp::{lemma_concat_one, lemma_run_units, lemma_svs_inj};
 
 verus! {
 
-/// A verified iterator that can be repositioned, as the old API's
-/// [`Shiftable`](crate::Shiftable) can. Hexane's verified iterators are;
-/// and a client's own iterator may be, as it may implement `Shiftable`.
-/// Its laws are this trait's: a client checked by Verus proves them, and
-/// a client in plain Rust promises them, as it does an old API trait's
-/// documented contract. Hexane's adapters ([`Unshift`],
+/// An iterator that can be repositioned. Hexane's iterators are; and a
+/// client's own iterator may be, as it may implement `Shiftable`. Its
+/// laws are this trait's: a client checked by Verus proves them, and a
+/// client in plain Rust promises them. Hexane's adapters ([`Unshift`],
 /// [`Ranges`]) are proved of any iterator that keeps them.
 ///
 /// What a specification says of one: it ranges over values, one per
@@ -268,8 +264,7 @@ pub trait Shiftable: Iterator + Sized {
 
 // ── The adapters ───────────────────────────────────────────────────────────
 
-/// A verified iterator with a lookahead, as the old API's
-/// [`Unshift`](crate::Unshift) is: the item it gives next can be looked
+/// An iterator with a lookahead: the item it gives next can be looked
 /// at first ([`peek`](Self::peek)). [`Unshift::new`] makes one
 /// of any [`Shiftable`] iterator, and [`Iter::unshift`] of a
 /// column's.
@@ -319,7 +314,7 @@ impl<I: Shiftable> Unshift<I> {
     ///
     /// # Panics
     ///
-    /// If `range` starts further back, as the old API's does.
+    /// If `range` starts further back.
     #[inline(always)]
     pub fn shift(&mut self, range: Range<usize>)
         requires
@@ -396,8 +391,8 @@ impl<I: Shiftable> Iterator for Unshift<I> {
     }
 }
 
-/// The values of several windows of a verified iterator, one window
-/// after another, as the old API's [`Ranges`](crate::Ranges) gives them:
+/// The values of several windows of an iterator, one window after
+/// another:
 /// [`Ranges::new`] makes one of any [`Shiftable`] iterator,
 /// and [`Iter::ranges`] of a column's.
 ///
@@ -428,8 +423,7 @@ impl<'r, I: Shiftable> Ranges<'r, I> {
     ///
     /// # Panics
     ///
-    /// When it comes to a range that starts before where it stands, as
-    /// the old API's `Ranges` does.
+    /// When it comes to a range that starts before where it stands.
     #[inline(always)]
     pub fn new(iter: I, ranges: &'r [Range<usize>]) -> (r: Self)
         ensures
@@ -623,8 +617,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
     }
 
     /// A lookahead: the iterator wrapped so that the value it gives next
-    /// can be looked at first ([`Unshift::peek`]), as the old
-    /// API's `Shiftable::unshift` gives.
+    /// can be looked at first ([`Unshift::peek`]).
     #[inline(always)]
     pub fn unshift(self) -> (r: Unshift<Self>)
         ensures
@@ -635,7 +628,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
     }
 
     /// The values of each of `ranges` of the column, one range after
-    /// another, as the old API's `Shiftable::ranges` gives them (what is
+    /// another (what is
     /// left of the iterator's own window is dropped). The ranges ascend
     /// and do not overlap (they may touch), and start where the iterator
     /// stands or later.
@@ -788,8 +781,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Runs<'a, V, C, K> {
     }
 
     /// A lookahead: the runs wrapped so that the run they give next can
-    /// be looked at first ([`Unshift::peek`]), as the old API's
-    /// `Shiftable::unshift` gives. (It cannot be moved to a window: its
+    /// be looked at first ([`Unshift::peek`]). (It cannot be moved to a window: its
     /// items are not each one value.)
     #[inline(always)]
     pub fn unshift(self) -> (r: Unshift<Self>)
@@ -801,7 +793,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Runs<'a, V, C, K> {
     }
 
     /// The runs of each of `ranges` of the column, one range after
-    /// another, as the old API's `Shiftable::ranges` gives them: a run
+    /// another: a run
     /// that crosses the edge of a range is cut there. The ranges ascend
     /// and do not overlap (they may touch), and start where the iterator
     /// stands or later.

@@ -340,23 +340,6 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
         s.data
     }
 
-    /// Flush, and take what was written since the last cut as one slab:
-    /// all the values if there was no cut.
-    pub(crate) fn take_slab(&mut self) -> (s: Slab)
-        requires old(self).inv(),
-        ensures
-            final(self).inv(), final(self).slabs@ == old(self).slabs@,
-            RleModel::<L>::ok(s), RleModel::<L>::vals(s) == lift_seq::<L>(old(self).cur@),
-            old(self).slabs@.len() == 0 ==> RleModel::<L>::vals(s) == old(self).values(),
-    {
-        proof {
-            lemma_vals_unit::<RleModel<L>>(arbitrary());
-            assert(Seq::<VOf<'static, L>>::empty() + lift_seq::<L>(old(self).cur@) =~= lift_seq::<L>(old(self).cur@));
-        }
-        let s = self.seal(false);
-        self.len = self.len_flushed;
-        s
-    }
 
     /// Flush, and take every slab: those cut, then the last. Their item
     /// count is the encoder's `len`.
@@ -446,7 +429,7 @@ impl<'a, L> crate::remap::Encodes<RleModel<L>> for REncoder<'a, L> where L: for<
 
 /// The RLE writer appending to a caller's buffer, after the bytes the
 /// buffer held when the first value came (`head`): `encode_to` and
-/// `RleEncoderState`.
+/// `EncoderState`.
 pub struct RStream<'a, L: WriteOps<'a>> {
     pub(crate) state: State<'a, L>,
     /// segments accounted

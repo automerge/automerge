@@ -1,6 +1,6 @@
 //! `PrefixColumn::load_iter` returned a `PrefixColumnLoadIter<'a, T>`,
 //! whose codec is the default, so a column with another codec was decoded
-//! as LEB128.
+//! as LEB128. It now returns a `ColumnLoadIter` of the column's codec.
 #![cfg(feature = "bijou64")]
 
 use hexane::{Bijou64, LoadOpts, PrefixColumn};
@@ -9,7 +9,7 @@ use hexane::{Bijou64, LoadOpts, PrefixColumn};
 fn load_iter_decodes_with_the_columns_codec() {
     // values of more than one byte, which the codecs encode differently
     let values: Vec<u64> = (0..1000).map(|i| i * 1000).collect();
-    let bytes = PrefixColumn::<u64, Bijou64>::from_values(values.clone()).save();
+    let bytes = PrefixColumn::<u64, Bijou64>::from_values(&values).save();
     let col = PrefixColumn::<u64, Bijou64>::load_iter(&bytes, LoadOpts::new())
         .finalize()
         .unwrap();

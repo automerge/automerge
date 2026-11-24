@@ -1295,7 +1295,7 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
         }
         if del == 0 {
             // runs of no values, and none deleted: the column is left as
-            // it is, as by the old API
+            // it is
             let mut i: usize = 0;
             while i < runs.len() && runs[i].count == 0
                 invariant
@@ -2012,7 +2012,7 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
 
     /// The column a load fills: `len` values after 0, each `fill` more
     /// than the one before it, or `len` nulls. Built as
-    /// [`DeltaColumn`](crate::DeltaColumn) builds it: one slab of the
+    /// [`DeltaColumn`] builds it: one slab of the
     /// fill, weighed and checked as a loaded slab is.
     pub(super) fn filled(len: usize, fill: T::Fill, max_segments: usize) -> (r: Result<Self, PackError>)
         requires
@@ -2349,47 +2349,27 @@ impl<T: DeltaValue<C>, C: Codec> std::fmt::Debug for DeltaColumn<T, C> {
 #[cfg(test)]
 mod tests {
     use super::super::{VDelta, VDeltaNum};
-    use crate::DeltaValue;
 
-    /// The verified conversions are the old API's (`DeltaValue`), and
-    /// so are the bounds of what fits.
-    fn agrees<T>(samples: &[T])
+    /// The conversions, and the bounds of what fits (`lo..=hi`, which are
+    /// those hexane has always had): a value fits as itself and
+    /// comes back as itself, and a null is none.
+    fn converts<T>(lo: i64, hi: i64, samples: &[T])
     where
-        T: VDeltaNum + DeltaValue + std::fmt::Debug + PartialEq,
-        Option<T>: DeltaValue + std::fmt::Debug + PartialEq,
+        T: VDeltaNum + std::fmt::Debug + PartialEq + Copy,
     {
-        assert_eq!(<T as VDeltaNum>::lo(), <T as DeltaValue>::MIN_I64);
-        assert_eq!(<T as VDeltaNum>::hi(), <T as DeltaValue>::MAX_I64);
-        assert_eq!(<T as VDelta>::lo(), <T as DeltaValue>::MIN_I64);
-        assert_eq!(<T as VDelta>::hi(), <T as DeltaValue>::MAX_I64);
+        assert_eq!((<T as VDeltaNum>::lo(), <T as VDeltaNum>::hi()), (lo, hi));
+        assert_eq!((<T as VDelta>::lo(), <T as VDelta>::hi()), (lo, hi));
         assert_eq!(
-            <Option<T> as VDelta>::lo(),
-            <Option<T> as DeltaValue>::MIN_I64
+            (<Option<T> as VDelta>::lo(), <Option<T> as VDelta>::hi()),
+            (lo, hi)
         );
-        assert_eq!(
-            <Option<T> as VDelta>::hi(),
-            <Option<T> as DeltaValue>::MAX_I64
-        );
-        assert_eq!(
-            <Option<T> as VDelta>::to_i64(None),
-            DeltaValue::to_i64(None::<T>)
-        );
-        assert_eq!(
-            <Option<T> as VDelta>::from_i64(None),
-            <Option<T> as DeltaValue>::null_value()
-        );
+        assert_eq!(<Option<T> as VDelta>::to_i64(None), None);
+        assert_eq!(<Option<T> as VDelta>::from_i64(None), None);
         for &v in samples {
-            let n = DeltaValue::try_to_i64(v).expect("a sample that fits");
-            assert_eq!(<T as VDeltaNum>::to_i64(v), n);
-            assert_eq!(<T as VDelta>::to_i64(v), DeltaValue::to_i64(v));
-            assert_eq!(
-                <Option<T> as VDelta>::to_i64(Some(v)),
-                DeltaValue::to_i64(Some(v))
-            );
-            assert_eq!(
-                <T as VDeltaNum>::from_i64(n),
-                <T as DeltaValue>::from_i64(n)
-            );
+            let n = <T as VDeltaNum>::to_i64(v);
+            assert!(lo <= n && n <= hi, "{v:?}");
+            assert_eq!(<T as VDelta>::to_i64(v), Some(n));
+            assert_eq!(<Option<T> as VDelta>::to_i64(Some(v)), Some(n));
             assert_eq!(<T as VDeltaNum>::from_i64(n), v);
             assert_eq!(<T as VDelta>::from_i64(Some(n)), v);
             assert_eq!(<Option<T> as VDelta>::from_i64(Some(n)), Some(v));
@@ -2397,16 +2377,28 @@ mod tests {
     }
 
     #[test]
-    fn conversions_agree_with_the_old_api() {
-        agrees::<u32>(&[0, 1, 77, u32::MAX - 1, u32::MAX]);
-        agrees::<u64>(&[0, 1, 1 << 40, i64::MAX as u64 - 1, i64::MAX as u64]);
-        agrees::<i32>(&[i32::MIN, i32::MIN + 1, -1, 0, 1, i32::MAX]);
-        agrees::<i64>(&[i64::MIN, i64::MIN + 1, -1, 0, 1, i64::MAX]);
+    fn conversions_and_bounds() {
+        converts::<u32>(0, u32::MAX as i64, &[0, 1, 77, u32::MAX - 1, u32::MAX]);
+        converts::<u64>(
+            0,
+            i64::MAX,
+            &[0, 1, 1 << 40, i64::MAX as u64 - 1, i64::MAX as u64],
+        );
+        converts::<i32>(
+            i32::MIN as i64,
+            i32::MAX as i64,
+            &[i32::MIN, i32::MIN + 1, -1, 0, 1, i32::MAX],
+        );
+        converts::<i64>(
+            i64::MIN,
+            i64::MAX,
+            &[i64::MIN, i64::MIN + 1, -1, 0, 1, i64::MAX],
+        );
         let top = if usize::BITS >= 64 {
             i64::MAX as usize
         } else {
             usize::MAX
         };
-        agrees::<usize>(&[0, 1, 4096, top - 1, top]);
+        converts::<usize>(0, top as i64, &[0, 1, 4096, top - 1, top]);
     }
 }

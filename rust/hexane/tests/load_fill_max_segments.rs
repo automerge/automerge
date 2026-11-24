@@ -17,7 +17,7 @@ fn a_filled_load_keeps_the_segment_budget() {
     assert_eq!(widest(filled.slab_segments()), 4);
 
     // the same values loaded from bytes, for comparison
-    let bytes = Column::<Option<u64>>::from_values(vec![None; 10]).save();
+    let bytes = Column::<Option<u64>>::from_values(&[None; 10]).save();
     let mut loaded = Column::<Option<u64>>::load_with(&bytes, opts()).unwrap();
     loaded.splice(0, 0, (0..200u64).map(Some));
     assert_eq!(filled.slab_segments(), loaded.slab_segments());
@@ -28,5 +28,5 @@ fn a_filled_load_keeps_the_segment_budget() {
 
     let mut prefix = PrefixColumn::<bool>::load_with(&[], opts().with_fill(false)).unwrap();
     prefix.splice(0, 0, (0..200).map(|i| i % 2 == 0));
-    assert!(widest(prefix.values().slab_segments()) <= 4);
+    assert!(widest(prefix.slab_segments()) <= 4);
 }

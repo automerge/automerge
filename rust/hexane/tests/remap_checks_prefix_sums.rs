@@ -1,15 +1,14 @@
 //! `Column::remap` builds a new column from the function's values, and a
-//! column with a prefix weight function checks that its sums fit its
-//! prefix type, as a load or an edit does: a remap that would overflow
-//! them panics rather than leave wrapped sums.
+//! prefix column checks that its sums fit the type it keeps them in, as
+//! a load or an edit does: a remap that would overflow them panics rather
+//! than leave wrapped sums.
 //!
 //! (The column is longer than a 32-bit `usize` counts.)
 #![cfg(target_pointer_width = "64")]
 
-use hexane::prefix::PrefixWeightFn;
-use hexane::{Column, Leb128, Run};
+use hexane::{PrefixColumn, Run};
 
-type Col = Column<u32, Leb128, PrefixWeightFn<u32>>;
+type Col = PrefixColumn<u32>;
 
 fn run(value: u32, count: usize) -> Run<u32> {
     Run { count, value }

@@ -61,7 +61,7 @@ macro_rules! v1_insert {
             let v = initial_values();
             b.counter(ItemsCount::new((OPS * $k) as u64))
                 .bench_local(|| {
-                    let mut c = Column::<u64>::from_values(v.clone());
+                    let mut c = Column::<u64>::from_values(&v);
                     let mut rng = SmallRng::seed_from_u64(0x1234);
                     for _ in 0..OPS {
                         let pos = rng.random_range(0..=c.len());
@@ -81,7 +81,7 @@ macro_rules! v1_delete {
             let v = initial_values();
             b.counter(ItemsCount::new((OPS * $k) as u64))
                 .bench_local(|| {
-                    let mut c = Column::<u64>::from_values(v.clone());
+                    let mut c = Column::<u64>::from_values(&v);
                     let mut rng = SmallRng::seed_from_u64(0x1234);
                     for _ in 0..OPS {
                         let len = c.len();
@@ -104,7 +104,7 @@ macro_rules! v1_replace {
             let v = initial_values();
             b.counter(ItemsCount::new((OPS * $k) as u64))
                 .bench_local(|| {
-                    let mut c = Column::<u64>::from_values(v.clone());
+                    let mut c = Column::<u64>::from_values(&v);
                     let mut rng = SmallRng::seed_from_u64(0x1234);
                     for _ in 0..OPS {
                         let len = c.len();

@@ -14,7 +14,7 @@ fn reversed() -> std::ops::Range<usize> {
 
 #[test]
 fn a_plain_column_sits_at_the_start() {
-    let col = Column::<u64>::from_values(vec![10, 20, 30, 40, 50]);
+    let col = Column::<u64>::from_values(&[10, 20, 30, 40, 50]);
     let mut it = col.iter_range(reversed());
     assert_eq!((it.pos(), it.end_pos(), it.next()), (4, 4, None));
     it.set_max(5);
@@ -23,7 +23,7 @@ fn a_plain_column_sits_at_the_start() {
 
 #[test]
 fn so_does_a_delta_column() {
-    let col = DeltaColumn::<u64>::from_values(vec![10, 20, 30, 40, 50]);
+    let col = DeltaColumn::<u64>::from_values(&[10, 20, 30, 40, 50]);
     let mut it = col.iter_range(reversed());
     assert_eq!((it.pos(), it.end_pos(), it.next()), (4, 4, None));
     it.set_max(5);
@@ -32,8 +32,8 @@ fn so_does_a_delta_column() {
 
 #[test]
 fn and_a_prefix_column() {
-    let col = PrefixColumn::<u64>::from_values(vec![10, 20, 30, 40, 50]);
-    let mut it = col.iter_range(reversed());
+    let col = PrefixColumn::<u64>::from_values(&[10, 20, 30, 40, 50]);
+    let mut it = col.prefix_iter_range(reversed());
     assert_eq!((it.pos(), it.end_pos()), (4, 4));
     assert!(it.next().is_none());
     it.set_max(5);
@@ -43,12 +43,12 @@ fn and_a_prefix_column() {
 
 #[test]
 fn ranges_past_the_end_are_unchanged() {
-    let col = DeltaColumn::<u64>::from_values(vec![10, 20, 30]);
+    let col = DeltaColumn::<u64>::from_values(&[10, 20, 30]);
     let it = col.iter_range(9..12);
     assert_eq!((it.pos(), it.end_pos()), (3, 3));
     let it = col.iter_range(1..12);
     assert_eq!(it.collect::<Vec<_>>(), vec![20, 30]);
-    let col = PrefixColumn::<u64>::from_values(vec![10, 20, 30]);
-    let it = col.iter_range(9..12);
+    let col = PrefixColumn::<u64>::from_values(&[10, 20, 30]);
+    let it = col.prefix_iter_range(9..12);
     assert_eq!((it.pos(), it.end_pos()), (3, 3));
 }

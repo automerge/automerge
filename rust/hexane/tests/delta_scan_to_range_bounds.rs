@@ -12,7 +12,7 @@ use hexane::DeltaColumn;
 use std::ops::Bound;
 
 fn unsigned() -> DeltaColumn<u64> {
-    DeltaColumn::from_values(vec![5, 7, 9])
+    DeltaColumn::from_values(&[5, 7, 9])
 }
 
 #[test]
@@ -28,7 +28,7 @@ fn an_upper_bound_past_the_domain_takes_every_value() {
 
 #[test]
 fn a_null_lower_bound_is_below_every_value() {
-    let col = DeltaColumn::<Option<i64>>::from_values(vec![None, Some(3), Some(8)]);
+    let col = DeltaColumn::<Option<i64>>::from_values(&[None, Some(3), Some(8)]);
     assert_eq!(col.iter().scan_to_range(None..Some(5)), Some((1, Some(3))));
     let after_null = (Bound::Excluded(None), Bound::Included(Some(8)));
     assert_eq!(col.iter().scan_to_range(after_null), Some((1, Some(3))));
@@ -49,13 +49,13 @@ fn a_miss_leaves_the_iterator_at_the_end() {
     assert_eq!(it.scan_to_value(u64::MAX), None);
     assert_eq!(it.next(), None);
 
-    let col = DeltaColumn::<i64>::from_values(vec![5, 7, 9]);
+    let col = DeltaColumn::<i64>::from_values(&[5, 7, 9]);
     let mut it = col.iter();
     let past_max = (Bound::Excluded(i64::MAX), Bound::Unbounded);
     assert_eq!(it.scan_to_range(past_max), None);
     assert_eq!(it.next(), None);
 
-    let col = DeltaColumn::<Option<i64>>::from_values(vec![None, Some(3)]);
+    let col = DeltaColumn::<Option<i64>>::from_values(&[None, Some(3)]);
     let mut it = col.iter();
     assert_eq!(it.scan_to_range(..=None), None);
     assert_eq!(it.next(), None);

@@ -1604,14 +1604,6 @@ impl Cut {
         self.slabs.len()
     }
 
-    /// The length of slab `i` cut so far.
-    pub(crate) fn completed_slab_len(&self, i: usize) -> (n: usize)
-        requires i < self.done_slabs().len(),
-        ensures n == slab_len(self.done_slabs()[i as int]),
-    {
-        slab_len_of(&self.slabs[i])
-    }
-
     /// Count the segment `seg` the reader read (from `r0` to `r1`) into
     /// the slab; yield its run, if it has values.
     #[inline(always)]
@@ -2010,13 +2002,6 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
         ensures n == self.done_slabs().len(),
     {
         self.cut.slabs_completed()
-    }
-
-    pub(crate) fn completed_slab_len(&self, i: usize) -> (n: usize)
-        requires i < self.done_slabs().len(),
-        ensures n == slab_len(self.done_slabs()[i as int]),
-    {
-        self.cut.completed_slab_len(i)
     }
 
     /// The next run, or `None` at the end of the input.

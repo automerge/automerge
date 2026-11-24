@@ -84,8 +84,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
                 ranges.push(sps[i].range.start..sps[i].range.end);
                 i += 1;
             }
-            // the old API's measure of which way pays (its
-            // `COPY_INVERT_FACTOR` is 1)
+            // the measure of which way pays (with a factor of 1)
             let invert = self.core.invert_pays(&src.core, ranges.as_slice(), sps.len(), 1);
             let mut f = <V::E as Model<V::X>>::blind();
             self.core.copy::<V::X, _>(&list, &mut src.core, invert, &mut f);

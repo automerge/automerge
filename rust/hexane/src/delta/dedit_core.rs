@@ -27,7 +27,7 @@
 //! that the glue (`DeltaEdit`) chains the steps, using none after `end`
 //! or after one that panicked.
 //!
-//! [`DeltaEdit`]: crate::delta::DeltaEdit
+//! [`DeltaEdit`]: crate::DeltaEdit
 
 use crate::btree::{SlabAgg, SlabBTree};
 use crate::column::Slab;

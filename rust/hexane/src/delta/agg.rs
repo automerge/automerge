@@ -300,37 +300,6 @@ pub(crate) fn agg_run(w: &mut SlabAgg, count: usize, v: Option<i64>, Ghost(ds): 
     agg_step(w, count, v)
 }
 
-/// [`agg_run`] for a weight of deltas no one keeps (the public
-/// `WeightFn::accumulate_run`): for whatever deltas `w` aggregates, the
-/// result aggregates them and the run; false, leaving `w` as it was, if
-/// the run does not fit or the count would overflow.
-pub(crate) fn agg_run_any(w: &mut SlabAgg, count: usize, v: Option<i64>) -> (ok: bool)
-    ensures
-        forall|ds: Seq<Option<i64>>|
-            #![trigger agg_of(*old(w), ds)]
-            agg_of(*old(w), ds) ==> (ok ==> agg_of(*final(w), ds + reps(count as nat, v))),
-        !ok ==> *final(w) == *old(w),
-{
-    if count == 0 {
-        proof {
-            assert forall|ds: Seq<Option<i64>>| agg_of(*old(w), ds) implies agg_of(*w, ds + reps(0, v)) by {
-                assert(ds + reps(0, v) =~= ds);
-            }
-        }
-        return true;
-    }
-    if w.len > usize::MAX - count {
-        return false;
-    }
-    let ghost w0 = *w;
-    let ok = agg_step(w, count, v);
-    proof {
-        assert forall|ds: Seq<Option<i64>>| agg_of(w0, ds) && ok implies agg_of(*w, ds + reps(count as nat, v)) by {
-            lemma_next(w0, ds, count as nat, v);
-        }
-    }
-    ok
-}
 
 /// [`agg_run`] after the first run: `w` aggregates some deltas already.
 #[inline]
@@ -794,9 +763,9 @@ impl AnySpan {
     }
 }
 
-/// A delta column's values as deltas: the trusted bridge to
-/// `DeltaInner::to_opt` (user code: an `i64` is its own delta, an
-/// `Option<i64>` too, a null holding the running sum).
+/// A delta column's values as deltas (an `i64` is its own delta, an
+/// `Option<i64>` too, a null holding the running sum). Its implementation
+/// proves it (`VDeltas`).
 pub(crate) trait DeltaOps<V: Copy> {
     spec fn dv(v: V) -> Option<i64>;
 

@@ -8,7 +8,7 @@ use hexane::{Column, DeltaColumn, PrefixColumn};
 
 #[test]
 fn len_after_set_max_past_the_end() {
-    let col = Column::<u64>::from_values(vec![1, 2, 3, 4, 5]);
+    let col = Column::<u64>::from_values(&[1, 2, 3, 4, 5]);
     let mut it = col.iter();
     it.set_max(100);
     assert_eq!(it.len(), 5);
@@ -27,7 +27,7 @@ fn len_after_set_max_past_the_end() {
 
 #[test]
 fn len_after_shift_past_the_end() {
-    let col = Column::<bool>::from_values(vec![true, false, true, true]);
+    let col = Column::<bool>::from_values(&[true, false, true, true]);
     let mut it = col.iter();
     it.shift(1..100);
     assert_eq!(it.len(), 3);
@@ -36,12 +36,16 @@ fn len_after_shift_past_the_end() {
 
 #[test]
 fn wrapping_iterators_count_the_same() {
-    let col = DeltaColumn::<u64>::from_values(vec![10, 11, 12]);
+    let col = DeltaColumn::<u64>::from_values(&[10, 11, 12]);
     let mut it = col.iter();
     it.set_max(50);
     assert_eq!(it.len(), 3);
     assert_eq!(it.count(), 3);
-    let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4]);
+    let col = PrefixColumn::<u64>::from_values(&[1, 2, 3, 4]);
+    let mut it = col.prefix_iter();
+    it.set_max(50);
+    assert_eq!(it.len(), 4);
+    assert_eq!(it.count(), 4);
     let mut it = col.iter();
     it.set_max(50);
     assert_eq!(it.len(), 4);

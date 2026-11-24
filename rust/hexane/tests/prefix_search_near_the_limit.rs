@@ -36,7 +36,7 @@ fn searches_further_from_it_are_unchanged() {
     assert_eq!(col.get_index_for_prefix(1), 1);
     assert_eq!(col.get_index_for_prefix(7 * max), 7);
     assert_eq!(col.get_index_for_prefix(7 * max + 1), 8);
-    let col = PrefixColumn::<u32>::from_values(vec![3, 3, 3]);
+    let col = PrefixColumn::<u32>::from_values(&[3, 3, 3]);
     assert_eq!(col.get_index_for_prefix(4), 2);
     assert_eq!(col.get_index_for_prefix(9), 3);
     assert_eq!(col.get_index_for_prefix(10), 4);

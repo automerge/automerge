@@ -109,11 +109,6 @@ impl<I: Shiftable> crate::window::Window for ShiftView<I> {
     }
 
     #[inline(always)]
-    fn w_advance_to(&mut self, target: usize) {
-        self.0.advance_to(target)
-    }
-
-    #[inline(always)]
     fn w_shift(&mut self, start: usize, end: usize) {
         self.0.shift(start..end)
     }

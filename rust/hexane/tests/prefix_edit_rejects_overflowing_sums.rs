@@ -5,12 +5,13 @@
 //! release builds gave a column whose prefix sums had wrapped (and whose
 //! saved bytes `load` rejects). They now panic, saying why.
 //!
+//! (An encoder's `into_column` also built such columns, and panicked
+//! the same way. An `Encoder` now builds only a plain column.)
+//!
 //! (The runs here are longer than a 32-bit `usize` counts.)
 #![cfg(target_pointer_width = "64")]
 
-use hexane::encoder::RleEncoder;
-use hexane::prefix::PrefixWeightFn;
-use hexane::{Column, EncoderApi, Leb128, PrefixColumn, Run};
+use hexane::{PrefixColumn, Run};
 use std::num::NonZeroU32;
 
 fn run<T>(value: T, count: usize) -> Run<T> {
@@ -90,17 +91,7 @@ fn a_nonzero_column_too() {
 #[test]
 #[should_panic(expected = "prefix sum overflows")]
 fn a_filled_column() {
-    Column::<u32, Leb128, PrefixWeightFn<u32>>::fill(1 << 33, u32::MAX);
-}
-
-#[test]
-#[should_panic(expected = "prefix sum overflows")]
-fn an_encoded_column() {
-    let mut e = RleEncoder::<u32>::new().with_max_segments(2);
-    e.append_n(u32::MAX, 1 << 32);
-    e.append(0);
-    e.append_n(u32::MAX - 1, 1 << 32);
-    let _: Column<u32, Leb128, PrefixWeightFn<u32>> = e.into_column();
+    PrefixColumn::<u32>::fill(1 << 33, u32::MAX);
 }
 
 #[test]

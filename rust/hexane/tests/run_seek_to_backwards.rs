@@ -8,7 +8,7 @@ use hexane::{Column, DeltaColumn, Shiftable};
 
 #[test]
 fn runs_seek_to_backwards_is_none() {
-    let col = Column::<u64>::from_values(vec![1, 1, 2, 2, 3]);
+    let col = Column::<u64>::from_values(&[1, 1, 2, 2, 3]);
     let mut runs = col.iter().runs();
     let run = runs.seek_to(2).unwrap();
     assert_eq!((run.count, run.value), (2, 2));
@@ -21,7 +21,7 @@ fn runs_seek_to_backwards_is_none() {
 
 #[test]
 fn delta_runs_seek_to_backwards_is_none() {
-    let col = DeltaColumn::<u64>::from_values(vec![1, 2, 3, 10, 20]);
+    let col = DeltaColumn::<u64>::from_values(&[1, 2, 3, 10, 20]);
     let mut runs = col.iter().runs();
     assert!(runs.seek_to(3).is_some());
     let pos = runs.get_pos();
@@ -31,7 +31,7 @@ fn delta_runs_seek_to_backwards_is_none() {
 
 #[test]
 fn item_iterators_agree() {
-    let col = Column::<u64>::from_values(vec![1, 1, 2, 2, 3]);
+    let col = Column::<u64>::from_values(&[1, 1, 2, 2, 3]);
     let mut it = col.iter();
     assert_eq!(it.seek_to(3), Some(2));
     assert_eq!(it.seek_to(1), None);

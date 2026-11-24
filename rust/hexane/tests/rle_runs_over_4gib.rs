@@ -12,5 +12,5 @@
 #[should_panic(expected = "must stay under 4 GiB")]
 fn a_value_of_4gib_panics() {
     let big = "x".repeat(u32::MAX as usize + 1);
-    let _ = hexane::Column::<String>::from_values(vec![big]);
+    let _ = hexane::Column::<String>::from_values(&[big.as_str()]);
 }

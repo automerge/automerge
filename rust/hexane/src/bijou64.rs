@@ -686,29 +686,6 @@ proof fn lemma_candidate_tier(v: u64)
 
 // ── Encoding ────────────────────────────────────────────────────────────────
 
-/// Returns the encoded length of `value` in bytes (1–9).
-#[inline]
-pub fn encoded_len(value: u64) -> (r: usize)
-    ensures r == spec_encode(value as nat).len(),
-{
-    proof { lemma_constants(); lemma_encode_len(value as nat); }
-    // Fast path: tier 0 values (0–247) need a single comparison.
-    if value < BOUNDS[0] {
-        return 1;
-    }
-    proof {
-        lemma_candidate_tier(value);
-        vstd::std_specs::bits::axiom_u64_leading_zeros(value);
-    }
-    // Derive the tier from the bit width, then correct with one comparison.
-    let bw = 64 - value.leading_zeros(); // 8..=64 here
-    let candidate = ((bw - 1) / 8 + 2) as usize;
-    if value < BOUNDS[candidate - 2] {
-        candidate - 1
-    } else {
-        candidate
-    }
-}
 
 /// A stack-allocated bijou64 encoding, carrying its own length.
 #[derive(Debug, Clone, Copy)]
@@ -877,13 +854,6 @@ pub fn unzigzag(u: u64) -> (r: i64)
     h ^ m
 }
 
-/// Returns the encoded length of `value` in bytes (1–9).
-#[inline]
-pub fn encoded_len_signed(value: i64) -> (r: usize)
-    ensures r == spec_encode_signed(value as int).len(),
-{
-    encoded_len(zigzag(value))
-}
 
 /// Encodes `value` as a stack-allocated [`EncodedU64`].
 #[inline]

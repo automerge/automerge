@@ -1,4 +1,4 @@
-//! The column cursor's core ([`crate::edit::Edit`]), verified with Verus.
+//! The column cursor's core ([`crate::Edit`]), verified with Verus.
 //!
 //! A column is a vector of slabs, a slab index and a total length; the
 //! cursor walks it forward, carrying, inserting and deleting values, with
@@ -20,8 +20,8 @@
 //! delete, insert every run a feed gives until it ends, close.
 //!
 //! The slab-level operations are the encodings' own, through each
-//! encoding's slab model ([`Slabs`], named by `SlabEdit::Model`), which
-//! is verified against its format: bool columns'
+//! encoding's slab model ([`Slabs`]), which is verified against its
+//! format: bool columns'
 //! ([`BoolModel`](crate::bool_edit::BoolModel)) and RLE columns'
 //! ([`RleModel`](crate::rle::edit::RleModel)).  Trusted, in the bridges
 //! at the bottom of this file: the dispatch of closures and inserted
@@ -71,8 +71,7 @@ verus! {
 // ── The encodings' slab operations ─────────────────────────────────────────
 
 /// The slab operations a cursor drives, specified against each slab's
-/// values: an encoding's slab model, named by [`SlabEdit::Model`], and
-/// verified against its format.
+/// values: an encoding's slab model, verified against its format.
 pub(crate) trait Slabs {
     type Tail: Copy + Clone + std::fmt::Debug + Default;
 
@@ -1185,7 +1184,7 @@ pub(crate) struct Reader<S> {
     pub(crate) at: usize,
 }
 
-/// The cursor's state; [`crate::edit::Edit`] pairs it with the column.
+/// The cursor's state; [`crate::Edit`] pairs it with the column.
 pub(crate) struct Cursor<E: Slabs> {
     /// index of the slab the cursor is standing in
     pub(crate) slab: usize,
@@ -2955,163 +2954,3 @@ pub(crate) fn splice_feed_bounded<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F
 }
 
 } // verus!
-
-// ── Trusted bridges ────────────────────────────────────────────────────────
-//
-// Outside `verus!`, so Verus takes them on trust; their spec items exist
-// only when Verus compiles the crate.  Each is a one-line forward: a
-// closure or a value to the encoding's rebuild (which forwards in turn to
-// verified functions with the contracts above), and a slab to its
-// weight.
-
-use crate::edit::{EditSlab, SlabEdit};
-use crate::encoding::ColumnEncoding;
-use crate::{AsColumnRef, ColumnValueRef};
-
-/// A closure seeing each run a cursor carries or drops, as the
-/// [`Visitor`] of encoding `E`'s slab model: it hands the closure to the
-/// encoding's rebuild. A second one, `D`, sees each slab a delete drops
-/// whole.
-pub(crate) struct Visiting<'f, E, F, D = NoDrops>(&'f mut F, D, PhantomData<fn() -> E>);
-
-/// Slabs dropped whole, unseen.
-pub(crate) struct NoDrops;
-
-/// Seeing each slab a delete drops whole.
-pub(crate) trait Drops<T: Copy + Clone + std::fmt::Debug + Default> {
-    fn dropped(&mut self, s: &Slab<T>);
-}
-
-impl<T: Copy + Clone + std::fmt::Debug + Default> Drops<T> for NoDrops {
-    #[inline(always)]
-    fn dropped(&mut self, _s: &Slab<T>) {}
-}
-
-impl<T: Copy + Clone + std::fmt::Debug + Default, D: FnMut(&Slab<T>)> Drops<T> for D {
-    #[inline(always)]
-    fn dropped(&mut self, s: &Slab<T>) {
-        self(s)
-    }
-}
-
-impl<'f, E, F> Visiting<'f, E, F> {
-    #[inline(always)]
-    pub(crate) fn new(f: &'f mut F) -> Self {
-        Visiting(f, NoDrops, PhantomData)
-    }
-}
-
-impl<'f, E, F, D> Visiting<'f, E, F, D> {
-    #[inline(always)]
-    pub(crate) fn with_drops(f: &'f mut F, d: D) -> Self {
-        Visiting(f, d, PhantomData)
-    }
-}
-
-impl<E: SlabEdit, F, D: Drops<<E as ColumnEncoding>::Tail>> Visitor<<E as SlabEdit>::Model>
-    for Visiting<'_, E, F, D>
-where
-    F: FnMut(<<E as ColumnEncoding>::Value as ColumnValueRef>::Get<'_>, usize),
-{
-    #[cfg(verus_keep_ghost)]
-    fn seen(&self) -> Seq<<<E as SlabEdit>::Model as Slabs>::V> {
-        unimplemented!()
-    }
-
-    #[inline(always)]
-    fn pass(
-        &mut self,
-        e: &mut <E as SlabEdit>::Edit,
-        s: &Slab<<E as ColumnEncoding>::Tail>,
-        n: usize,
-        runs: usize,
-    ) -> usize {
-        e.pass(s, n, runs, self.0)
-    }
-
-    #[inline(always)]
-    fn discard(
-        &mut self,
-        e: &mut <E as SlabEdit>::Edit,
-        s: &Slab<<E as ColumnEncoding>::Tail>,
-        n: usize,
-    ) {
-        e.delete(s, n, self.0)
-    }
-
-    #[inline(always)]
-    fn dropped(&mut self, s: &Slab<<E as ColumnEncoding>::Tail>) {
-        self.1.dropped(s)
-    }
-}
-
-/// A value to insert, as the [`Insertable`] of encoding `E`'s slab model.
-pub(crate) struct Inserting<E, X>(X, PhantomData<fn() -> E>);
-
-impl<E, X> Inserting<E, X> {
-    #[inline(always)]
-    pub(crate) fn new(x: X) -> Self {
-        Inserting(x, PhantomData)
-    }
-}
-
-impl<E: SlabEdit, X: AsColumnRef<<E as ColumnEncoding>::Value>> Insertable<<E as SlabEdit>::Model>
-    for Inserting<E, X>
-{
-    #[cfg(verus_keep_ghost)]
-    fn val(&self) -> <<E as SlabEdit>::Model as Slabs>::V {
-        unimplemented!()
-    }
-
-    #[inline(always)]
-    fn insert_into(self, e: &mut <E as SlabEdit>::Edit, n: usize) {
-        e.insert(self.0, n)
-    }
-}
-
-/// The runs a splice inserts, from the caller's iterator, as the
-/// [`RunFeed`] of encoding `E`'s slab model.
-pub(crate) struct Feeding<E, It>(It, PhantomData<fn() -> E>);
-
-impl<E, It> Feeding<E, It> {
-    #[inline(always)]
-    pub(crate) fn new(it: It) -> Self {
-        Feeding(it, PhantomData)
-    }
-}
-
-impl<
-        E: SlabEdit,
-        V: AsColumnRef<<E as ColumnEncoding>::Value>,
-        It: Iterator<Item = (V, usize)>,
-    > RunFeed<<E as SlabEdit>::Model> for Feeding<E, It>
-{
-    type X = Inserting<E, V>;
-
-    type K = ();
-
-    #[cfg(verus_keep_ghost)]
-    fn inv(&self) -> bool {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn key(&self) {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn given(&self) -> Seq<<<E as SlabEdit>::Model as Slabs>::V> {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn ended(&self) -> bool {
-        unimplemented!()
-    }
-
-    #[inline(always)]
-    fn next_run(&mut self) -> Option<(Inserting<E, V>, usize)> {
-        self.0.next().map(|(v, n)| (Inserting::new(v), n))
-    }
-}

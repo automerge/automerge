@@ -1,33 +1,27 @@
 //! A prefix column's running sums, verified with Verus.
 //!
-//! [`PrefixIter`](crate::prefix::PrefixIter) walks a column with the
-//! verified iterator core ([`ICore`]) and keeps a running total of the
-//! values' contributions (`T::accumulate`). It can be rebased
-//! (`reset_prefix`: totals then count from there, with the offset in
-//! `base`), and it jumps to a far slab by the index, which hands back the
-//! sum of the slabs before it. The functions here keep its invariant
-//! (`at_sum`): `base` plus the running total is the sum of the
-//! contributions of the values before the iterator.
+//! A prefix iterator ([`PrefixIter`](crate::PrefixIter),
+//! [`AccIter`](crate::AccIter)) walks a column with the verified iterator
+//! core ([`ICore`]) and keeps a running total of the values'
+//! contributions. It can be rebased (`reset_prefix`: totals then count
+//! from there, with the offset in `base`), and it jumps to a far slab by
+//! the index, which hands back the sum of the slabs before it. The
+//! functions here keep its invariant (`at_sum`): `base` plus the running
+//! total is the sum of the contributions of the values before the
+//! iterator.
 //!
 //! The sums are a slab weight's prefixes (`PrefixOps::W`), and the
 //! arithmetic is that weight's, with the laws the functions here rest on
 //! (`PrefixWeight`): `+` is associative, with zero its identity, and
-//! `b + (a - b) == a`. A weight proves them, or assumes them.
-//!
-//! Trusted, for the unverified API's weight
-//! ([`PrefixSlabWeight`]): those laws
-//! (`axiom_prefix_add`, `axiom_prefix_sub`), as for the wrapping integers
-//! (in debug builds an operation that would wrap panics rather than
-//! return), and that the value type's `accumulate` and `accumulate_run`
-//! add its values' contributions (`PrefixOps`: user code). That each
-//! slab's weight in the index holds the slab's sum is the column's
-//! invariant (`ix_ok`).
+//! `b + (a - b) == a`. Each weight proves them (`SumWeight`,
+//! `AccWeight`). That each slab's weight in the index holds the slab's
+//! sum is the column's invariant (`ix_ok`).
 
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::assign_op_pattern)]
 
 #[cfg(verus_keep_ghost)]
-use crate::btree::{axiom_prefix_add, fold, prefix_add, sum_len, SlabAggregate};
+use crate::btree::{fold, sum_len, SlabAggregate};
 use crate::btree::{PrefixAggregate, SlabBTree};
 use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
@@ -40,11 +34,9 @@ use crate::iter_core::{
     past, vals_of, window,
 };
 use crate::iter_core::{Decode, Decoders, ICore};
-use crate::prefix::PrefixSlabWeight;
 #[cfg(verus_keep_ghost)]
 use crate::rle::writer::concat;
 use crate::Run;
-use std::ops::{Add, AddAssign, SubAssign};
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -53,18 +45,6 @@ use crate::index::lemma_plain_valid;
 
 use crate::trusted::prefix_core_past_window as past_window;
 verus! {
-
-/// `a - b` on a prefix type.
-pub(crate) uninterp spec fn prefix_sub<P>(a: P, b: P) -> P;
-
-/// Adding back what was subtracted restores the sum, as for the integer
-/// types (wrapping). Trusted, like `axiom_prefix_add`.
-#[verifier::external_body]
-pub(crate) proof fn axiom_prefix_sub<P>(a: P, b: P)
-    ensures
-        prefix_add(b, prefix_sub(a, b)) == a,
-{
-}
 
 /// A slab weight whose prefixes the functions here can sum: its `+` has
 /// the laws they rest on, and a `-` that undoes it.
@@ -91,28 +71,6 @@ pub(crate) trait PrefixWeight: PrefixAggregate {
             forall|w: Self| #[trigger] w.prefix_ok();
 }
 
-/// The unverified API's weight: its laws are the trusted ones.
-impl<P> PrefixWeight for PrefixSlabWeight<P>
-where
-    P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign + Add<Output = P>
-        + for<'a> AddAssign<&'a P>,
-{
-    open spec fn prefix_minus(a: P, b: P) -> P {
-        prefix_sub(a, b)
-    }
-
-    proof fn lemma_prefix_add(a: P, b: P, c: P) {
-        axiom_prefix_add(a, b, c);
-    }
-
-    proof fn lemma_prefix_sub(a: P, b: P) {
-        axiom_prefix_sub(a, b);
-    }
-
-    proof fn lemma_prefix_total() {
-    }
-}
-
 /// `n` copies of `c`, added.
 pub(crate) open spec fn reps<W: PrefixWeight>(n: nat, c: W::Prefix) -> W::Prefix
     decreases n,
@@ -120,9 +78,8 @@ pub(crate) open spec fn reps<W: PrefixWeight>(n: nat, c: W::Prefix) -> W::Prefix
     if n == 0 { W::prefix_zero() } else { W::prefix_plus(reps::<W>((n - 1) as nat, c), c) }
 }
 
-/// A prefix column's values' contributions, and its prefix arithmetic:
-/// for the unverified API, the trusted bridge to `PrefixValue` (user
-/// code) and `T::Prefix`.
+/// A prefix column's values' contributions, and its prefix arithmetic,
+/// which each implementation proves (`SumOf`, `AccOf`).
 pub(crate) trait PrefixOps<V: Copy> {
     /// What the sums are kept in. Nothing is asked of the type here:
     /// the readers reach its arithmetic through the functions below
@@ -144,10 +101,6 @@ pub(crate) trait PrefixOps<V: Copy> {
     fn acc_run(t: &mut Self::P, run: &Run<V>)
         ensures *final(t) == Self::W::prefix_plus(*old(t), reps::<Self::W>(run.count as nat, Self::contrib(run.value)));
 
-    /// `T::try_accumulate_run`: `acc_run`, unless the sum would not fit.
-    fn try_acc_run(t: &mut Self::P, run: &Run<V>) -> (ok: bool)
-        ensures ok ==> *final(t) == Self::W::prefix_plus(*old(t), reps::<Self::W>(run.count as nat, Self::contrib(run.value)));
-
     /// `P::default()`.
     fn zero() -> (r: Self::P)
         ensures r == Self::W::prefix_zero();
@@ -164,13 +117,6 @@ pub(crate) trait PrefixOps<V: Copy> {
     fn add_to(a: &mut Self::P, b: &Self::P)
         ensures *final(a) == Self::W::prefix_plus(*old(a), *b);
 
-    /// `T::MAX_UNCHECKED_LEN`: a slab of at most this many items cannot
-    /// overflow its sum, so it is summed without checking.
-    fn max_unchecked_len() -> usize;
-
-    /// `T::try_add_prefix`: add `b`, unless the sum would not fit. Only
-    /// its run-time check matters, so it specifies nothing.
-    fn try_add(t: &mut Self::P, b: &Self::P) -> bool;
 }
 
 /// The sum of the contributions of values `vs`.
@@ -736,150 +682,9 @@ pub(crate) fn p_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     p_nth_in::<X, B>(core, slabs, ix, n, total, base)
 }
 
-/// `advance_to`, keeping the running total: advance so that the item at
-/// `target` comes next; at or past it already, stay.
-#[inline(always)]
-pub(crate) fn p_advance_to<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
-    core: &mut ICore<X::D>,
-    slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<B::W>>,
-    target: usize,
-    total: &mut B::P,
-    base: &B::P,
-)
-    requires
-        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
-        index_ok::<X, B>(ix, slabs@),
-    ensures
-        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
-        final(core).out::<X>(slabs@) == past(old(core).out::<X>(slabs@), target - old(core).pos),
-        target <= old(core).pos ==> final(core).pos == old(core).pos,
-        old(core).pos < target <= old(core).pos + old(core).out::<X>(slabs@).len() ==> final(core).pos
-            == target,
-{
-    if target > core.pos {
-        p_nth::<X, B>(core, slabs, ix, target - core.pos - 1, total, base);
-    }
-}
 
-/// `advance_by`, keeping the running total: move `amount` items on.
-#[inline(always)]
-pub(crate) fn p_advance_by<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
-    core: &mut ICore<X::D>,
-    slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<B::W>>,
-    amount: usize,
-    total: &mut B::P,
-    base: &B::P,
-)
-    requires
-        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
-        index_ok::<X, B>(ix, slabs@),
-    ensures
-        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
-        final(core).out::<X>(slabs@) == past(old(core).out::<X>(slabs@), amount as int),
-        amount <= old(core).out::<X>(slabs@).len() ==> final(core).pos == old(core).pos + amount,
-{
-    if amount > 0 {
-        let ghost o = core.out::<X>(slabs@);
-        p_nth::<X, B>(core, slabs, ix, amount - 1, total, base);
-        proof {
-            if amount > o.len() {
-                assert(final(core).out::<X>(slabs@) =~= Seq::<<X::D as Decode>::Item>::empty());
-            }
-        }
-    }
-}
 
-/// `shift`, keeping the running total: move the window to `start..end`,
-/// only forwards (from a `start` before the iterator, the window starts
-/// where it stands).
-#[inline(always)]
-pub(crate) fn p_shift<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
-    core: &mut ICore<X::D>,
-    slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<B::W>>,
-    start: usize,
-    end: usize,
-    total: &mut B::P,
-    base: &B::P,
-)
-    requires
-        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
-        index_ok::<X, B>(ix, slabs@),
-    ensures
-        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
-        final(core).out::<X>(slabs@) == window(
-            vals_of::<X>(slabs@),
-            if start <= old(core).pos { old(core).pos as int } else { start as int },
-            end as int,
-        ),
-        start <= old(core).pos ==> final(core).pos == old(core).pos,
-        old(core).pos < start <= end && start <= vals_of::<X>(slabs@).len() ==> final(core).pos == start,
-{
-    let ghost p = core.pos as int;
-    core.set_max::<X>(slabs, end);
-    proof {
-        core.lemma_out_window::<X>(slabs@);
-        if end < p {
-            assert(window(vals_of::<X>(slabs@), p, p) =~= window(vals_of::<X>(slabs@), p, end as int));
-        }
-        if start > p {
-            lemma_window_past(vals_of::<X>(slabs@), p, end as int, start - p);
-        }
-    }
-    p_advance_to::<X, B>(core, slabs, ix, start, total, base);
-}
 
-/// `shift_next`, keeping the running total: move the window to
-/// `start..end` and give its first value; `start` is at or after the
-/// iterator.
-#[inline(always)]
-pub(crate) fn p_shift_next<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
-    core: &mut ICore<X::D>,
-    slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<B::W>>,
-    start: usize,
-    end: usize,
-    total: &mut B::P,
-    base: &B::P,
-) -> (r: Option<<X::D as Decode>::Item>)
-    requires
-        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
-        index_ok::<X, B>(ix, slabs@),
-        start >= old(core).pos,
-    ensures
-        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
-        ({
-            let w = window(vals_of::<X>(slabs@), start as int, end as int);
-            &&& w.len() > 0 ==> {
-                &&& r == Some(w[0])
-                &&& final(core).out::<X>(slabs@) == w.skip(1)
-                &&& final(core).pos == start + 1
-            }
-            &&& w.len() == 0 ==> r is None && final(core).out::<X>(slabs@).len() == 0
-        }),
-{
-    let ghost p = core.pos as int;
-    core.set_max::<X>(slabs, end);
-    let ghost o1 = core.out::<X>(slabs@);
-    proof {
-        core.lemma_out_window::<X>(slabs@);
-        if end < p {
-            assert(window(vals_of::<X>(slabs@), p, p) =~= window(vals_of::<X>(slabs@), p, end as int));
-        }
-        lemma_window_past(vals_of::<X>(slabs@), p, end as int, start - p);
-    }
-    let r = p_nth::<X, B>(core, slabs, ix, start - core.pos, total, base);
-    proof {
-        let (w, n) = (window(vals_of::<X>(slabs@), start as int, end as int), start - p);
-        if n < o1.len() {
-            assert(w =~= o1.skip(n));
-            assert(w.skip(1) =~= o1.skip(n + 1));
-        }
-    }
-    r
-}
 
 /// `delta_nth`: the `n`th value left in the window (0-based), as `p_nth`
 /// gives it, and what its prefix added since the iterator's start: the
@@ -959,72 +764,7 @@ pub(crate) fn p_delta_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::It
     Some((v, d))
 }
 
-/// `seek_to`, keeping the running total: the item at `at`, moving past
-/// it; `None`, moving nowhere, if `at` is behind the iterator.
-#[inline(always)]
-pub(crate) fn p_seek_to<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
-    core: &mut ICore<X::D>,
-    slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<B::W>>,
-    at: usize,
-    total: &mut B::P,
-    base: &B::P,
-) -> (r: Option<<X::D as Decode>::Item>)
-    requires
-        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
-        index_ok::<X, B>(ix, slabs@),
-    ensures
-        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
-        at < old(core).pos ==> r is None && *final(core) == *old(core) && *final(total) == *old(total),
-        at >= old(core).pos ==> {
-            let (o, k) = (old(core).out::<X>(slabs@), at - old(core).pos);
-            &&& k < o.len() ==> r == Some(o[k]) && final(core).out::<X>(slabs@) == o.skip(k + 1)
-                && final(core).pos == at + 1
-            &&& k >= o.len() ==> r is None && final(core).out::<X>(slabs@).len() == 0
-        },
-{
-    if at >= core.pos {
-        p_nth::<X, B>(core, slabs, ix, at - core.pos, total, base)
-    } else {
-        None
-    }
-}
 
-/// `PrefixColumn::delta`'s seek: advance to `from`, then `p_delta_nth(n)`:
-/// the value at `from + n`, if the window has it, and what its prefix
-/// added since `from` (added to the sum before `from`, the sum before it).
-pub(crate) fn p_delta_from<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
-    core: &mut ICore<X::D>,
-    slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<B::W>>,
-    from: usize,
-    n: usize,
-    total: &mut B::P,
-    base: &B::P,
-) -> (r: Option<(<X::D as Decode>::Item, B::P)>)
-    requires
-        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
-        index_ok::<X, B>(ix, slabs@),
-        from >= old(core).pos,
-    ensures
-        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
-        ({
-            let o = past(old(core).out::<X>(slabs@), from - old(core).pos);
-            match r {
-                Some((v, d)) => {
-                    &&& n < o.len()
-                    &&& v == o[n as int]
-                    &&& B::W::prefix_plus(vsum::<_, B>(before::<X>(slabs@, from as int)), d) == vsum::<_, B>(
-                        before::<X>(slabs@, from + n),
-                    )
-                },
-                None => n >= o.len(),
-            }
-        }),
-{
-    p_advance_to::<X, B>(core, slabs, ix, from, total, base);
-    p_delta_nth::<X, B>(core, slabs, ix, n, total, base)
-}
 
 /// At or past the end, the values before a position are all of them.
 proof fn lemma_before_all<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, pos: int)
@@ -1259,64 +999,5 @@ pub(crate) fn p_slab_sum<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Ite
     t
 }
 
-/// [`p_slab_sum`], unless a sum overflows: then `None`.
-#[inline(never)]
-pub(crate) fn p_slab_sum_checked<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
-    slab: &'a Slab<X::Tail>,
-) -> (r: Option<B::P>)
-    requires
-        X::ok(*slab),
-    ensures
-        r matches Some(t) ==> t == vsum::<_, B>(X::vals(*slab)),
-{
-    let ghost v = X::vals(*slab);
-    let mut d = X::open(slab);
-    let mut t = B::zero();
-    let ghost mut k: int = 0;
-    proof {
-        assert(v.take(0) =~= Seq::<<X::D as Decode>::Item>::empty());
-        assert(v.skip(0) =~= v);
-    }
-    loop
-        invariant
-            v == X::vals(*slab),
-            d.inv(),
-            0 <= k <= v.len(),
-            d.rest() == v.skip(k),
-            t == vsum::<_, B>(v.take(k)),
-        ensures
-            t == vsum::<_, B>(v),
-        decreases d.rest().len(),
-    {
-        let ghost t0 = t;
-        match d.d_run_max(usize::MAX) {
-            Some(run) => {
-                if !B::try_acc_run(&mut t, &run) {
-                    return None;
-                }
-                proof {
-                    let c = run.count as int;
-                    let r = Seq::new(run.count as nat, |_i: int| run.value);
-                    assert(v.take(k + c) =~= v.take(k) + r) by {
-                        assert forall|i: int| 0 <= i < c implies #[trigger] v[k + i] == run.value by {
-                            assert(v.skip(k).take(c)[i] == run.value);
-                        }
-                    }
-                    lemma_vsum_cat::<_, B>(v.take(k), r);
-                    lemma_vsum_run::<_, B>(run.count as nat, run.value);
-                    assert(v.skip(k).skip(c) =~= v.skip(k + c));
-                    k = k + c;
-                }
-            },
-            None => {
-                proof {
-                    assert(v.take(k) =~= v);
-                }
-                break;
-            },
-        }
-    }
-    Some(t)
-}
 
 } // verus!

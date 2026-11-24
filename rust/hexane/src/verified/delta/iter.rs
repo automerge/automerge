@@ -12,7 +12,7 @@
 //!
 //! It keeps as it goes the sum of the differences before it, so that
 //! the next value is one addition away. The moves are
-//! [`DeltaIter`](crate::DeltaIter)'s, the shared ones of
+//! [`DeltaIter`]'s, the shared ones of
 //! `delta/diter.rs` (`d_next`, `d_step`): a long move asks the column's
 //! index for the slab to go to and for the sum of the differences
 //! passed over, and within a slab a whole run is passed over at once.
@@ -496,9 +496,8 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
     /// before its end or after it, and the iterator moves on to where
     /// `range` starts ([`advance_to`](Self::advance_to)); a `range`
     /// that starts past its end is taken as the empty one at its
-    /// start. The bounds are read as the old API read them
-    /// (`bound_start`, `bound_end`): `..` is all the window has ahead of
-    /// the iterator.
+    /// start. The bounds are read as `bound_start` and `bound_end` say:
+    /// `..` is all the window has ahead of the iterator.
     ///
     /// Few of the values are looked at: the column's index tells the
     /// part of the column to look in. The values searched are taken to
@@ -722,8 +721,7 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     }
 
     /// An iterator over the values of `range`, clamped to the column
-    /// (`range_in`): over `start..end`, as the old API's `iter_range`
-    /// took it.
+    /// (`range_in`): over `start..end`.
     ///
     /// The iterator moves from the column's start to `start` as
     /// [`advance_by`](DeltaIter::advance_by) does: the column's
@@ -1092,8 +1090,7 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
     }
 
     /// A lookahead: the iterator wrapped so that the value it gives next
-    /// can be looked at first ([`Unshift::peek`]), as the old
-    /// API's `Shiftable::unshift` gives.
+    /// can be looked at first ([`Unshift::peek`]).
     #[inline(always)]
     pub fn unshift(self) -> (r: Unshift<Self>)
         ensures
@@ -1104,7 +1101,7 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
     }
 
     /// The values of each of `ranges` of the column, one range after
-    /// another, as the old API's `Shiftable::ranges` gives them (what is
+    /// another (what is
     /// left of the iterator's own window is dropped). The ranges ascend
     /// and do not overlap (they may touch), and start where the iterator
     /// stands or later.
@@ -1247,8 +1244,7 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaRuns<'a, T, C> {
     }
 
     /// A lookahead: the runs wrapped so that the run they give next can
-    /// be looked at first ([`Unshift::peek`]), as the old API's
-    /// `Shiftable::unshift` gives. (It cannot be moved to a window: its
+    /// be looked at first ([`Unshift::peek`]). (It cannot be moved to a window: its
     /// items are not each one value.)
     #[inline(always)]
     pub fn unshift(self) -> (r: Unshift<Self>)
@@ -1260,7 +1256,7 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaRuns<'a, T, C> {
     }
 
     /// The runs of each of `ranges` of the column, one range after
-    /// another, as the old API's `Shiftable::ranges` gives them: a run
+    /// another: a run
     /// that crosses the edge of a range is cut there, and each says the
     /// number before it. The ranges ascend and do not overlap (they may
     /// touch), and start where the iterator stands or later.

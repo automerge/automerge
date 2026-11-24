@@ -1802,9 +1802,7 @@ pub(crate) enum SuspendedRun {
 /// across writes. [`resume`](Dec::resume) restores a decoder from one in
 /// O(1).
 ///
-/// Public only because [`ColumnEncoding::State`](crate::ColumnEncoding::State)
-/// names it; it is not exported, so nothing outside the crate can name
-/// one.
+/// Not exported: nothing outside the crate can name one.
 ///
 /// Position only, never a value: a repeat run records where its value is
 /// rather than what it is, so the state is `Copy` and costs a `String`
@@ -4196,8 +4194,7 @@ pub(crate) proof fn lemma_sbyte_end<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDec
 
 // ── The column iterator's decoder model ────────────────────────────────────
 
-/// An RLE slab decoder: RLE columns' `ColumnEncoding::Decoder`
-/// (`RleDecoder`), verified as the column iterator's `Decode`.
+/// An RLE slab decoder, verified as the column iterator's `Decode`.
 pub struct RDecoder<'a, O: RleOps<'a>> {
     pub(crate) inner: Dec<'a, O>,
 }
@@ -4207,8 +4204,8 @@ pub struct RDecoder<'a, O: RleOps<'a>> {
 /// `slab_ok`, and holds the values its bytes encode. `O` is the column's
 /// value ops: one type for every lifetime a slab is borrowed for.
 ///
-/// Public only because RLE columns' `ColumnEncoding::ReadModel` names it;
-/// this module is not.
+/// Public only because the verified API's value models name it; this
+/// module is not.
 pub struct RleReads<O>(PhantomData<O>);
 
 impl<'a, O: RleOps<'a>> Decode for RDecoder<'a, O> {

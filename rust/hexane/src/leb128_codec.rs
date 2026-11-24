@@ -975,14 +975,6 @@ impl Encoded {
         self.buf.as_slice().split_at(self.len as usize).0
     }
 
-    /// The buffer and the length of the encoding at its front.
-    #[inline]
-    pub fn into_parts(self) -> (r: ([u8; BUF_BYTES], u8))
-        ensures 1 <= r.1 <= MAX_BYTES, r.0@.subrange(0, r.1 as int) == self@,
-    {
-        proof { use_type_invariant(self); }
-        (self.buf, self.len)
-    }
 }
 
 /// Encodes `value` as unsigned LEB128.

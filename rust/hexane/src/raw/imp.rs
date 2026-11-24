@@ -1756,8 +1756,7 @@ pub(super) fn drain_after(slabs: &mut Vec<RawSlab>, start: usize, del: usize) ->
 }
 
 /// Splice a single slab: delete up to `del` bytes at `index`, insert
-/// `values`.  Mirrors the shape of [`ColumnEncoding::splice_slab`] used by
-/// `Column` — `del` may exceed the slab's length, in which case the
+/// `values`. `del` may exceed the slab's length, in which case the
 /// excess is returned as `overflow_del` for the caller to apply to the
 /// following slabs.
 ///
@@ -1768,8 +1767,6 @@ pub(super) fn drain_after(slabs: &mut Vec<RawSlab>, start: usize, del: usize) ->
 /// splits at splice points, so there's nowhere else to cut.
 ///
 /// Returns `(overflow_slab, overflow_del)`.
-///
-/// [`ColumnEncoding::splice_slab`]: crate::encoding::ColumnEncoding::splice_slab
 pub(super) fn splice_slab(
     slab: &mut RawSlab,
     index: usize,

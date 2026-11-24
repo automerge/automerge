@@ -1,11 +1,9 @@
-//! The run counts of a `bool` column of the verified public API, verified
-//! with Verus.
+//! The run counts of a `bool` column, verified with Verus.
 //!
 //! A `bool` column is the lengths of its runs, written as numbers of the
-//! column's codec. [`Column`](crate::Column) reaches the codec through a
-//! trusted bridge (`bool_wire::Counts`). Here the same contract
-//! ([`CountOps`](crate::bool_wire::CountOps)) is *proved*, for every
-//! codec of the verified API ([`Codec`]).
+//! column's codec. The bool core reaches the codec through a contract
+//! ([`CountOps`](crate::bool_wire::CountOps)), which is *proved* here for
+//! every codec ([`Codec`]).
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each

@@ -8,7 +8,7 @@ use hexane::{Column, DeltaColumn, PrefixColumn};
 
 #[test]
 fn nth_past_the_data_stops_at_the_end() {
-    let col = Column::<u64>::from_values(vec![1, 2, 3, 4, 5]);
+    let col = Column::<u64>::from_values(&[1, 2, 3, 4, 5]);
     let mut it = col.iter();
     it.set_max(100);
     assert_eq!(it.nth(50), None);
@@ -17,7 +17,7 @@ fn nth_past_the_data_stops_at_the_end() {
     assert_eq!(it.next(), None);
     assert_eq!(it.pos(), 5);
 
-    let col = Column::<bool>::from_values(vec![true, false, true]);
+    let col = Column::<bool>::from_values(&[true, false, true]);
     let mut it = col.iter();
     it.set_max(100);
     assert_eq!(it.nth(50), None);
@@ -27,7 +27,7 @@ fn nth_past_the_data_stops_at_the_end() {
 #[test]
 fn across_slabs_too() {
     let vals: Vec<u64> = (0..200).map(|i| i * 7 % 13).collect();
-    let col = Column::<u64>::from_values_with_max_segments(vals.clone(), 4);
+    let col = Column::<u64>::from_values_with_max_segments(&vals, 4);
     assert!(col.slab_count() > 4);
     for start in [0, 1, 57, 199] {
         let mut it = col.iter();
@@ -40,12 +40,12 @@ fn across_slabs_too() {
 
 #[test]
 fn as_the_delta_and_prefix_iterators_do() {
-    let col = DeltaColumn::<u64>::from_values(vec![1, 2, 3, 4, 5]);
+    let col = DeltaColumn::<u64>::from_values(&[1, 2, 3, 4, 5]);
     let mut it = col.iter();
     it.set_max(100);
     assert_eq!(it.nth(50), None);
     assert_eq!(it.pos(), 5);
-    let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4, 5]);
+    let col = PrefixColumn::<u64>::from_values(&[1, 2, 3, 4, 5]);
     let mut it = col.iter();
     it.set_max(100);
     assert!(it.nth(50).is_none());

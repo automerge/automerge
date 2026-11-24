@@ -54,7 +54,7 @@ fn initial_values_i64() -> Vec<i64> {
 #[divan::bench(max_time = Duration::from_secs(6))]
 fn len_build(b: Bencher) {
     let v = initial_values_u64();
-    b.bench_local(|| divan::black_box(Column::<u64>::from_values(v.clone())));
+    b.bench_local(|| divan::black_box(Column::<u64>::from_values(&v)));
 }
 
 #[divan::bench(max_time = Duration::from_secs(6))]
@@ -62,7 +62,7 @@ fn len_insert(b: Bencher) {
     let v = initial_values_u64();
     b.counter(ItemsCount::new((OPS * K) as u64))
         .bench_local(|| {
-            let mut c = Column::<u64>::from_values(v.clone());
+            let mut c = Column::<u64>::from_values(&v);
             let mut rng = SmallRng::seed_from_u64(0x1234);
             for _ in 0..OPS {
                 let pos = rng.random_range(0..=c.len());
@@ -78,7 +78,7 @@ fn len_delete(b: Bencher) {
     let v = initial_values_u64();
     b.counter(ItemsCount::new((OPS * K) as u64))
         .bench_local(|| {
-            let mut c = Column::<u64>::from_values(v.clone());
+            let mut c = Column::<u64>::from_values(&v);
             let mut rng = SmallRng::seed_from_u64(0x1234);
             for _ in 0..OPS {
                 let len = c.len();
@@ -97,7 +97,7 @@ fn len_replace(b: Bencher) {
     let v = initial_values_u64();
     b.counter(ItemsCount::new((OPS * K) as u64))
         .bench_local(|| {
-            let mut c = Column::<u64>::from_values(v.clone());
+            let mut c = Column::<u64>::from_values(&v);
             let mut rng = SmallRng::seed_from_u64(0x1234);
             for _ in 0..OPS {
                 let len = c.len();
@@ -114,7 +114,7 @@ fn len_replace(b: Bencher) {
 
 #[divan::bench(max_time = Duration::from_secs(6))]
 fn len_get(b: Bencher) {
-    let c = Column::<u64>::from_values(initial_values_u64());
+    let c = Column::<u64>::from_values(&initial_values_u64());
     b.counter(ItemsCount::new(OPS as u64)).bench_local(|| {
         let mut rng = SmallRng::seed_from_u64(0xABCD);
         let mut acc: u64 = 0;
@@ -133,7 +133,7 @@ fn len_get(b: Bencher) {
 #[divan::bench(max_time = Duration::from_secs(6))]
 fn agg_build(b: Bencher) {
     let v = initial_values_i64();
-    b.bench_local(|| divan::black_box(DeltaColumn::<i64>::from_values(v.clone())));
+    b.bench_local(|| divan::black_box(DeltaColumn::<i64>::from_values(&v)));
 }
 
 #[divan::bench(max_time = Duration::from_secs(6))]
@@ -141,7 +141,7 @@ fn agg_insert(b: Bencher) {
     let v = initial_values_i64();
     b.counter(ItemsCount::new((OPS * K) as u64))
         .bench_local(|| {
-            let mut c = DeltaColumn::<i64>::from_values(v.clone());
+            let mut c = DeltaColumn::<i64>::from_values(&v);
             let mut rng = SmallRng::seed_from_u64(0x1234);
             for _ in 0..OPS {
                 let pos = rng.random_range(0..=c.len());
@@ -157,7 +157,7 @@ fn agg_delete(b: Bencher) {
     let v = initial_values_i64();
     b.counter(ItemsCount::new((OPS * K) as u64))
         .bench_local(|| {
-            let mut c = DeltaColumn::<i64>::from_values(v.clone());
+            let mut c = DeltaColumn::<i64>::from_values(&v);
             let mut rng = SmallRng::seed_from_u64(0x1234);
             for _ in 0..OPS {
                 let len = c.len();
@@ -176,7 +176,7 @@ fn agg_replace(b: Bencher) {
     let v = initial_values_i64();
     b.counter(ItemsCount::new((OPS * K) as u64))
         .bench_local(|| {
-            let mut c = DeltaColumn::<i64>::from_values(v.clone());
+            let mut c = DeltaColumn::<i64>::from_values(&v);
             let mut rng = SmallRng::seed_from_u64(0x1234);
             for _ in 0..OPS {
                 let len = c.len();
@@ -193,7 +193,7 @@ fn agg_replace(b: Bencher) {
 
 #[divan::bench(max_time = Duration::from_secs(6))]
 fn agg_get(b: Bencher) {
-    let c = DeltaColumn::<i64>::from_values(initial_values_i64());
+    let c = DeltaColumn::<i64>::from_values(&initial_values_i64());
     b.counter(ItemsCount::new(OPS as u64)).bench_local(|| {
         let mut rng = SmallRng::seed_from_u64(0xABCD);
         let mut acc: i64 = 0;
@@ -209,7 +209,7 @@ fn agg_get(b: Bencher) {
 
 #[divan::bench(max_time = Duration::from_secs(6))]
 fn agg_find_by_value(b: Bencher) {
-    let c = DeltaColumn::<i64>::from_values(initial_values_i64());
+    let c = DeltaColumn::<i64>::from_values(&initial_values_i64());
     b.counter(ItemsCount::new(OPS as u64)).bench_local(|| {
         let mut rng = SmallRng::seed_from_u64(0xABCD);
         let mut acc: usize = 0;

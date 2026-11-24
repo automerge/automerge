@@ -1,20 +1,14 @@
-//! `ColumnIndex` abstracts the slab-index backing of a `Column`.
+//! The indexes of a column's slabs: what each slab weighs, and where in
+//! the column it starts.
 //!
-//! Two concrete implementations:
+//! * [`BitIndex<W>`]: a Fenwick tree over a `Vec<W>` of the slabs'
+//!   weights.
+//! * `crate::btree::SlabBTree<W>`: a B-tree over the slabs' weights, which
+//!   also keeps sums that a Fenwick tree cannot (and is the default).
 //!
-//! * [`BitIndex<W>`] — Fenwick BIT over a parallel `Vec<W>` of per-slab
-//!   weights.  Fast, cache-tight; requires `W: SlabWeight` (AddAssign +
-//!   SubAssign for incremental updates).
-//! * `crate::btree::SlabBTree<W>` — B-tree over per-slab weights.
-//!   Slightly slower for plain positional lookups but supports
-//!   non-invertible aggregates (min/max) that Fenwick can't handle, and
-//!   typically wins on compound prefix-sum queries.
-//!
-//! `Column<T, WF, Idx>` is parameterised over `Idx: ColumnIndex<WF::Weight>`
-//! so you can swap indices with a type parameter change.
+//! [`IndexOps`] is what the verified core asks of an index.
 
 use crate::sealed::Sealed;
-use std::ops::Range;
 
 #[cfg(verus_keep_ghost)]
 use crate::btree::{
@@ -28,47 +22,6 @@ use crate::fenwick;
 use crate::fenwick::{bit_ok, lemma_sum_split, lens, sum, total};
 #[allow(unused_imports)]
 use vstd::prelude::*;
-
-/// Abstraction over the per-slab weight index a `Column` maintains.
-///
-/// Implementors store one weight per slab plus whatever aggregation
-/// structure they need (Fenwick array, B-tree, etc.) and answer
-/// positional queries in O(log n).
-pub trait ColumnIndex<W>: Sealed + Default + IndexOps<W> {
-    /// Construct from an iterator of per-slab weights in slab order.
-    fn from_weights<I: IntoIterator<Item = W>>(iter: I) -> Self;
-
-    /// Number of slabs indexed.
-    fn len(&self) -> usize;
-
-    /// `true` if no slabs are indexed.
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Locate the slab containing the item at absolute position `index`
-    /// within the column.  Returns `(slab_idx, offset_within_slab)`.
-    /// If `index >= total_items`, returns `(len(), 0)` — past-end sentinel,
-    /// matching the behaviour of `fenwick::find`.
-    fn find_slab(&self, index: usize) -> (usize, usize);
-
-    /// Number of items in slabs `0..slab_idx` — the inverse of
-    /// [`find_slab`](Self::find_slab).  O(log n) for both implementations.
-    /// `slab_idx` may equal `len()`, in which case the total item count
-    /// is returned.
-    fn items_before(&self, slab_idx: usize) -> usize;
-
-    /// Replace slab `slab_idx`'s weight with `new_weight`.  O(log n) for
-    /// both implementations.
-    fn update_slab(&mut self, slab_idx: usize, new_weight: W);
-
-    /// Splice a range of slab weights — remove entries in `range`,
-    /// insert `new_weights` in their place.  Used for structural
-    /// changes (overflow, cross-slab drain, merges).
-    fn splice<I: IntoIterator<Item = W>>(&mut self, range: Range<usize>, new_weights: I);
-}
-
-// ── IndexOps: the verified interface ─────────────────────────────────────
 
 pub(crate) use crate::trusted::splice_vec;
 verus! {
@@ -186,20 +139,6 @@ pub trait IndexOps<W>: Sized {
             n == sum(self.ws().map_values(|w: W| Self::wlen(w)), 0, i as int),
     ;
 
-    /// Slab `i`'s weight. Unspecified: only overflow checks read it, and
-    /// they can only panic.
-    fn ix_weight(&self, i: usize) -> W
-        requires
-            self.ok(),
-            i < self.ws().len(),
-    ;
-
-    /// Every slab's weight, merged (likewise unspecified).
-    fn ix_total(&self) -> W
-        requires
-            self.ok(),
-    ;
-
     /// Replace slab `i`'s weight.
     fn ix_set(&mut self, i: usize, w: W)
         requires
@@ -232,7 +171,7 @@ pub trait IndexOps<W>: Sized {
 
 verus! {
 
-/// Fenwick-BIT-backed `ColumnIndex`.  Holds a parallel cache of
+/// A Fenwick-tree index of slab weights.  Holds a parallel cache of
 /// per-slab weights alongside the BIT so point updates can read the
 /// old weight.
 ///
@@ -466,22 +405,6 @@ impl<W: SlabWeight> IndexOps<W> for BitIndex<W> {
         self.rebuild();
     }
 
-    #[verifier::external_body]
-    fn ix_weight(&self, i: usize) -> W {
-        self.weights[i].clone()
-    }
-
-    #[verifier::external_body]
-    fn ix_total(&self) -> W {
-        // BIT prefix query over every weight
-        let mut acc = W::default();
-        let mut i = self.weights.len();
-        while i > 0 {
-            acc += self.bit[i].clone();
-            i -= i & i.wrapping_neg();
-        }
-        acc
-    }
 }
 
 /// Where every merge whose item counts fit is representable
@@ -628,13 +551,6 @@ impl<A: SlabAggregate> IndexOps<A> for SlabBTree<A> {
         self.splice_vec(start, end, new);
     }
 
-    fn ix_weight(&self, i: usize) -> A {
-        self.slab_agg(i)
-    }
-
-    fn ix_total(&self) -> A {
-        self.root_agg()
-    }
 }
 
 /// Aggregates' item counts.
@@ -686,64 +602,6 @@ impl<W: SlabWeight> Default for BitIndex<W> {
 
 impl<W: SlabWeight> Sealed for BitIndex<W> {}
 
-impl<W: SlabWeight> ColumnIndex<W> for BitIndex<W> {
-    fn from_weights<I: IntoIterator<Item = W>>(iter: I) -> Self {
-        Self::from_vec(iter.into_iter().collect())
-    }
-
-    fn len(&self) -> usize {
-        self.weights.len()
-    }
-
-    fn find_slab(&self, index: usize) -> (usize, usize) {
-        self.find(index)
-    }
-
-    fn items_before(&self, slab_idx: usize) -> usize {
-        // Standard BIT prefix query: sum of weights[0..slab_idx].
-        debug_assert!(slab_idx <= self.weights.len());
-        self.before(slab_idx)
-    }
-
-    fn update_slab(&mut self, slab_idx: usize, new_weight: W) {
-        self.set(slab_idx, new_weight);
-    }
-
-    fn splice<I: IntoIterator<Item = W>>(&mut self, range: Range<usize>, new_weights: I) {
-        self.weights.splice(range, new_weights);
-        self.rebuild();
-    }
-}
-
 // ── SlabBTree: B-tree-backed ───────────────────────────────────────────────
 
 impl<A: SlabAggregate> Sealed for SlabBTree<A> {}
-
-impl<A: SlabAggregate> ColumnIndex<A> for SlabBTree<A> {
-    fn from_weights<I: IntoIterator<Item = A>>(iter: I) -> Self {
-        SlabBTree::from_iter(iter)
-    }
-
-    fn len(&self) -> usize {
-        SlabBTree::len(self)
-    }
-
-    fn find_slab(&self, index: usize) -> (usize, usize) {
-        match self.find_by_prefix(index) {
-            Some((si, items_before)) => (si, index - items_before),
-            None => (SlabBTree::len(self), 0),
-        }
-    }
-
-    fn items_before(&self, slab_idx: usize) -> usize {
-        self.items_before_slab(slab_idx)
-    }
-
-    fn update_slab(&mut self, slab_idx: usize, new_weight: A) {
-        SlabBTree::update_slab(self, slab_idx, new_weight);
-    }
-
-    fn splice<I: IntoIterator<Item = A>>(&mut self, range: Range<usize>, new_weights: I) {
-        SlabBTree::splice(self, range, new_weights);
-    }
-}

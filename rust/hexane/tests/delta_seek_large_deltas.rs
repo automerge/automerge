@@ -8,7 +8,7 @@
 use hexane::DeltaColumn;
 
 fn check(vals: &[i64]) {
-    let col = DeltaColumn::<i64>::from_values(vals.to_vec());
+    let col = DeltaColumn::<i64>::from_values(vals);
     for &t in vals.iter().chain([0, 1, -1].iter()) {
         let lo = vals.iter().position(|&v| v >= t).unwrap_or(vals.len());
         let hi = vals.iter().position(|&v| v > t).unwrap_or(vals.len());

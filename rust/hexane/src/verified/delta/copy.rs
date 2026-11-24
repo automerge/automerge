@@ -38,7 +38,7 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// # Panics
     ///
     /// Where splices are out of order or out of bounds, which the
-    /// `requires` rules out of a verified caller (in the old words); and
+    /// `requires` rules out of a verified caller; and
     /// where the column's values would span 2^63 or more, as for
     /// `splice`. The column is then left an empty one.
     #[inline(always)]

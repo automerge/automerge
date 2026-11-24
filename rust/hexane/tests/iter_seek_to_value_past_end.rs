@@ -10,7 +10,7 @@ use hexane::Column;
 
 /// A sorted column over many slabs.
 fn sorted() -> Column<u64> {
-    Column::<u64>::from_values_with_max_segments((0..200).collect(), 4)
+    Column::<u64>::from_values_with_max_segments(&(0..200).collect::<Vec<_>>(), 4)
 }
 
 #[test]

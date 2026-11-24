@@ -44,7 +44,7 @@ fn a_column_too_long_to_save_fails_to_load() {
     // and a bool column's runs, `usize::MAX - 2` items
     let mut data = vec![];
     for n in [i64::MAX as u64, i64::MAX as u64 - 1] {
-        data.extend_from_slice(Leb128::encode_unsigned(n).as_bytes());
+        Leb128::put_u(n, &mut data);
     }
     assert!(Column::<bool>::load(&data).is_err());
 }

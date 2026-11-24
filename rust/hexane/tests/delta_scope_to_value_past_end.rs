@@ -11,8 +11,8 @@ use hexane::{Column, DeltaColumn};
 
 fn columns() -> (Column<u64>, DeltaColumn<i64>) {
     (
-        Column::<u64>::from_values((0..200).collect()),
-        DeltaColumn::<i64>::from_values((0..200).collect()),
+        Column::<u64>::from_values(&(0..200).collect::<Vec<_>>()),
+        DeltaColumn::<i64>::from_values(&(0..200).collect::<Vec<_>>()),
     )
 }
 

@@ -8,9 +8,9 @@
 
 use hexane::{Column, DeltaColumn, PackError, PrefixColumn};
 
-fn loaded<T: hexane::ColumnValue>(vals: Vec<T>) -> Column<T> {
+fn loaded(vals: Vec<u64>) -> Column<u64> {
     // loaded columns start at the same edit counter
-    Column::<T>::load(&Column::<T>::from_values(vals).save()).unwrap()
+    Column::<u64>::load(&Column::<u64>::from_values(&vals).save()).unwrap()
 }
 
 #[test]
@@ -36,15 +36,15 @@ fn a_position_that_fits_resumes() {
 
 #[test]
 fn a_resumed_prefix_iterator_sums_its_own_column() {
-    let a = PrefixColumn::<u64>::load(&Column::<u64>::from_values(vec![1; 10]).save()).unwrap();
-    let b = PrefixColumn::<u64>::load(&Column::<u64>::from_values(vec![5; 10]).save()).unwrap();
-    let mut it = a.iter();
+    let a = PrefixColumn::<u64>::load(&Column::<u64>::from_values(&[1; 10]).save()).unwrap();
+    let b = PrefixColumn::<u64>::load(&Column::<u64>::from_values(&[5; 10]).save()).unwrap();
+    let mut it = a.prefix_iter();
     it.nth(2);
     let mut it = it.suspend().try_resume(&b).unwrap();
     assert_eq!(it.total(), 15);
     assert_eq!(it.next().map(|v| v.total()), Some(20));
     // and on the same column, as before
-    let mut it = a.iter();
+    let mut it = a.prefix_iter();
     it.nth(2);
     let mut it = it.suspend().try_resume(&a).unwrap();
     assert_eq!(it.next().map(|v| v.total()), Some(4));
@@ -54,9 +54,9 @@ fn a_resumed_prefix_iterator_sums_its_own_column() {
 /// total, resumed on another column, from the same position there.
 #[test]
 fn a_reset_prefix_iterator_resumes_on_another_column() {
-    let a = PrefixColumn::<u64>::load(&Column::<u64>::from_values(vec![5; 10]).save()).unwrap();
-    let b = PrefixColumn::<u64>::load(&Column::<u64>::from_values(vec![1; 10]).save()).unwrap();
-    let mut it = a.iter();
+    let a = PrefixColumn::<u64>::load(&Column::<u64>::from_values(&[5; 10]).save()).unwrap();
+    let b = PrefixColumn::<u64>::load(&Column::<u64>::from_values(&[1; 10]).save()).unwrap();
+    let mut it = a.prefix_iter();
     it.nth(2);
     it.reset_prefix();
     it.nth(1);
@@ -65,7 +65,7 @@ fn a_reset_prefix_iterator_resumes_on_another_column() {
     assert_eq!(it.total(), 2);
     assert_eq!(it.next().map(|v| v.total()), Some(3));
     // and on the same column, as before
-    let mut it = a.iter();
+    let mut it = a.prefix_iter();
     it.nth(2);
     it.reset_prefix();
     it.nth(1);
@@ -76,7 +76,7 @@ fn a_reset_prefix_iterator_resumes_on_another_column() {
 
 #[test]
 fn a_resumed_delta_iterator_reads_its_own_column() {
-    let save = |vals: Vec<i64>| DeltaColumn::<i64>::from_values(vals).save();
+    let save = |vals: Vec<i64>| DeltaColumn::<i64>::from_values(&vals).save();
     let a = DeltaColumn::<i64>::load(&save((1..=10).collect())).unwrap();
     let b = DeltaColumn::<i64>::load(&save((100..110).collect())).unwrap();
     let mut it = a.iter();

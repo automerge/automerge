@@ -1,7 +1,10 @@
 //! A repeat run's count is an `i64` on the wire, so a column can't hold a
-//! run of more than `i64::MAX` equal values. Making one is a panic, as
-//! for `Column::fill`, rather than a column that saves to bytes that
-//! don't load.
+//! run of more than `i64::MAX` equal values. Making one by an edit is a
+//! panic, rather than a column that saves to bytes that don't load.
+//! (`Column::fill` requires a length that one run can count.)
+//!
+//! Only on 64-bit targets: a 32-bit `usize` can't count `i64::MAX` values.
+#![cfg(target_pointer_width = "64")]
 
 use hexane::Column;
 
@@ -19,7 +22,6 @@ fn growing_a_run_past_i64_max_panics_at_the_end() {
     col.push(5);
 }
 
-#[cfg(target_pointer_width = "64")]
 #[test]
 fn a_longer_column_of_shorter_runs_still_round_trips() {
     let mut col = Column::<u64>::fill(i64::MAX as usize, 5);

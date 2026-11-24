@@ -7,11 +7,10 @@ use hexane::{Codec, DeltaColumn, Leb128, PackError};
 
 /// A literal run of the deltas `ds`.
 fn literal(ds: &[i64]) -> Vec<u8> {
-    let mut b = Leb128::encode_signed(-(ds.len() as i64))
-        .as_bytes()
-        .to_vec();
+    let mut b = vec![];
+    Leb128::put_i(-(ds.len() as i64), &mut b);
     for &d in ds {
-        b.extend_from_slice(Leb128::encode_signed(d).as_bytes());
+        Leb128::put_i(d, &mut b);
     }
     b
 }
@@ -67,7 +66,7 @@ fn a_span_of_2_63_minus_1_loads() {
 #[test]
 fn a_leading_null_does_not_widen_the_span() {
     let values = vec![None, Some(i64::MIN), Some(-1)];
-    let col = DeltaColumn::<Option<i64>>::from_values(values.clone());
+    let col = DeltaColumn::<Option<i64>>::from_values(&values);
     let loaded = DeltaColumn::<Option<i64>>::load(&col.save()).unwrap();
     assert_eq!(loaded.to_vec(), values);
 }

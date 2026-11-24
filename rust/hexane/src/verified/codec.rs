@@ -1,11 +1,10 @@
-//! The number codecs of the verified public API, verified with Verus.
+//! The number codecs, verified with Verus.
 //!
 //! A column writes its numbers (run headers, null counts, and the
-//! integers it holds) with a codec. [`Column`](crate::Column) reaches
-//! one through the [`Codec`](crate::Codec) trait, of which Verus sees
-//! nothing. [`Codec`] is that trait with specifications: what the bytes
-//! of a number are, that no two numbers' bytes start the same string, and
-//! that the reading and writing functions read and write those bytes.
+//! integers it holds) with a codec. [`Codec`] says what a codec is: what
+//! the bytes of a number are, that no two numbers' bytes start the same
+//! string, and that the reading and writing functions read and write
+//! those bytes.
 //! It is *proved* for [`Leb128`](crate::Leb128), from the verified LEB128
 //! codec in `leb128_codec`.
 //!
@@ -35,8 +34,7 @@ verus! {
 /// A codec for the numbers of a [`Column`](super::Column),
 /// with what it does specified and proved. The codecs are this crate's
 /// ([`Leb128`](crate::Leb128), and `Bijou64` with the `bijou64`
-/// feature) and a client's own, as a client of the old API may write a
-/// [`Codec`](crate::Codec).
+/// feature) and a client's own.
 ///
 /// The proofs about a column rest on what this trait's functions ensure,
 /// its laws. Verus checks them for a client it is run on. A client
@@ -154,8 +152,7 @@ pub trait Codec {
 }
 
 /// The number of bytes of `n` as an unsigned LEB128 number: as many as
-/// [`Leb128`](crate::Leb128) writes of it. The old API's
-/// [`ulebsize`](crate::ulebsize).
+/// [`Leb128`](crate::Leb128) writes of it.
 #[inline(always)]
 pub fn ulebsize(n: u64) -> (r: u64)
     ensures
@@ -165,8 +162,7 @@ pub fn ulebsize(n: u64) -> (r: u64)
 }
 
 /// The number of bytes of `n` as a signed LEB128 number: as many as
-/// [`Leb128`](crate::Leb128) writes of it. The old API's
-/// [`lebsize`](crate::lebsize).
+/// [`Leb128`](crate::Leb128) writes of it.
 #[inline(always)]
 pub fn lebsize(n: i64) -> (r: u64)
     ensures

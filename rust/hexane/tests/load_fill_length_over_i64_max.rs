@@ -56,7 +56,7 @@ fn a_fill_of_i64_max_items_loads() {
 fn a_filled_load_with_a_loaded_length() {
     let mut b = vec![];
     for (n, v) in [(i64::MAX, 1u8), (i64::MAX - 2, 2)] {
-        b.extend_from_slice(Leb128::encode_signed(n).as_bytes());
+        Leb128::put_i(n, &mut b);
         b.push(v);
     }
     let len = Column::<u64>::load(&b).unwrap().len();

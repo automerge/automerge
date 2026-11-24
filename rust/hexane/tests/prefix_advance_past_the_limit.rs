@@ -8,13 +8,13 @@
 use hexane::PrefixColumn;
 
 fn ones() -> PrefixColumn<u32> {
-    PrefixColumn::<u32>::from_values(vec![1, 1, 1])
+    PrefixColumn::<u32>::from_values(&[1, 1, 1])
 }
 
 #[test]
 fn advancing_past_the_limit_from_the_start() {
     let col = ones();
-    let mut it = col.iter();
+    let mut it = col.prefix_iter();
     assert!(it.advance_prefix(u64::MAX).is_none());
     assert!(it.next().is_none());
 }
@@ -22,12 +22,12 @@ fn advancing_past_the_limit_from_the_start() {
 #[test]
 fn advancing_past_the_limit_from_further_on() {
     let col = ones();
-    let mut it = col.iter();
+    let mut it = col.prefix_iter();
     it.next();
     assert!(it.advance_prefix(u64::MAX - 1).is_none());
     assert!(it.next().is_none());
     // with the running total reset, too
-    let mut it = col.iter();
+    let mut it = col.prefix_iter();
     it.next();
     it.reset_prefix();
     assert!(it.advance_prefix(u64::MAX).is_none());
@@ -37,7 +37,7 @@ fn advancing_past_the_limit_from_further_on() {
 #[test]
 fn advancing_within_the_column_is_unchanged() {
     let col = ones();
-    let mut it = col.iter();
+    let mut it = col.prefix_iter();
     assert_eq!(it.advance_prefix(1).map(|s| s.pos), Some(1));
     assert_eq!(it.advance_prefix(0).map(|s| s.pos), Some(2));
     assert!(it.advance_prefix(5).is_none());

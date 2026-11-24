@@ -10,11 +10,11 @@ use hexane::{Column, DeltaColumn, Splice};
 
 /// A source of 64 items in 32 slabs: enough slabs for the estimate to run.
 fn source() -> Column<u64> {
-    Column::from_values_with_max_segments((0..64).collect(), 2)
+    Column::from_values_with_max_segments(&(0..64).collect::<Vec<u64>>(), 2)
 }
 
 fn dest() -> Column<u64> {
-    Column::from_values_with_max_segments((100..110).collect(), 2)
+    Column::from_values_with_max_segments(&(100..110).collect::<Vec<u64>>(), 2)
 }
 
 #[test]
@@ -22,7 +22,7 @@ fn an_empty_range_at_the_start_only_deletes() {
     let mut dst = dest();
     dst.copy_ranges(
         source(),
-        [Splice {
+        &[Splice {
             pos: 0,
             delete: 1,
             range: 0..0,
@@ -36,7 +36,7 @@ fn a_range_past_the_source_only_deletes() {
     let mut dst = dest();
     dst.copy_ranges(
         source(),
-        [Splice {
+        &[Splice {
             pos: 2,
             delete: 3,
             range: 100..200,
@@ -50,7 +50,7 @@ fn an_empty_range_at_a_slab_boundary_only_deletes() {
     let mut dst = dest();
     dst.copy_ranges(
         source(),
-        [Splice {
+        &[Splice {
             pos: 3,
             delete: 2,
             range: 10..10,
@@ -64,7 +64,7 @@ fn empty_ranges_beside_copies() {
     let mut dst = dest();
     dst.copy_ranges(
         source(),
-        [
+        &[
             Splice {
                 pos: 1,
                 delete: 1,
@@ -85,14 +85,14 @@ fn empty_ranges_beside_copies() {
 
 #[test]
 fn a_delta_column_too() {
-    let src = DeltaColumn::<u64>::from_values((0..64).collect());
+    let src = DeltaColumn::<u64>::from_values(&(0..64).collect::<Vec<_>>());
     let mut src2 = DeltaColumn::<u64>::with_max_segments(2);
     src2.splice(0, 0, src.iter());
     let mut dst = DeltaColumn::<u64>::with_max_segments(2);
     dst.splice(0, 0, 100..110);
     dst.copy_ranges(
         src2,
-        [Splice {
+        &[Splice {
             pos: 0,
             delete: 1,
             range: 0..0,

@@ -7,7 +7,7 @@
 //! the edit as it was, though those values are stored relative to what
 //! stands before them. [`DeltaColumn::splice`](crate::DeltaColumn::splice)
 //! does the second by rewriting the first non-null delta after the edit
-//! (the boundary) to reach the value it held; a [`DeltaEdit`](crate::delta::DeltaEdit)
+//! (the boundary) to reach the value it held; a [`DeltaEdit`](crate::DeltaEdit)
 //! cursor keeps a [`Ledger`] instead: the value standing before it in the
 //! column being written, and what the next original delta owes, which it
 //! pays when it moves past that delta.
@@ -345,7 +345,7 @@ proof fn lemma_same_rem(a: int, x: int, y: int)
     ;
 }
 
-/// The arithmetic of a [`DeltaEdit`](crate::delta::DeltaEdit) cursor:
+/// The arithmetic of a [`DeltaEdit`](crate::DeltaEdit) cursor:
 /// the value standing before the cursor in the column being written, and
 /// what the next original delta owes.
 pub(crate) struct Ledger {

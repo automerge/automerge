@@ -612,31 +612,3 @@ pub(crate) proof fn lemma_unlift_meta<'s, L: Lift<'s>>(data: Seq<u8>)
 }
 
 } // verus!
-
-// Outside `verus!`, so Verus takes it on trust; its spec items exist only
-// when Verus compiles the crate.
-impl<'s, T: crate::RleValue, V: crate::AsColumnRef<T>, C: crate::Codec> Lift<'s> for WOps<T, V, C> {
-    type W = WOps<T, T, C>;
-
-    #[cfg(verus_keep_ghost)]
-    fn lift(_v: VOf<'s, Self>) -> VOf<'static, Self::W> {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn axiom_lift(_v: VOf<'s, Self>) {}
-
-    #[cfg(verus_keep_ghost)]
-    fn axiom_lift_codec(_n: i64, _m: u64) {}
-
-    #[cfg(verus_keep_ghost)]
-    fn axiom_unlift(_w: VOf<'static, Self::W>) {}
-
-    #[inline(always)]
-    fn own(c: Self::Cow) -> <Self::W as WriteOps<'static>>::Cow {
-        RleCow::Owned(match c {
-            RleCow::Owned(v) => T::to_owned(v.as_column_ref()),
-            RleCow::Ref(g) => T::to_owned(g),
-        })
-    }
-}

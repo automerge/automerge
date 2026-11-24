@@ -929,9 +929,9 @@ impl<S: BoundedValues, E, M, B> BoundedFeed<E> for ValuesFeed<S, E, M, B> where
     }
 }
 
-/// A delta column's values as written: the trusted bridge to
-/// `DeltaInner::from_opt` (user code), which writes a delta, and to the
-/// edit model's owned values, whose deltas those read back are.
+/// A delta column's values as written: how a value is written as a
+/// delta, and the edit model's owned values, whose deltas those read back
+/// are. Its implementation proves it (`VDeltas`).
 pub(crate) trait DeltaWrite<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E as Slabs>::Tail>>: DeltaOps<
     <X::D as Decode>::Item,
 > {

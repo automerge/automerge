@@ -1,7 +1,6 @@
-//! Delta columns of the verified public API: the numbers a delta
-//! column holds ([`VDelta`]), how the values of the column underneath
-//! are deltas (`VDeltas`, in place of the old API's trusted
-//! `delta::indexed::DB`), sources of values that say what they give
+//! Delta columns: the numbers a delta column holds ([`VDelta`]), how the
+//! values of the column underneath are deltas (`VDeltas`), sources of
+//! values that say what they give
 //! (`SliceValues`, `SliceItems`), so that what the verified cores build
 //! from them is known, and the column ([`DeltaColumn`]). The
 //! column's iterator ([`DeltaIter`]) is in `delta/iter.rs`.
@@ -1163,7 +1162,7 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// Delete the value at `at`, where there is one: then the column
     /// counts an edit more. Past the end there is nothing to delete, and
     /// the call is no edit, as it is none of
-    /// [`DeltaColumn`](crate::DeltaColumn).
+    /// [`DeltaColumn`].
     #[inline(always)]
     pub fn remove(&mut self, at: usize)
         ensures
@@ -1213,7 +1212,7 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// Delete every value. The column keeps its segment budget.
     ///
     /// Of a column with no value this is no edit, as it is none of
-    /// [`DeltaColumn`](crate::DeltaColumn). Of any other the column
+    /// [`DeltaColumn`]. Of any other the column
     /// counts an edit more.
     #[inline(always)]
     pub fn clear(&mut self)

@@ -6,7 +6,7 @@ use hexane::{Column, DeltaColumn, PrefixColumn, Shiftable};
 
 #[test]
 fn delta_shift_from_behind_yields_from_the_iterator() {
-    let col = DeltaColumn::<u64>::from_values(vec![10, 20, 30, 40, 50]);
+    let col = DeltaColumn::<u64>::from_values(&[10, 20, 30, 40, 50]);
     let mut it = col.iter();
     it.nth(2);
     it.shift(1..4);
@@ -16,9 +16,9 @@ fn delta_shift_from_behind_yields_from_the_iterator() {
 #[test]
 fn delta_shift_agrees_with_the_other_iterators() {
     let values: Vec<u64> = (0..200).map(|i| i * 3 % 17).collect();
-    let plain = Column::<u64>::from_values(values.clone());
-    let prefix = PrefixColumn::<u64>::from_values(values.clone());
-    let delta = DeltaColumn::<u64>::from_values(values.clone());
+    let plain = Column::<u64>::from_values(&values);
+    let prefix = PrefixColumn::<u64>::from_values(&values);
+    let delta = DeltaColumn::<u64>::from_values(&values);
     for (at, range) in [
         (0, 0..5),
         (50, 10..60),
@@ -27,7 +27,7 @@ fn delta_shift_agrees_with_the_other_iterators() {
         (199, 0..1),
     ] {
         let mut a = plain.iter();
-        let mut b = prefix.iter();
+        let mut b = prefix.prefix_iter();
         let mut c = delta.iter();
         if at > 0 {
             a.nth(at - 1);
@@ -52,7 +52,7 @@ fn delta_shift_agrees_with_the_other_iterators() {
 
 #[test]
 fn delta_advance_to_behind_stays() {
-    let col = DeltaColumn::<u64>::from_values(vec![10, 20, 30, 40, 50]);
+    let col = DeltaColumn::<u64>::from_values(&[10, 20, 30, 40, 50]);
     let mut it = col.iter();
     it.nth(2);
     it.advance_to(1);

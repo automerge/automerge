@@ -17,16 +17,14 @@
 //! encodings, so a column that loads saves back to the same bytes: each
 //! value sequence has only one canonical grouping (`unique`).
 //!
-//! The value type and the varint codec come in through [`RleOps`].  Its
-//! implementation, [`Ops`], is trusted: it forwards to the column type's
-//! [`RleValue`] impl and the codec, and its contract is
-//! what those must satisfy — encodings are prefix-free and nonempty, and
-//! `==` on values is equality.
+//! The value type and the varint codec come in through [`RleOps`]: its
+//! contract is what they must satisfy (encodings are prefix-free and
+//! nonempty, and `==` on values is equality). Each implementation proves
+//! it (the verified API's value types, `crate::verified::value`).
 
 #![allow(clippy::len_zero)]
 
-use crate::{Codec, PackError, RleValue};
-use std::marker::PhantomData;
+use crate::PackError;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -207,108 +205,6 @@ pub trait WriteOps<'a> {
 }
 
 } // verus!
-
-/// [`RleOps`] for column type `T` with codec `C`: the trusted bridge from
-/// the verified RLE code to the value type's and codec's own code.
-pub struct Ops<T, C>(PhantomData<(T, C)>);
-
-// Outside `verus!`, so Verus takes it on trust; its spec items exist only
-// when Verus compiles the crate.
-impl<'a, T: RleValue, C: Codec> RleOps<'a> for Ops<T, C> {
-    type V = <T as crate::ColumnValueRef>::Get<'a>;
-
-    #[cfg(verus_keep_ghost)]
-    fn nullable() -> bool {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn is_null(_v: Self::V) -> bool {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn enc(_v: Self::V) -> Seq<u8> {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn null() -> Self::V {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn enc_signed(_n: i64) -> Seq<u8> {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn enc_unsigned(_n: u64) -> Seq<u8> {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn axiom_enc(_v: Self::V, _w: Self::V, _s: Seq<u8>, _t: Seq<u8>) {}
-
-    #[cfg(verus_keep_ghost)]
-    fn axiom_null() {}
-
-    #[cfg(verus_keep_ghost)]
-    fn axiom_enc_signed(_a: i64, _b: i64, _s: Seq<u8>, _t: Seq<u8>) {}
-
-    #[cfg(verus_keep_ghost)]
-    fn axiom_enc_unsigned(_a: u64, _b: u64, _s: Seq<u8>, _t: Seq<u8>) {}
-
-    #[inline(always)]
-    fn nullable_exec() -> bool {
-        T::NULLABLE
-    }
-
-    #[inline(always)]
-    fn same(a: &Self::V, b: &Self::V) -> bool {
-        *a == *b
-    }
-
-    #[inline(always)]
-    fn try_unpack(data: &'a [u8]) -> Result<(usize, Self::V), PackError> {
-        T::try_unpack::<C>(data)
-    }
-
-    #[inline(always)]
-    fn unpack(data: &'a [u8]) -> (usize, Self::V) {
-        T::unpack::<C>(data)
-    }
-
-    #[inline(always)]
-    fn value_len(data: &[u8]) -> Option<usize> {
-        T::value_len::<C>(data)
-    }
-
-    #[inline(always)]
-    fn get_null() -> Self::V {
-        T::get_null()
-    }
-
-    #[inline(always)]
-    fn read_signed_opt(data: &[u8]) -> Option<(usize, i64)> {
-        C::read_signed(data)
-    }
-
-    #[inline(always)]
-    fn read_unsigned_opt(data: &[u8]) -> Option<(usize, u64)> {
-        C::read_unsigned(data)
-    }
-
-    #[inline(always)]
-    fn read_signed(data: &[u8]) -> Result<(usize, i64), PackError> {
-        C::try_read_signed(data)
-    }
-
-    #[inline(always)]
-    fn read_unsigned(data: &[u8]) -> Result<(usize, u64), PackError> {
-        C::try_read_unsigned(data)
-    }
-}
 
 verus! {
 

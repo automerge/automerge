@@ -15,7 +15,7 @@ fn scan(vals: &[i64], lo: i64, hi: i64) -> Vec<usize> {
 }
 
 fn check(vals: &[i64]) {
-    let col = DeltaColumn::<i64>::from_values(vals.to_vec());
+    let col = DeltaColumn::<i64>::from_values(vals);
     let mut bounds = vec![i64::MIN, i64::MIN + 1, -1, 0, 1, i64::MAX - 1, i64::MAX];
     for &v in vals {
         bounds.extend([v.saturating_sub(1), v, v.saturating_add(1)]);
@@ -61,6 +61,6 @@ fn small_values_with_any_bounds() {
 #[test]
 fn the_largest_u64_a_column_holds() {
     let max = i64::MAX as u64;
-    let col = DeltaColumn::<u64>::from_values(vec![5, max, max]);
+    let col = DeltaColumn::<u64>::from_values(&[5, max, max]);
     assert_eq!(col.find_by_value(max).collect::<Vec<_>>(), vec![1, 2]);
 }

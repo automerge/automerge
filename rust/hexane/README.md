@@ -20,12 +20,17 @@ useful anywhere you want an editable, compressed, typed sequence.
 |------|--------------|-------------------|
 | [`Column<T>`] | random access, splice, iteration | you just need an editable compressed sequence |
 | [`PrefixColumn<T>`] | O(log n) running-sum queries | values are *sizes* or *counts* and you need offsets |
+| [`AccColumn<T>`] | running sums in a type of your own | you add up something that is not a number |
 | [`DeltaColumn<T>`] | delta encoding, find-by-value | values are mostly sequential (IDs, counters) |
 | [`RawColumn`] | uncompressed byte arena | variable-sized blobs addressed by byte range |
 
-Supported value types: `u32`, `u64`, `i64`, `usize`, `NonZeroU32`, `String`,
-`Vec<u8>`, `bool` — and `Option<T>` of each, stored as first-class nulls.
-Reads are zero-copy where possible: a `Column<String>` hands out `&str`.
+Supported value types: `u32`, `u64`, `i32`, `i64`, `usize`, `NonZeroU32`,
+`String`, `Vec<u8>`, `bool`, and `Option<T>` of each, stored as
+first-class nulls; and types of your own (below). Reads are zero-copy where
+possible: a `Column<String>` hands out `&str`, and takes one.
+
+Every public function has a contract, which [Verus] has proved: see
+[Formal verification](#formal-verification).
 
 ## Quick start
 
@@ -33,8 +38,8 @@ Reads are zero-copy where possible: a `Column<String>` hands out `&str`.
 use hexane::Column;
 
 let mut col = Column::<Option<String>>::new();
-col.push(Some("hello"));        // &str accepted anywhere String is
-col.push(None::<String>);       // nulls are part of the encoding
+col.push(Some("hello"));        // a column takes and gives values borrowed
+col.push(None);                 // nulls are part of the encoding
 col.push(Some("world"));
 
 assert_eq!(col.get(0), Some(Some("hello")));
@@ -59,15 +64,17 @@ number: it converts "record 2" into "bytes 8..15". `PrefixColumn` keeps
 per-slab sums in its B-tree so any running sum is O(log n), and its
 iterators answer both views of the accumulator with unambiguous names:
 **`prefix()` is the sum *before* an item (exclusive), `total()` the sum
-*through* it (inclusive).**
+*through* it (inclusive).** A prefix column is a `Column` kept with sums
+(`Column<T, Leb128, SumIndex>`): `iter` and `get` read its values,
+`prefix_iter` and `get_prefixed` its values with their sums.
 
 ```rust
 use hexane::PrefixColumn;
 
 // Byte lengths of four records stored elsewhere.
-let lens = PrefixColumn::<u32>::from_values(vec![5, 3, 7, 2]);
+let lens = PrefixColumn::<u32>::from_values(&[5, 3, 7, 2]);
 
-let pv = lens.get(2).unwrap();          // a PrefixedValue
+let pv = lens.get_prefixed(2).unwrap(); // a PrefixedValue
 assert_eq!(pv.value, 7);
 assert_eq!(pv.prefix(), 8);             // bytes before record 2
 assert_eq!(pv.total(), 15);             // bytes through record 2
@@ -79,8 +86,13 @@ assert_eq!(lens.sum_range(1..3), 10);          // 3 + 7
 assert_eq!(lens.get_index_for_total(10), 2);   // which record owns offset 10?
 
 // Plain values, when you don't need sums:
-assert_eq!(lens.values().get(1), Some(3));
+assert_eq!(lens.get(1), Some(3));
 ```
+
+The sums are kept in a type wide enough for them (`u64` for `u32` values,
+`u128` for `u64`), and a column whose sums would not fit is refused on
+load and panics on an edit. An [`AccColumn<T>`] sums in a type of your
+own, which need not be a number (automerge's mark sets are kept this way).
 
 ### `DeltaColumn<T>` — sequential data, tiny bytes
 
@@ -91,7 +103,7 @@ data collapses into a few runs. A per-slab min/max index makes
 ```rust
 use hexane::DeltaColumn;
 
-let ids = DeltaColumn::<u64>::from_values(vec![100, 101, 102, 103, 200]);
+let ids = DeltaColumn::<u64>::from_values(&[100, 101, 102, 103, 200]);
 assert_eq!(ids.get(3), Some(103));
 assert_eq!(ids.find_first(200), Some(4));
 assert_eq!(ids.find_by_range(101..104).collect::<Vec<_>>(), vec![1, 2, 3]);
@@ -105,7 +117,7 @@ unsigned types, `< 2⁶³`). This is not an implementation quirk — wire deltas
 are `i64`, and deleting an element makes its neighbors adjacent, so *any*
 pair of values may someday need their difference encoded. 2⁶³ is exactly
 the boundary at which that stays representable. Writes outside the domain
-panic; [`load`] rejects such data with an error; queries for unstorable
+panic; `load` rejects such data with an error; queries for unstorable
 values return empty.
 
 ### `RawColumn` — the byte arena
@@ -130,7 +142,7 @@ When values arrive in order — building a change, parsing a file — skip the
 column and stream:
 
 ```rust
-use hexane::{Encoder, EncoderApi, DeltaEncoder};
+use hexane::{DeltaEncoder, Encoder};
 
 // RLE bytes straight from an iterator:
 let bytes = Encoder::<u64>::encode([7u64, 7, 7, 8]);
@@ -153,13 +165,14 @@ column costs zero bytes in a saved document.
 ## Loading untrusted data
 
 `load` fully validates: every run header, every value, UTF-8 for strings,
-delta running sums with overflow checks, domain checks per type. Only after
-that validation do the unchecked hot paths ever touch the bytes.
+delta running sums with overflow checks, domain checks per type. It accepts
+exactly the canonical encodings of the values (each sequence of values has
+one), so a column that loads saves back to the same bytes.
 
 ```rust
 use hexane::{Column, LoadOpts};
 
-let bytes = Column::<u64>::from_values(vec![1, 2, 3]).save();
+let bytes = Column::<u64>::from_values(&[1, 2, 3]).save();
 
 // Expect an exact length; treat empty input as "3 zeros".
 let col = Column::<u64>::load_with(
@@ -172,12 +185,11 @@ assert_eq!(col.len(), 3);
 Loads can also stream: `load_iter` yields the column's runs *during*
 the decode pass, so a consumer that needs the data anyway reads it while
 the column builds — one pass over the bytes instead of load-then-iterate.
-(This is how automerge builds its op indexes at load time.)
 
 ```rust
 use hexane::{Column, LoadOpts};
 
-let bytes = Column::<u64>::from_values(vec![1, 1, 2, 2, 2]).save();
+let bytes = Column::<u64>::from_values(&[1, 1, 2, 2, 2]).save();
 
 let mut iter = Column::<u64>::load_iter(&bytes, LoadOpts::new());
 let mut total = 0;
@@ -188,10 +200,10 @@ let col = iter.finalize().unwrap();      // the fully-validated column
 assert_eq!((col.len(), total), (5, 8));
 ```
 
-The streaming decoders (`decoder`, `DeltaDecoder::new`) trust their
-bytes, as they come from an encoder or `save` in the same program. For
-bytes from outside, `try_decoder` and `DeltaDecoder::try_new` check them
-first, as `load` does:
+The streaming decoders (`decoder`, `DeltaDecoder::new`) take bytes that
+are a saved column, as an encoder or `save` in the same program writes
+them. For bytes from outside, `try_decoder` and `DeltaDecoder::try_new`
+check them first, as `load` does:
 
 ```rust
 use hexane::{DeltaDecoder, PackError};
@@ -204,12 +216,13 @@ assert!(DeltaDecoder::<u32>::try_new(&[0x7f, 0x7f]).is_err()); // -1 isn't a u32
 # Ok::<(), PackError>(())
 ```
 
-The failure-mode policy is uniform across the crate:
+The failure-mode policy:
 
 | Situation | Behavior |
 |-----------|----------|
-| Your code breaks a documented precondition (out-of-bounds splice, out-of-domain delta write, inverted range) | **panic** — it points at the bug |
 | Untrusted bytes are malformed, hostile, or out of domain | **`Err(PackError)`** — `load` never panics |
+| A value the column cannot hold (a delta out of its domain, a sum that does not fit) | **panic**, before the column changes where the contract says so |
+| A call outside its contract's `requires` (an out-of-bounds splice, a decoder of bytes that are no saved column) | a program checked by Verus cannot make one; any other has to keep the contract itself, and gets an unspecified result or a panic, never anything unsafe (the crate has no `unsafe`) |
 | A query asks for a value the column could never contain | **empty result** — "not found" is the truthful answer |
 
 ## How it works
@@ -244,430 +257,167 @@ is one run, in one slab, forever:
 ```rust
 use hexane::Column;
 
-let flags = Column::<bool>::from_values(vec![false; 1_000_000]);
+let flags = Column::<bool>::from_values(&vec![false; 1_000_000]);
 assert_eq!(flags.save().len(), 3);   // one run: a single LEB128 count
 
-let mut sparse = Column::<Option<u32>>::from_values(vec![None; 1_000_000]);
-sparse.splice(500_000, 0, [None::<u32>, None, None]);  // ~100ns: a count bump
+let mut sparse = Column::<Option<u32>>::fill(1_000_000, None);
+sparse.splice(500_000, 0, [None, None, None]);  // ~100ns: a count bump
 assert_eq!(sparse.len(), 1_000_003);
 
 // And save_to_unless elides it from the file entirely:
 let mut out = Vec::new();
-assert!(sparse.save_to_unless(&mut out, None::<u32>).is_empty());
+assert!(sparse.save_to_unless(&mut out, None).is_empty());
 ```
 
 This makes speculative schema — columns you *might* need — nearly free to
 carry: sub-150ns per edit, a handful of bytes in memory, zero bytes on
-disk. (Timings from the divan benches on an M-series laptop; run
-`cargo bench` for yours.)
+disk.
 
 ## Custom value types
 
-Two small trait impls teach a `Copy` type the wire format, and both
-`Column<T>` and `Column<Option<T>>` fall out — see the worked `ValueMeta`
-example on [`ColumnValue`]. Implement [`PrefixValue`] too and
-`PrefixColumn<T>` works as well; automerge's op metadata columns are built
-exactly this way. The encoding must be a code, so that each value's bytes
-are its alone: [`RleValue`] spells out what that asks of an impl.
+A `Copy` type of your own is stored as one of the built-in numbers
+([`VNewtype`]): say which, and how to convert. A number that is no value
+of the type is refused on load, so each value keeps one encoding. Both
+`Column<T>` and `Column<Option<T>>` then work.
+
+```rust
+use hexane::{Column, PackError, VNewtype};
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Kind {
+    Int,
+    Str,
+}
+
+impl VNewtype for Kind {
+    type Base = u64;
+
+    fn to_base(self) -> u64 {
+        match self {
+            Kind::Int => 0,
+            Kind::Str => 1,
+        }
+    }
+
+    fn from_base(b: u64) -> Result<Self, PackError> {
+        match b {
+            0 => Ok(Kind::Int),
+            1 => Ok(Kind::Str),
+            _ => Err(PackError::InvalidValue(format!("not a kind: {b}"))),
+        }
+    }
+}
+
+let mut col = Column::<Option<Kind>>::new();
+col.push(Some(Kind::Int));
+col.push(None);
+assert_eq!(col.get(0), Some(Some(Kind::Int)));
+assert!(Column::<Kind>::load(&[2, 2]).is_err()); // 2 is no kind
+```
+
+A type with an encoding of its own implements [`RleValue`] instead, and a
+codec of your own [`Codec`]. A type whose values add up to something in a
+prefix column implements [`VAmount`] (a number) or [`VAdds`] (an
+accumulator of your own, for an [`AccColumn<T>`]). Each of these traits
+states laws that a client checked by Verus proves; any other client has
+to keep them itself.
 
 ## Format stability
 
-The byte format **is** the automerge document format, so it is frozen. The
-test suite pins it with golden fixtures — byte-exact expected encodings for
-every codec, captured against the original reference implementation. If a
-change trips one of those tests, it isn't a test failure; it's a
-compatibility break with every existing document.
-
-Behind that sit the rest of the guarantees: property tests and fuzzers with
-reference models for every column type, a structural invariant checker that
-re-verifies every cached B-tree aggregate inside the fuzz loops, and
-validate-on-load backing the one `unsafe` block in the crate.
+The byte format **is** the automerge document format, so it is frozen.
+The proofs show that what a column saves is the canonical encoding of its
+values, and that a load accepts exactly the canonical encodings; the tests
+tie that encoding to the format automerge has always written. Those of
+`tests/verified_api.rs` once ran the reference implementation beside
+every check, and kept a digest of what it wrote and read; they check each
+digest still (`tests/golden`). If a change trips one of them, it isn't a
+test failure; it's a compatibility break with every existing document.
 
 ## Formal verification
 
-Most of the crate's core is verified with [Verus](https://github.com/verus-lang/verus):
-the proofs live beside the code in `verus!` blocks, and a normal build
-compiles them away. To check them, run `cargo verus verify -p hexane
---features bijou64,vstd/nonzero_internals` with Verus installed.
+Every public function of the crate has a contract, stated in terms of
+the column's values as a sequence (`col@`), and [Verus] has proved that
+the code keeps every one of them. The proofs live beside the code in
+`verus!` blocks, and a normal build compiles them away. To check them,
+run `cargo verus verify -p hexane --features bijou64,vstd/nonzero_internals`
+with Verus installed.
 
-The verified API (`hexane::verified`) has acceptance clients in
-`src/verified/client_proof.rs`: functions written as a user of the API
-would write them, which that run proves. To prove them again as a crate
-outside hexane, from what hexane exports alone, see
-`verus-client/README.md`.
+A client that is itself checked by Verus can build its own proofs on the
+contracts: that what it reads back is what it wrote, or that a column it
+saved loads as the same values and saves back to the same bytes.
+`src/verified/client_proof.rs` holds such clients, written as a user of
+the API would write them, which the same run proves; `verus-client/`
+proves them again as a crate outside hexane, from what hexane exports
+alone.
 
-**Proved:**
+The specification can be read apart from the code and the proofs: each
+file of `src/verified` (and `src/raw.rs`) is the specification of what it
+declares, every body there a call of a function proved in the file's
+module `imp`. The module docs of `hexane::verified` ("Reviewing the
+specification") say which files to read and how.
 
-* The LEB128 and bijou64 codecs: each value has exactly one encoding.
-* Loading: validation accepts exactly the canonical encodings (for RLE,
-  a slab's last group must also be under 4 GiB), and a load that succeeds
-  builds slabs with correct metadata holding the input's values. Each
-  sequence of values has exactly one canonical encoding, for RLE and bool
-  slabs alike, so `save`, which writes a canonical encoding of the
-  column's values, gives back the bytes an unedited column was loaded
-  from. As the runs stream past, a slab is cut only at the end of a run,
-  and a load's slab weights are accumulated from exactly the runs of each
-  slab, by each weight model's verified accumulation (for a delta column,
-  exactly its slab's aggregate), so each is its slab's weight. The
-  column a load builds (`load_core::LoadCore`) is proved to satisfy the
-  column invariant, its delta domain included, from the bytes alone:
-  `load`, `load_with` and `load_iter(..).finalize()`, for every column
-  type.
-* The slab-level code: decoders, encoders, the edit rebuilds and slab
-  merges, for both RLE and bool slabs.
-* The slab indexes (the B-tree and the Fenwick tree).
-* The column iterator and the column edit cursor, against the RLE and bool
-  formats: every read yields exactly the column's values in the window
-  (and an `nth` past the data stops at its end), and every edit leaves canonical slabs, with correct metadata, holding
-  exactly the intended values. This includes delta columns, which store
-  their deltas as an RLE column. Their index sums the deltas in `i64`, and
-  while an edit is under way those sums can exceed `i64` (a delete that
-  drops a whole slab joins its neighbours in the index before the delta
-  that bridges them is written). The B-tree's invariant asks only that
-  its item counts add up; its aggregates are exact wherever they are
-  representable, which is all its queries need.
-* Moving an iterator (`advance_to`, `advance_by`, `shift`,
-  `shift_next` and `Shiftable::seek_to` on `Iter`, `PrefixIter` and
-  `DeltaIter`, and `shift_next` and `seek_to` on their run adapters):
-  after `shift(range)` the iterator has left exactly the column's values
-  in `range`, or from where it stands if `range` starts behind it (it
-  moves only forwards); `shift_next` gives the value at `range.start`,
-  if the window holds one; `advance_to` and `advance_by` move it on past
-  exactly the values between, and no further than its window. The
-  prefix iterator's running total and the delta iterator's running sum
-  move with it, so a value read after a move is still the sum before it
-  (for a delta column, the running sum through it). `PrefixIter::delta_nth`
-  and `PrefixColumn::delta` give, with the value, what its prefix added
-  since the start: added to the sum before the start, the sum before the
-  value.
-* `Shiftable`'s provided methods, `Unshift` and `Ranges`, against the
-  contract `Shiftable` states (`window`), which is trusted of each
-  implementation (the column iterators and the run adapters keep it by
-  the methods above): the provided methods do what they say from the
-  methods every implementation gives; `Ranges`, over any `Shiftable`,
-  run adapters included, gives items standing for the values of each of
-  its ranges in turn, and panics on one starting behind the iterator;
-  `Unshift` gives its lookahead and then what its inner iterator has
-  left, and after `shift(range)` exactly the values in `range`. Its
-  `shift` asks for an `ItemPerValue` iterator, which gives an item per
-  value (the column iterators; trusted of others that implement it), and
-  the run adapters are not one.
-* Suspending and resuming an iterator (`Iter::suspend`,
-  `IterState::try_resume`, and the prefix and delta iterators' versions,
-  which build on them): `suspend` keeps a position that always resumes;
-  `try_resume` succeeds exactly when the position kept is one of the
-  column's slabs (or at or past its end), finding the slab's start in the
-  index, and an iterator resumed over the same slabs has the same values
-  left to give as the one suspended. That the slabs are the same is the
-  edit counter's job, which is not proved.
-* The column invariant, as a type invariant: a `Column`'s state is a
-  `column_core::ColumnCore`, whose fields only verified code changes, so
-  every column is well-formed and indexed between calls. Its view is the
-  column's values: a splice replaces exactly the range given, and an
-  iterator over a range (every column type's `iter`/`iter_range`, and a
-  resumed one) gives exactly the values there, through the read model,
-  which is proved to agree with the edit model (for RLE columns, up to
-  owning a borrowed value, `Lift`). A load
-  builds its column in verified code, and the public `Edit` cursor
-  (`edit_core::EditCore`) takes the column's parts and, dropped, hands
-  them back checked to be in the domain (a `DeltaEdit` checks that more
-  cheaply first), in verified code too: each of its steps requires and
-  keeps the cursor's invariant and is specified by what it does to the
-  values (carrying, inserting or dropping them, or reading the next one),
-  and the column it hands back holds exactly the values its steps
-  describe. The trusted exceptions are that the
-  slabs a fill or an encoder hands a new column are well-formed (as
-  those verified functions promise; the column weighs them and checks a
-  delta column's domain itself), that the `Edit` and `DeltaEdit` glue
-  chains its steps (and uses none after one that panicked, if the panic
-  is caught), and a clone. An `Edit` or a `DeltaEdit` dropped by a panic
-  hands nothing back, and the column panics when used again.
-* A delta column's domain, in its type invariant: every step between two
-  of its running sums fits `i64` (so it holds at most `i64::MAX` items,
-  and its values lie within a range less than 2^63 wide). So each slab's
-  weight is the aggregate of its deltas, and every merge of the index's
-  aggregates is representable, which is what the delta readers assume
-  (`delta::ddomain`, `ColumnCore::delta_parts`). A delta splice
-  (`splice`, `splice_runs`, `insert`, `remove`, `remove_n`, `push`,
-  `truncate`) is verified end to end (`ColumnCore::splice_delta`): it
-  finds the running sum, the nulls and the value around the splice,
-  feeds the items through the verified plan into the cursor, and checks
-  the plan's bound on the values, or where that is too wide reads the
-  column again, so the column it leaves is in the domain, or it panics.
-  `from_values` likewise (`ColumnCore::fill_delta`).
-* `Column::splice`, and with it `insert`, `remove`, `remove_n`, `push`,
-  `clear`, `truncate`, `splice_runs` and the prefix and delta columns'
-  splices: the chain of cursor steps (open, delete, insert each run,
-  close) is one verified function (`cursor::splice_feed`, behind
-  `ColumnCore::splice`). The column stays well-formed and its values
-  become those before the splice, the runs inserted, then those after
-  the ones deleted. Nothing is assumed of the runs, which come from the
-  caller.
-* `Column::remap` and `ColumnEncoding::remap`: the column becomes what
-  the function gives for each value the iterator has (for
-  `Column::remap`, all of the column's), called once per run
-  (`ColumnCore::from_mapped_runs`). It reads a run at a time and appends
-  a run of the function's value to the encoding's verified encoder (the
-  RLE or the bool one, `remap::Encodes`), whose slabs make the new
-  column, weighed and checked as any built column is (and a prefix
-  column's total checked, as a build's is). Nothing is assumed of the
-  function.
-* Building a column: its index and length are computed from its slabs,
-  checking that each slab's weight counts its items, and `Column::fill`
-  makes a well-formed slab of the values asked for.
-* Saving: `Column::save_to` writes the canonical encoding of the column's
-  values, merging each slab onto those before it.
-* The streaming encoders (`RleEncoder`, `BoolEncoder`): the bytes `save`
-  returns are the canonical encoding of the values appended. With a segment
-  budget, every slab they cut is well-formed, and together the slabs hold
-  the values appended, in order. `save_to_unless` writes nothing only if
-  every value equals the one given.
-* Encoding into a caller's buffer (`encode_to`, `encode_to_unless`,
-  `RleEncoderState`): the buffer's earlier bytes are left as they were,
-  and followed by the canonical encoding of the values; the `_unless`
-  variants write nothing only if every value equals the one given.
-* The delta encoders (`DeltaEncoder`, `DeltaEncoderState`): the deltas
-  they write realize exactly the values appended, or they panic on values
-  spanning 2^63 or more.
-* Delta columns' slab aggregates: a slab's sum of deltas and its least and
-  greatest running sum are exact, both as `load` accumulates them run by
-  run and as an edit or a build computes them from the slab, wherever the
-  slab's sums fit `i64` (an edit can weigh a slab whose sums don't for a
-  moment, and weighs it again once they do); and `load` accepts only data
-  whose running sums all lie in the value domain, and whose values span
-  less than 2^63.
-  Merging two aggregates gives the aggregate of their deltas, as the
-  B-tree's value search assumes.
-* Reading a delta column (`DeltaIter`'s `next`, `nth` and `next_run`,
-  and so `get`, `iter`, `iter_range` and `to_vec`): each value is the
-  running sum of the deltas before it, or null, including after `nth`
-  jumps to a far slab by the index's sums, given that the index holds
-  each slab's aggregate and that the sums at slab boundaries fit `i64`
-  (which the column's domain gives).
-  The running sum wraps as release arithmetic does, and is proved to be
-  the deltas' sum modulo 2^64: the sum itself, wherever it fits.
-* A delta column's value search (`find_by_value`, `find_by_range`,
-  `find_first`): it yields exactly the items whose values lie in the
-  range, in order, given the index's aggregates (as for reading). Slabs
-  the index rules out hold none, and within a slab the items of a run of
-  equal deltas are found by division, without overflow at the ends of
-  `i64`.
-* A delta column's sorted search (`DeltaColumn::scope_to_value`,
-  `DeltaIter::seek_to_value`): where the values in the window are sorted
-  (nulls first), it returns exactly the range of them equal to the
-  target, or, if there are none, the empty range where the target would
-  go, and leaves the iterator at its start; unsorted, it returns some
-  range inside the window. It jumps by the index's prefix sums to the slab
-  where the running sum first reaches the target, which skips no match
-  when the window is sorted, whatever lies outside it. Given the index's
-  aggregates, as for reading.
-* A delta column's scans (`DeltaIter::scan_to_range` and
-  `scan_to_value`): each returns the first item of the iterator's window,
-  from its position, whose value lies in the range (or is null, for
-  `scan_to_value(None)`), with the iterator just past it; or none, with
-  the window used up. Slabs the index rules out hold no match. Given the
-  index's aggregates, as for reading.
-* A delta column's edits (`splice`, `splice_runs`, `insert`, `remove`
-  and the other splices, `from_values`, `copy_ranges` (below), and the
-  `DeltaEdit` cursor),
-  stated by the column's values as its iterators read them (each the
-  running sum of the deltas through it, wrapping, `ddomain::rvals`): a
-  splice leaves the values before it, then the values of the items it
-  took, then the values after the deleted ones, as they were;
-  `from_values` leaves the values it took. The `DeltaEdit` cursor
-  (`dedit_core::DeltaEditCore`) starts from the column's values, and each
-  of its steps is stated by what it does to them: an insert writes the
-  values given, a carry the original values it passes, a delete nothing,
-  and a peek reads the original value at the cursor; dropped, it hands
-  back the column holding the values written, then the original values
-  after the cursor. Underneath, each delta written is the one that value
-  needs after the running sum before it, and a splice's rewritten
-  boundary delta, or the cursor's account of what the values after it
-  are owed, keeps every value after the edit as it was, its ledger
-  following what the column cursor carries, deletes and jumps over.
-* A delta edit's check that it leaves the values in the domain, so that
-  the index's sums fit again: its walk over the column
-  (`ddomain::slabs_fit`) passes exactly when the values lie in the
-  domain within a range less than 2^63 wide, and then every running sum
-  fits `i64`; and its shortcut, which skips the walk where a bound on the
-  values already fits, passes only where the walk would. The bound
-  starts from the least and greatest running sum in the index's root
-  aggregate, which holds the column's values (by the column's
-  invariant), and the edit cursor, `splice` and `from_values` widen it
-  by each value they write; every value the column holds after the edit
-  lies in it.
-* The value search of `Column` and its iterator (`scope_to_value`,
-  `seek_to_value`): where the values in the window are sorted, it returns
-  exactly the range of them equal to the target, or, if there are none,
-  the empty range where the target would go. Unsorted, it returns some
-  range inside the window.
-* `RawColumn`: its splices, reads, iterator, save and load, and
-  `copy_ranges`, which applies the normalized splices back to front
-  (each lands above those still to come, so their positions hold), each
-  range spliced a chunk per source slab, and leaves the column holding
-  the caller's splices applied one by one. A `splice` of several chunks
-  concatenates them in glue first.
-* The splices `copy_ranges` takes: normalizing them checks their order
-  and bounds, and gives a list in order in both columns, with every range
-  inside the source and none doing nothing, which applied gives what the
-  splices give one by one, to any destination and source (what splices
-  make of two columns depends only on their lengths). Which way runs is
-  chosen inside verified code (`ColumnCore::copy`, `dcopy::copy`), by a
-  heuristic (`ColumnCore::invert_pays`) proved only to run without
-  panicking or overflowing and to invert only between columns of the
-  same segment budget, and
-  both ways of carrying the list out are
-  verified chains of the edit cursor's steps (`copy::copy_direct`,
-  `copy::copy_invert`): the direct one applies it to the destination with
-  one cursor; the inverted one keeps the source, cuts out the gaps
-  between its ranges (the cuts leave exactly the ranges' items) and puts
-  the destination's gaps back (as splices, a normalized list that applied
-  to those gives what the splices give). From the column's invariant,
-  each leaves the column holding the destination with the splices
-  applied: the caller's splices, one by one, since the normalized list
-  reaches them in a type that keeps what normalizing proved
-  (`splices::Normalized`), and each checks it was made for the columns'
-  lengths. The source's items come from a verified reader over the
-  source column, moved to each range with its own index (`copy::SrcFeed`),
-  each run's value written as its owned form. A delta column's
-  `copy_ranges` is the same, in the column's values (`delta::dcopy`): the
-  direct way is a chain of the `DeltaEdit` cursor's steps, the inverted
-  one cuts the gaps with delta splices that insert nothing and puts the
-  destination's values back with one cursor, and the source's runs come
-  from a verified reader with its running sum (`dcopy::DSrc`), each
-  realizing the source's values there; the column's values become the
-  destination's with the splices applied.
-* The weights a column's index keeps: each weight function names a
-  verified model (`weights`), whose relation the column invariant keeps
-  between each slab and its weight: a plain column's weight is the slab's
-  item count, a prefix column's the item count and the sum of its values,
-  a delta column's the item count and, where its running sums fit, the
-  aggregate of its deltas. The edit cursor computes them with the
-  verified computations.
-* Prefix sums: a prefix column's slab weights hold each slab's sum, so
-  the prefix readers' invariant follows from the column's type invariant;
-  `get_prefix` and `get_total` return the
-  sum of the values before (through) the item, from the index's sum for
-  the slabs before it; and the prefix iterator's running total
-  (`PrefixIter`'s `next`, `nth`, `next_run` and `reset_prefix`), with its
-  offset, is always the sum of the values before it, including after
-  `nth` jumps to a far slab; and `sum_range(start..end)` is what added
-  to the sum before `start` gives the sum before `end`.
-* Prefix searches: `get_index_for_prefix` returns exactly the first index
-  whose prefix sum reaches the target, or one past the end if none does
-  (`get_index_for_total` is that less one); and `PrefixIter::advance_prefix(n)`
-  lands on the first item in the iterator's window whose running sum,
-  from the iterator's position, exceeds `n`, or else runs to the window's
-  end and returns `None`. Both whenever the column's sum fits its prefix
-  type, which loads and edits check.
+**Proved**, among the contracts:
 
-**Trusted, not proved:** each value type's and codec's own encode and
-decode, which the verified code reaches through traits (the contract on
-`RleValue`); the thin glue that
-connects the generic column types to the verified cores, and the closures
-passed through it (including the slabs a new column is built from, which
-come from the verified fills and encoders, and the iterators' state
-between calls); that each `Shiftable` iterator keeps the contract its
-docs state; each prefix value type's `accumulate` and
-`accumulate_run` (that they add its values, a run as its value
-repeated) and `try_accumulate_run` (that when it succeeds it adds what
-`accumulate_run` does), and that its prefix type's `+` is associative with `default`
-its identity and `b + (a - b) == a`, as for wrapping integers; for the
-prefix searches, that an unsigned prefix type's values are numbers, whose
-sums (where they fit) and differences are its `+` and `-`, which its
-`checked_add` adds when the sum fits, whose order is its `<=`, and which
-its `/` and `try_into` divide and convert; the delta
-value types' `to_opt` and `from_opt` (a delta written reads back as
-itself); that each value type's `Ord` agrees with its
-`==`; and, for the delta columns' sorted search, that a delta value
-type's `Ord` orders values as the `i64`s they are stored as, with nulls
-first and values outside the domain last.
+* Each sequence of values has exactly one canonical encoding, for both
+  codecs (LEB128 and bijou64); `save` writes it, a load accepts exactly
+  the canonical encodings (and so a column that loads saves back to the
+  same bytes), and a load that succeeds holds the values the bytes
+  encode. So do the streaming encoders and decoders, and loads run by run.
+* Every edit (`splice`, `insert`, `remove`, `remap`, `copy_ranges`, the
+  edit cursors) leaves the column holding exactly the values it should,
+  and the column's slabs, index and counts consistent, as a type
+  invariant.
+* Every read (`get`, the iterators, their moves, runs, searches, and
+  suspending and resuming) gives exactly the column's values; a search of
+  values in order finds exactly the places that hold the target.
+* Prefix and accumulator columns: each sum is the sum of the values, and
+  a search by sum finds the first place that reaches it; a delta column's
+  values stay in its domain, and its finds and scans give exactly the
+  places whose values lie in the range.
 
-**Known limitations:**
-
-* The prefix and delta columns' other logic is not verified: that a
-  column's sum fits its prefix type, which the searches' results depend on
-  (loads reject sums that would not, and edits panic, but those checks are
-  not part of the proof); and `delta`, which is glue over the verified
-  iterator.
-* `RleEncoderState` and `DeltaEncoderState`, which write into a buffer
-  the caller passes to each call, are proved only if every call gets the
-  same buffer, with the bytes they wrote unchanged in between. Their
-  docs say so; nothing checks it.
-* Where a precondition of the verified code cannot be shown from the
-  specifications (a slab of `i64::MAX` bytes or more, or a column or
-  encoder of nearly `usize::MAX` items), the code checks it and panics
-  rather than assume it. A load returns an error instead: a column of
-  more than `usize::MAX - 3` items, which its edits and `save` would
-  panic on, fails to load, and so does a delta column of more than
-  `i64::MAX`.
-
-### The verified API
-
-`hexane::verified` offers what the old API offers, with a specification
-on every public function in terms of the column's values, so that a
-client checked by Verus can build on it (the acceptance clients show
-how): columns of every built-in value type (the numbers, `bool`,
-`NonZeroU32`, byte strings and strings, their options, and a
-client's types, stored as one of the numbers
-or as bytes of their own), plain (with either of the old API's
-indexes, a B-tree or a Fenwick tree), prefix (sums and accumulators)
-and delta columns; their loads (also run by
-run), saves, splices, edit cursors and `copy_ranges`; their iterators,
-searches and runs; the streaming encoders and decoders; the raw
-column; both codecs, and a client's own (`Codec`), with the sizes of
-LEB128 numbers (`lebsize`, `ulebsize`); and the
-repositioning of every iterator
-(`Shiftable`, which a client's own iterator may implement, with a
-lookahead and a walk over ranges).
-
-Its specification can be read apart from the code and the proofs:
-each file of `src/verified` (and `src/raw.rs`) is the specification of
-what it declares, every body there a call of a function proved in the
-file's module `imp`. The module docs of `hexane::verified` ("Reviewing
-the specification") say which files to read and how.
-
-What it trusts, besides Verus, Z3 and vstd's specifications of the
-standard library, is all in one file, `src/trusted.rs`:
+**Trusted**, besides Verus, Z3 and vstd's specifications of the standard
+library, is all in one file, `src/trusted.rs`:
 
 * the helpers that panic, each only in that it does not return, and the
   constructors of `PackError`;
 * three edits of a range of a `Vec` (`splice_vec`, `splice_bytes`,
-  the raw column's `drain_slabs`), whose
-  specifications are assumed, and four helpers that claim nothing
-  (`add`, `recycle_buf`, `carry_budget`, `take_buf`);
+  the raw column's `drain_slabs`), whose specifications are assumed, and
+  four helpers that claim nothing (`add`, `recycle_buf`, `carry_budget`,
+  `take_buf`);
 * for strings, the specification of `core::str::from_utf8`, and that two
   `str`s of the same characters are one.
 
-Of what a client hands it, it asks: of an iterator, the laws Verus asks
-of every iterator; and of a client's own value type, encoding, codec or
-repositionable iterator, the laws of `VNewtype`, `RleValue`, `Codec` or
-`Shiftable` (a client checked by Verus proves them).
+Of what a client hands it, the crate asks: of an iterator, the laws Verus
+asks of every iterator; and of a client's own value type, encoding,
+codec, sum, accumulator or repositionable iterator, the laws of its trait
+(`VNewtype`, `RleValue`, `Codec`, `VAmount`, `VAdds` and `VAccum`,
+`Shiftable`). A client checked by Verus proves them; any other keeps
+them itself.
 
-That a splice ends is proved where it takes a slice (and so for
-`from_values`, `insert`, `push` and the deletes), of every kind of
-column; of a caller's iterator it is not.
-
-Not mirrored: `Column::find_by_value` and `find_by_value_range`, which
-only the delta column's own index weight reaches (the delta column's
-`find_by_value` is verified).
+**Not proved:** that a splice or an encoder's `extend` of a caller's
+iterator ends. It ends when the iterator does; one of a slice is proved
+to end.
 
 ## Development
 
 ```bash
-cargo test -p hexane            # ~525 tests incl. fuzzers & golden fixtures
-cargo bench -p hexane           # divan benches: column_ops, load, remap, ...
+cargo test -p hexane --features bijou64   # unit, regression and API tests
+cargo verus verify -p hexane --features bijou64,vstd/nonzero_internals
 ```
 
-Feature flags: `wasm` (console logging via `web-sys`). MSRV 1.80.
+Feature flags: `bijou64` (the second codec), `wasm` (console logging via
+`web-sys`). MSRV 1.90.
 
 License: MIT.
 
+[Verus]: https://github.com/verus-lang/verus
 [`Column<T>`]: https://docs.rs/hexane/latest/hexane/struct.Column.html
-[`PrefixColumn<T>`]: https://docs.rs/hexane/latest/hexane/struct.PrefixColumn.html
+[`PrefixColumn<T>`]: https://docs.rs/hexane/latest/hexane/type.PrefixColumn.html
+[`AccColumn<T>`]: https://docs.rs/hexane/latest/hexane/type.AccColumn.html
 [`DeltaColumn<T>`]: https://docs.rs/hexane/latest/hexane/struct.DeltaColumn.html
 [`RawColumn`]: https://docs.rs/hexane/latest/hexane/struct.RawColumn.html
-[`ColumnValue`]: https://docs.rs/hexane/latest/hexane/trait.ColumnValue.html
-[`PrefixValue`]: https://docs.rs/hexane/latest/hexane/trait.PrefixValue.html
+[`VNewtype`]: https://docs.rs/hexane/latest/hexane/trait.VNewtype.html
 [`RleValue`]: https://docs.rs/hexane/latest/hexane/trait.RleValue.html
-[`load`]: https://docs.rs/hexane/latest/hexane/struct.DeltaColumn.html#method.load
+[`Codec`]: https://docs.rs/hexane/latest/hexane/trait.Codec.html
+[`VAmount`]: https://docs.rs/hexane/latest/hexane/trait.VAmount.html
+[`VAdds`]: https://docs.rs/hexane/latest/hexane/trait.VAdds.html

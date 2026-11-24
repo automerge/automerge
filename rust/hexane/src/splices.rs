@@ -1250,24 +1250,6 @@ impl<V> Cuts<V> {
     }
 }
 
-#[cfg(test)]
-impl Cuts<()> {
-    /// [`new`](Self::new), for the test helpers' glue, which counts rows
-    /// rather than holding values: the cuts' items are units.
-    #[inline(always)]
-    pub(crate) fn of_len(sps: &[Splice], src_len: usize) -> (c: Self)
-        requires
-            ranges_in(sps@, src_len as int),
-        ensures
-            c.inv(),
-            c.cuts@.len() == 0,
-            c.sps@ == sps@,
-            c.src@.len() == src_len,
-    {
-        Self::new(sps, src_len, Ghost(Seq::new(src_len as nat, |_i: int| ())))
-    }
-}
-
 /// The gaps between the splices, in the destination, put back between
 /// the ranges kept (`copy::put_gaps`, `dcopy::put_gaps`): each, as a
 /// splice inserting it, is

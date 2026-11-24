@@ -1,4 +1,6 @@
-//! A verified public API for columns.
+//! hexane's columns, with their specification. These items are the
+//! crate's API, at its root too: `hexane::Column` is
+//! `hexane::verified::Column`.
 //!
 //! [`Column`] is a column whose every operation carries a
 //! specification that [Verus](https://github.com/verus-lang/verus) has
@@ -8,14 +10,10 @@
 //! and that a column it saved loads again as the same values and saves
 //! back to the same bytes (`client_proof` is such a client).
 //!
-//! It runs the same verified code as [`Column`](crate::Column): the same
-//! slabs, index, cursor and loader. What differs is what stands around
-//! that code. `Column` reaches a value type and a codec through its
-//! packing traits, and takes its closures and iterators through small
-//! adapters; Verus sees neither, and takes on trust that they do what the
-//! specifications say. Here the codec (`codec`), the value types (`value`,
-//! `counts`, `bytes`) and all that lies between this API and the core are
-//! verified too.
+//! Under it is the crate's verified core: its slabs, index, cursor and
+//! loader. The codec (`codec`), the value types (`value`, `counts`,
+//! `bytes`) and all that lies between the API and the core are verified
+//! too.
 //!
 //! [`Encoder`] takes values one after another and gives the
 //! saved column of them, with no column in between.
@@ -119,8 +117,7 @@
 //! module has no `unsafe`, so what makes a `&str` of a column's bytes is
 //! the standard library's check of them (`core::str::from_utf8`), at
 //! each read: it is proved to find them UTF-8, and it looks at every
-//! byte of the string. [`Column`](crate::Column) reads a string without
-//! that check.
+//! byte of the string.
 //!
 //! In a specification a column is the sequence of its values (`col@`),
 //! each as its type's [`VSpec::S`]: a number as itself, a byte string as
@@ -482,10 +479,12 @@
 //! gives the vector's items.
 //!
 //! The specifications say what a saved column is in their own terms.
-//! That those are the bytes of [`Column`](crate::Column) for the same
-//! values is not proved but tested (`tests/verified_api.rs`): for each
-//! value type the two save the same bytes, each loads what the other
-//! saved, and they refuse the same bytes with the same error.
+//! That those are the bytes of automerge's format for the same values is
+//! not proved but tested (`tests/verified_api.rs`): while hexane's earlier
+//! implementation existed, the tests ran it beside each check (the same
+//! bytes saved, each loading what the other saved, the same bytes
+//! refused with the same error), and they keep a digest of what it did,
+//! which each test checks still (`tests/golden`).
 //!
 //! How a column lies in memory is no part of any specification:
 //! [`slab_count`](Column::slab_count),
@@ -495,12 +494,11 @@
 //! it, as does an iterator's [`get_slab`](Iter::get_slab), and
 //! promise nothing but that the lengths add up. Nor is how
 //! often [`remap`](Column::remap) calls its function: once for
-//! each run of equal values, as `Column`'s does, which is tested. After
-//! the same edits a `Column` has the slabs of a
-//! [`Column`](crate::Column), each as long and of as many runs, and
-//! `dump_slabs` prints the same lines. That is tested too, but for one
-//! case: a column that [`clear`](Column::clear) has emptied has
-//! no slab, where `Column` keeps an empty one, until the next edit.
+//! each run of equal values, which is tested. That after the same edits
+//! a column has the slabs the earlier implementation made, each as long
+//! and of as many runs, is tested too (the digests), but for one case: a
+//! column that [`clear`](Column::clear) has emptied has no slab, where
+//! that implementation kept an empty one, until the next edit.
 //!
 //! That an edit of a column ends what was suspended of it is proved. A
 //! state fits only a column that counts the edits the state does
@@ -513,13 +511,14 @@
 //! one edit, counted when it is finished, if a step of it deleted a
 //! value or inserted one; a value it replaced with its equal
 //! ([`replace_with`](Edit::replace_with)) is none. The count is
-//! a `usize` that wraps around, as `Column`'s is: after one edit or
+//! a `usize` that wraps around: after one edit or
 //! more, and no more of them than `usize::MAX`, it is not what it was
 //! (`lemma_after_edits`), so a state taken before them is refused. The
 //! column sets the count itself after each call. That the calls which
-//! end what was suspended of a `Column` are those that end it here is
-//! tested, as is that after a call which is no edit a state resumes
-//! where `Column`'s does. And a state that does resume cannot misread:
+//! end what was suspended are those that ended it in the earlier
+//! implementation is tested (the digests), as is that after a call which
+//! is no edit a state resumes where it did there. And a state that does
+//! resume cannot misread:
 //! the iterator given has the values of the column it was resumed on,
 //! in the state's window, whatever column the state was taken of.
 //!
@@ -527,10 +526,8 @@
 //!
 //! Every function that Verus takes on trust on a path of this API is in
 //! one file, `src/trusted.rs`, which says what each assumes. (Code
-//! outside `verus!` is not checked at all. Of that, this API runs only
-//! the functions named below as not checked. What the old API takes on
-//! trust besides, and no function of this API runs, is left where it
-//! is; `src/trusted.rs` says where.)
+//! outside `verus!` is not checked at all. Of that, the crate runs only
+//! the functions named below as not checked.)
 //!
 //! Verus and its solver Z3, and Verus's specifications of the standard
 //! library: of `Vec` and slices, and for a column of `NonZeroU32` those
@@ -562,8 +559,7 @@
 //! the equality of two slices (`==`).
 //!
 //! Of this crate, the functions Verus is told to take as they are (all in
-//! `src/trusted.rs`), which are few and small, and are those the verified
-//! core of [`Column`](crate::Column) has too:
+//! `src/trusted.rs`), which are few and small:
 //!
 //! * the helpers that panic, which say why and do nothing else. A method
 //!   panics where a column would outgrow what its arithmetic can count
@@ -596,23 +592,22 @@
 //!   (`carry_budget`).
 //!
 //! No value type's encoding is trusted, nor the codec's, and there is no
-//! unverified code between this API and the core: every other function on
-//! a path through this API is checked. The options of a load
-//! ([`LoadOpts`]) are one type for both APIs, and are checked too:
-//! nothing is assumed of what they hold.
+//! unverified code between the API and the core: every other function on
+//! a path through it is checked. The options of a load ([`LoadOpts`]) are
+//! checked too: nothing is assumed of what they hold.
 //!
 //! Three functions of a column are not checked, and nothing is specified
 //! of them. They read the column through checked functions that ask
 //! nothing of a caller, and then print or compare: `Debug`;
 //! [`dump_slabs`](Column::dump_slabs), whose printing of what
 //! checked code has read of each slab is not checked; and
-//! `check_invariants`, a tool for tests that these docs leave out, as
-//! [`Column`](crate::Column)'s do. It looks at run time for what is
+//! `check_invariants`, a tool for tests that these docs leave out. It
+//! looks at run time for what is
 //! proved of every column (a slab's bytes hold the values and runs it
 //! counts, and the index counts the slabs' lengths) and for the layout
 //! policy, which is not proved (a slab's runs are within the budget,
 //! and no two neighbours should have been merged), and panics if it
-//! finds otherwise. As `Column`'s, it takes every column as one that
+//! finds otherwise. It takes every column as one that
 //! edits have made, and panics for some that were loaded: a load leaves
 //! a short last slab unmerged. `Debug` of a [`Encoder`] is not
 //! checked either: it prints the number that the checked `len` returns.
@@ -1260,8 +1255,8 @@ pub open spec fn gives<I: IntoIterator>(i: I, p: spec_fn(Seq<I::Item>) -> bool) 
 }
 
 /// The places `start..end` of a range of a column of `len` values, as
-/// [`Column::iter_range`] and its kin take it: clamped to the column, as
-/// the old API's `iter_range` did. A range past the end ends there, and
+/// [`Column::iter_range`] and its kin take it: clamped to the column. A
+/// range past the end ends there, and
 /// one that ends before it starts is the empty one at its start.
 pub open spec fn range_in(range: Range<usize>, len: nat) -> (int, int) {
     let s = if range.start <= len {
@@ -1301,8 +1296,7 @@ pub open spec fn bound_start(start: Bound<&usize>) -> int {
 /// takes it: an `Included` end is the place after it (but for
 /// `usize::MAX`), and an `Unbounded` one is `max`, the place after the
 /// last there is. A range that ends before it starts (`bound_start`) is
-/// the empty one at its start. This and `bound_start` are how the old
-/// API read the bounds of a range (`normalize_range_max`).
+/// the empty one at its start.
 pub open spec fn bound_end(start: Bound<&usize>, end: Bound<&usize>, max: int) -> int {
     let e = match end {
         Bound::Included(n) => if *n == usize::MAX {
@@ -1471,8 +1465,7 @@ pub proof fn lemma_after_edits(n: usize, k: nat)
 /// the type is known otherwise, `Column::new()` is of the kind
 /// it says. A column kept with a [`SumIndex`] is a prefix column
 /// ([`PrefixColumn`]); one kept with a [`LenBitIndex`] is a
-/// plain column whose index is a Fenwick tree, as the old API's
-/// `Column<V, C, LenWeight, BitIndex<usize>>`.
+/// plain column whose index is a Fenwick tree.
 pub struct Column<V: ColumnValueRef<C>, C: Codec = Leb128, K: VIndex<V, C> = LenIndex> {
     core: KCore<V, C, K>,
 }
@@ -1823,9 +1816,8 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
 
     /// Delete every value. The column keeps its segment budget.
     ///
-    /// Of a column with no value this is no edit, as it is none of
-    /// [`Column`](crate::Column): the column counts what it did, and
-    /// what was suspended of it resumes still. Of any other the column
+    /// Of a column with no value this is no edit: the column counts what
+    /// it did, and what was suspended of it resumes still. Of any other the column
     /// counts an edit more.
     #[inline(always)]
     pub fn clear(&mut self)
@@ -1968,8 +1960,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     }
 
     /// An iterator over the values of `range`, clamped to the column
-    /// (`range_in`): over `start..end`, as the old API's `iter_range`
-    /// took it.
+    /// (`range_in`): over `start..end`.
     #[inline(always)]
     pub fn iter_range(&self, range: Range<usize>) -> (it: Iter<'_, V, C, K>)
         ensures
@@ -2080,8 +2071,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     /// ([`PackError::InvalidLength`]), as empty `bytes` are for every
     /// length but 0.
     ///
-    /// A slab holds two runs or more: [`Column`](crate::Column) panics
-    /// when asked for fewer, and here that is a `requires`. The fill
+    /// A slab holds two runs or more, which is a `requires`. The fill
     /// value need not live as long as `bytes` do, nor `bytes` as long as
     /// it: the column owns what it holds.
     #[inline(always)]
@@ -2576,9 +2566,9 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
     /// The search is over `range` of the column, as far as that lies
     /// in what the iterator has left: the iterator moves on to where
     /// `range` starts first ([`advance_to`](Self::advance_to)), and
-    /// looks no further than where it ends. The bounds are read as the
-    /// old API read them (`bound_start`, `bound_end`): `..` is all the
-    /// iterator has left.
+    /// looks no further than where it ends. The bounds are read as
+    /// `bound_start` and `bound_end` say: `..` is all the iterator has
+    /// left.
     ///
     /// Few of the values are looked at
     /// ([`scope_to_value`](Column::scope_to_value)). They need be
@@ -2887,7 +2877,7 @@ impl IterState {
     /// and after more edits unless they are `usize::MAX + 1` or more
     /// (`lemma_after_edits`).
     ///
-    /// Panics, as [`Column`](crate::Column)'s does, where an edit's panic
+    /// Panics where an edit's panic
     /// left `column` without its parts and the state would fit it.
     #[inline(always)]
     pub fn try_resume<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(&self, column: &'a Column<V, C, K>) -> (r: Result<

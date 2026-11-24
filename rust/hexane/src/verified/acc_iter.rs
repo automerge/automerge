@@ -1200,8 +1200,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     }
 
     /// A lookahead: the iterator wrapped so that the item it gives next
-    /// can be looked at first ([`Unshift::peek`]), as the old
-    /// API's `Shiftable::unshift` gives.
+    /// can be looked at first ([`Unshift::peek`]).
     #[inline(always)]
     pub fn unshift(self) -> (r: Unshift<Self>)
         ensures
@@ -1212,7 +1211,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     }
 
     /// The items of each of `ranges` of the column, one range after
-    /// another, as the old API's `Shiftable::ranges` gives them (what is
+    /// another (what is
     /// left of the iterator's own window is dropped). The ranges ascend
     /// and do not overlap (they may touch), and start where the iterator
     /// stands or later.

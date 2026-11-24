@@ -25,8 +25,9 @@ fn bench(name: &str, n: u64, mut f: impl FnMut()) {
 }
 
 fn main() {
-    let bool_col = Column::<bool>::from_values((0..10_000).map(|_| rand_bool()).collect());
-    let u64_col = Column::<u64>::from_values((0..10_000).map(|_| rand_u64()).collect());
+    let bool_col =
+        Column::<bool>::from_values(&(0..10_000).map(|_| rand_bool()).collect::<Vec<_>>());
+    let u64_col = Column::<u64>::from_values(&(0..10_000).map(|_| rand_u64()).collect::<Vec<_>>());
 
     let mut c = bool_col.clone();
     bench("bool replace_1", 500_000, || {

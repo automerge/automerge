@@ -53,7 +53,7 @@ use vstd::std_specs::range::RangeBoundsSpec;
 verus! {
 
 /// A slab's segment budget, where none is given: that of
-/// [`Column`](crate::Column).
+/// [`Column`].
 pub(super) const MAX_SEG: usize = 64;
 
 /// `range_in`: `range` clamped to a column of `len` values.
@@ -79,7 +79,7 @@ pub(crate) fn range_in_exec(range: Range<usize>, len: usize) -> (r: (usize, usiz
 }
 
 /// `bound_start` and `bound_end` of `range`, where `max` is the
-/// place after the last there is: the old API's `normalize_range_max`.
+/// place after the last there is.
 pub(crate) fn bounds_exec<R: RangeBounds<usize>>(range: &R, max: usize) -> (r: (usize, usize))
     ensures
         r.0 as int == bound_start(range.spec_start_bound()),
@@ -917,7 +917,7 @@ pub(super) fn segments_in<T: Copy + Clone + std::fmt::Debug + Default>(s: &Slab<
     s.segments
 }
 
-/// The lengths of slabs, collected as [`Column`](crate::Column) collects
+/// The lengths of slabs, collected as [`Column`] collects
 /// them. The functions mapped have names because Verus proves nothing of
 /// a closure here whose argument is of a generic type.
 #[inline]
@@ -3200,7 +3200,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> std::fmt::Debug for Iter<'
 // check them. They read the column through checked functions that ask
 // nothing of a caller.
 impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
-    /// Print a line for each slab, as [`Column`](crate::Column) does:
+    /// Print a line for each slab, as [`Column`] does:
     /// where in the column the slab starts, how many values and runs it
     /// holds, its first run and its last.
     ///
