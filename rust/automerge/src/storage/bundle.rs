@@ -836,6 +836,19 @@ impl TryFrom<&[u8]> for Bundle {
 }
 
 impl Bundle {
+    /// The heads a bundle chunk declares, read from its prefix without
+    /// parsing its columns. Nothing else about the chunk is checked.
+    pub(crate) fn parse_declared_heads(i: parse::Input<'_>) -> Option<Vec<ChangeHash>> {
+        let actors: PrefixResult<'_, Vec<ActorId>> = parse::length_prefixed(parse::actor_id)(i);
+        let (i, _actors) = actors.ok()?;
+        let heads: PrefixResult<'_, Vec<ChangeHash>> = parse_entries(i, HASH + MIN_ULEB, |i| {
+            let (i, h) = parse::change_hash(i)?;
+            let (i, _idx) = parse::leb128_u64(i)?;
+            Ok((i, h))
+        });
+        Some(heads.ok()?.1)
+    }
+
     pub(crate) fn parse_after_header(i: parse::Input<'_>) -> Result<Self, InvalidBundle> {
         let bad = |s: &str| InvalidBundle(s.to_string());
         let invalid = |e: parse::ParseError<_>| InvalidBundle(format!("invalid prefix: {}", e));

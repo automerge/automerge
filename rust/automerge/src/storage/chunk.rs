@@ -55,6 +55,52 @@ pub(crate) mod error {
 }
 
 impl<'a> Chunk<'a> {
+    /// If `input` opens with a bundle chunk whose checksum holds and whose
+    /// declared heads all satisfy `known`, the input after that chunk. The
+    /// bundle's columns are not parsed: a document that has a bundle's
+    /// heads has every change in it, so there is nothing to apply.
+    pub(crate) fn skip_known_bundle(
+        input: parse::Input<'a>,
+        known: impl Fn(&ChangeHash) -> bool,
+    ) -> Option<parse::Input<'a>> {
+        let (i, raw) = RawHeader::parse::<error::Chunk>(input).ok()?;
+        if raw.chunk_type != ChunkType::Bundle {
+            return None;
+        }
+        let (remaining, data) = parse::take_n::<error::Chunk>(raw.data_len, i).ok()?;
+        let heads = crate::storage::Bundle::parse_declared_heads(parse::Input::new(data))?;
+        // hashed last: a chunk that is not skipped is hashed when it is parsed
+        (!heads.is_empty() && heads.iter().all(known) && raw.hashed(data).checksum_valid())
+            .then_some(remaining)
+    }
+
+    /// The length of the chunk `data` opens with, when that chunk is a
+    /// save (a document or a bundle) and every chunk after it is a bundle.
+    ///
+    /// Bundles apply in any order, so such data loads the same whether its
+    /// chunks are read together or the first one alone and then the rest.
+    pub(crate) fn leading_save_len(data: &[u8]) -> Option<usize> {
+        let mut input = parse::Input::new(data);
+        let mut first = None;
+        while !input.is_empty() {
+            let (i, raw) = RawHeader::parse::<error::Chunk>(input).ok()?;
+            let is_bundle = raw.chunk_type == ChunkType::Bundle;
+            if first.is_none() {
+                if !is_bundle && raw.chunk_type != ChunkType::Document {
+                    return None;
+                }
+                first = Some(raw.header_size + raw.data_len);
+            } else if !is_bundle {
+                return None;
+            }
+            input = parse::take_n::<error::Chunk>(raw.data_len, i)
+                .ok()?
+                .0
+                .reset();
+        }
+        first.filter(|len| *len < data.len())
+    }
+
     pub(crate) fn parse(
         input: parse::Input<'a>,
     ) -> parse::ParseResult<'a, Chunk<'a>, error::Chunk> {
@@ -259,6 +305,43 @@ impl Header {
     where
         E: From<error::Header>,
     {
+        let (i, raw) = RawHeader::parse(input)?;
+        let (_, data) = parse::take_n(raw.data_len, i)?;
+        Ok((i, raw.hashed(data)))
+    }
+
+    /// The range of the input which corresponds to the data specified by this header
+    pub(crate) fn data_bytes(&self) -> Range<usize> {
+        self.header_size..(self.header_size + self.data_len)
+    }
+
+    pub(crate) fn hash(&self) -> ChangeHash {
+        self.hash
+    }
+
+    pub(crate) fn checksum_valid(&self) -> bool {
+        CheckSum(self.hash.checksum()) == self.checksum
+    }
+
+    pub(crate) fn checksum(&self) -> CheckSum {
+        self.checksum
+    }
+}
+
+/// A [`Header`] before its chunk's data is hashed: enough to find the
+/// chunk's type and extent.
+struct RawHeader {
+    checksum: CheckSum,
+    chunk_type: ChunkType,
+    data_len: usize,
+    header_size: usize,
+}
+
+impl RawHeader {
+    fn parse<E>(input: parse::Input<'_>) -> parse::ParseResult<'_, RawHeader, E>
+    where
+        E: From<error::Header>,
+    {
         let (
             i,
             parse::RangeOf {
@@ -285,36 +368,26 @@ impl Header {
             },
             input,
         )?;
-
-        let (_, data) = parse::take_n(chunk_len as usize, i)?;
-        let hash = hash(chunk_type, data);
         Ok((
             i,
-            Header {
+            RawHeader {
                 checksum: checksum_bytes.into(),
                 chunk_type,
-                data_len: data.len(),
+                data_len: chunk_len as usize,
                 header_size: header.len(),
-                hash,
             },
         ))
     }
 
-    /// The range of the input which corresponds to the data specified by this header
-    pub(crate) fn data_bytes(&self) -> Range<usize> {
-        self.header_size..(self.header_size + self.data_len)
-    }
-
-    pub(crate) fn hash(&self) -> ChangeHash {
-        self.hash
-    }
-
-    pub(crate) fn checksum_valid(&self) -> bool {
-        CheckSum(self.hash.checksum()) == self.checksum
-    }
-
-    pub(crate) fn checksum(&self) -> CheckSum {
-        self.checksum
+    /// `data` is the chunk's data.
+    fn hashed(self, data: &[u8]) -> Header {
+        Header {
+            checksum: self.checksum,
+            chunk_type: self.chunk_type,
+            data_len: data.len(),
+            header_size: self.header_size,
+            hash: hash(self.chunk_type, data),
+        }
     }
 }
 

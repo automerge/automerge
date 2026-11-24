@@ -176,3 +176,45 @@ fn a_lone_fragment_head_bundle_names_only_its_deps() {
     deps.sort_unstable();
     assert_eq!(boundary, deps);
 }
+
+/// Loading a save and then fragments it already holds skips those
+/// fragments, in two calls or in one with the save as the opening bytes.
+/// Fragments a stale save lacks still apply.
+#[test]
+fn load_incremental_skips_fragments_the_save_already_holds() {
+    use crate::next;
+
+    let mut doc = next::AutoCommit::new().with_actor(ActorId::from(&b"skip"[..]));
+    let mut stale_save = vec![];
+    for i in 0..600 {
+        doc.put(&ROOT, "k", i as i64).unwrap();
+        doc.commit_with(CommitOptions::default().with_time(0));
+        if i == 299 {
+            stale_save = doc.save();
+        }
+    }
+    let heads = doc.get_heads();
+    let save = doc.save();
+    let fragments = doc.fragments_after(&[], false).unwrap();
+    assert!(fragments.len() > 1);
+    let blobs: Vec<u8> = fragments.iter().flat_map(|f| f.bytes.clone()).collect();
+
+    let mut two_calls = next::Automerge::load(&save).unwrap();
+    two_calls.load_incremental(&blobs).unwrap();
+
+    let mut one_call = next::Automerge::new();
+    one_call
+        .load_incremental(&[save.clone(), blobs.clone()].concat())
+        .unwrap();
+
+    let mut from_stale = next::Automerge::new();
+    from_stale
+        .load_incremental(&[stale_save, blobs].concat())
+        .unwrap();
+
+    for loaded in [&two_calls, &one_call, &from_stale] {
+        assert_eq!(loaded.get_heads(), heads);
+        assert_eq!(loaded.num_changes(), 600);
+        assert_eq!(loaded.save(), save);
+    }
+}

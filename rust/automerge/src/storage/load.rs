@@ -185,6 +185,15 @@ fn load_next_change<'a, H: crate::hash_retention::HashRetention>(
     current: &ChangeGraph<H>,
     verification: VerificationMode,
 ) -> Result<parse::Input<'a>, Error> {
+    // A bundle the document already holds is skipped before its columns are
+    // parsed, which is most of the cost of reading one. An unknown answer
+    // parses; the apply path deduplicates.
+    if let Some(remaining) =
+        storage::Chunk::skip_known_bundle(data, |h| current.has_change(h).unwrap_or(false))
+    {
+        tracing::trace!("skipping bundle chunk already in the document");
+        return Ok(remaining);
+    }
     let (remaining, chunk) = storage::Chunk::parse(data).map_err(|e| Error::Parse(Box::new(e)))?;
     if !chunk.checksum_valid() {
         return Err(Error::BadChecksum);

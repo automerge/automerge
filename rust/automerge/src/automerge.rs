@@ -1208,6 +1208,13 @@ impl<H: HashRetention> Automerge<H> {
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
         if self.is_empty() {
+            // A save followed by bundles: load the save alone, then the
+            // rest against it, so bundles the save already holds are
+            // skipped instead of parsed.
+            let (data, rest) = match crate::storage::Chunk::leading_save_len(data) {
+                Some(len) => data.split_at(len),
+                None => (data, &[][..]),
+            };
             let mut doc = Self::load_as(
                 data,
                 LoadOptions::new()
@@ -1223,6 +1230,9 @@ impl<H: HashRetention> Automerge<H> {
             doc.set_write_frontier_boundaries(self.write_frontier.clone());
             doc.ops_mut().mark_all_dirty();
             *self = doc;
+            if !rest.is_empty() {
+                self.load_incremental(rest)?;
+            }
             return Ok(self.ops.len());
         }
         let changes = match load_changes(
