@@ -199,6 +199,26 @@ impl<E: Slabs> Weigh<E, usize> for LenModel {
         true
     }
 
+    type Pre = ();
+
+    open spec fn pre_ok(p: (), s: Seq<Slab<E::Tail>>) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn dom_check_spliced<I: IndexOps<usize>>(
+        _pre: (),
+        _slabs: &Vec<Slab<E::Tail>>,
+        _index: &I,
+        _len: usize,
+        _at: usize,
+        _ins: usize,
+        _old: Ghost<Seq<Slab<E::Tail>>>,
+        _del: Ghost<int>,
+    ) -> bool {
+        true
+    }
+
     #[inline(always)]
     fn total_ok(_ws: &[usize], _len: usize) -> bool {
         true
@@ -321,6 +341,27 @@ impl<E, X, B> Weigh<E, SlabAgg> for DeltaModel<X, B> where
             lemma_lens_ok::<E, X>(slabs@);
         }
         slabs_fit::<X, B>(slabs.as_slice(), len, i64::MIN, i64::MAX)
+    }
+
+    type Pre = ();
+
+    open spec fn pre_ok(p: (), s: Seq<Slab<E::Tail>>) -> bool {
+        true
+    }
+
+    /// The whole check: a delta column's own splices check what they
+    /// put in themselves (`ColumnCore::splice_delta`).
+    fn dom_check_spliced<I: IndexOps<SlabAgg>>(
+        _pre: (),
+        slabs: &Vec<Slab<E::Tail>>,
+        _index: &I,
+        len: usize,
+        _at: usize,
+        _ins: usize,
+        _old: Ghost<Seq<Slab<E::Tail>>>,
+        _del: Ghost<int>,
+    ) -> bool {
+        <Self as Weigh<E, SlabAgg>>::dom_check(slabs, len)
     }
 
     /// The domain (`dom_check`) bounds the sums: nothing more to check.

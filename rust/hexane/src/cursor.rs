@@ -404,6 +404,49 @@ pub(crate) trait Weigh<E: Slabs, W> {
             r ==> Self::dom_ok(slabs@),
     ;
 
+    /// What a check after a splice may know of the column before it (of
+    /// a prefix column, its sum), so as to read only what the splice put
+    /// in.
+    type Pre;
+
+    /// `p` is so of the column of slabs `s`.
+    spec fn pre_ok(p: Self::Pre, s: Seq<Slab<E::Tail>>) -> bool;
+
+    /// [`dom_check`](Self::dom_check) of the column a splice left: of
+    /// `slabs`, `len` items, kept with `index`, where the splice took
+    /// `del` items at `at` out of the column of slabs `old`, which was in
+    /// the domain, and put `ins` items there. From what `pre` says of
+    /// `old`, it may read only those `ins` items, where that shows the
+    /// column in the domain.
+    fn dom_check_spliced<I: IndexOps<W>>(
+        pre: Self::Pre,
+        slabs: &Vec<Slab<E::Tail>>,
+        index: &I,
+        len: usize,
+        at: usize,
+        ins: usize,
+        old: Ghost<Seq<Slab<E::Tail>>>,
+        del: Ghost<int>,
+    ) -> (r: bool)
+        requires
+            all_ok::<E>(slabs@),
+            index.ok(),
+            wlens::<W, I>(index.ws()) == slab_lens(slabs@),
+            len == total(slab_lens(slabs@)),
+            all_ok::<E>(old@),
+            Self::dom_ok(old@),
+            Self::pre_ok(pre, old@),
+            0 <= del@,
+            at + del@ <= vals_of::<E>(old@).len(),
+            at + ins <= len,
+            vals_of::<E>(slabs@) == vals_of::<E>(old@).take(at as int) + vals_of::<E>(slabs@).subrange(
+                at as int,
+                at + ins,
+            ) + vals_of::<E>(old@).skip(at + del@),
+        ensures
+            r ==> Self::dom_ok(slabs@),
+    ;
+
     /// Whether the weights `ws` of a column of `len` items add up to a
     /// total the weights can hold (a prefix column's sum fits its prefix
     /// type): a build checks it before its index adds them up. Not part

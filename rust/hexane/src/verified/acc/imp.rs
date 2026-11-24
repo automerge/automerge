@@ -10,6 +10,7 @@
 #[cfg(verus_keep_ghost)]
 use super::super::{held, lemma_held, lemma_svs_sub};
 use super::*;
+use crate::verified::kind::KCore;
 
 use crate::attrib::Accumulate;
 use crate::btree::{PrefixAggregate, SlabAggregate, SlabBTree};
@@ -424,6 +425,26 @@ impl<V: Accumulated + ColumnValueRef<C>, C: Codec> Weigh<V::E, AccWeight<V::Acc>
         true
     }
 
+    type Pre = ();
+
+    open spec fn pre_ok(p: (), s: Seq<Slab<<V::E as Slabs>::Tail>>) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn dom_check_spliced<I: IndexOps<AccWeight<V::Acc>>>(
+        _pre: (),
+        _slabs: &Vec<Slab<<V::E as Slabs>::Tail>>,
+        _index: &I,
+        _len: usize,
+        _at: usize,
+        _ins: usize,
+        _old: Ghost<Seq<Slab<<V::E as Slabs>::Tail>>>,
+        _del: Ghost<int>,
+    ) -> (r: bool) {
+        true
+    }
+
     #[inline(always)]
     fn total_ok(_ws: &[AccWeight<V::Acc>], _len: usize) -> bool {
         true
@@ -531,6 +552,13 @@ impl<V: Accumulated + ColumnValueRef<C>, C: Codec> Kind<V, C> for AccIndex {
     }
 
     proof fn lemma_kept(s: Seq<Slab<<V::E as Slabs>::Tail>>) {
+    }
+
+    proof fn lemma_computes() {
+    }
+
+    #[inline(always)]
+    fn pre(_core: &KCore<V, C, AccIndex>) {
     }
 }
 

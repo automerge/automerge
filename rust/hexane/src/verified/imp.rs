@@ -15,8 +15,8 @@ use crate::btree::SlabAggregate;
 use crate::column::Slab;
 use crate::copy::NoRuns;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{lemma_lens_ok, lemma_vals_own, lemma_vals_unit, slab_lens, Weigh};
-use crate::cursor::{BoundedFeed, ReadsAgree, RunFeed, Slabs};
+use crate::cursor::{lemma_lens_ok, lemma_vals_own, lemma_vals_unit, slab_lens};
+use crate::cursor::{BoundedFeed, ReadsAgree, RunFeed, Slabs, Weigh};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{sum, total};
 #[cfg(verus_keep_ghost)]
@@ -33,6 +33,7 @@ use crate::rle::edit::RleModel;
 use crate::rle::enc::REncoder;
 #[cfg(verus_keep_ghost)]
 use crate::verified::{saved, saved_values};
+use crate::weights::LoadWeigh;
 use crate::{Leb128, LoadOpts, MaybeFill, PackError, Run};
 use counts::Bools;
 use kind::KCore;
@@ -1111,6 +1112,63 @@ impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
         Self::filled(len, value, MAX_SEG)
     }
 
+    /// [`filled`](Self::filled), as a load makes it: an error and no
+    /// panic where the kind of index cannot keep the values (a prefix
+    /// column whose sums would not fit), the error a load of the same
+    /// values saved gives.
+    pub(super) fn try_filled(len: usize, value: Get<'_, V>, max_segments: usize) -> (r: Result<Self, PackError>)
+        requires
+            len <= i64::MAX,
+            len <= usize::MAX - 3,
+            max_segments >= 2,
+        ensures
+            r matches Ok(c) ==> c@ == Seq::new(len as nat, |_i: int| value.sv()),
+            K::keeps(Seq::new(len as nat, |_i: int| value.sv())) ==> r is Ok,
+    {
+        if len == 0 {
+            return Ok(Self::filled(len, value, max_segments));
+        }
+        let slab = <V::E as Model<V::X>>::fill(len, value);
+        let ghost s = slab;
+        let mut slabs = Vec::with_capacity(1);
+        slabs.push(slab);
+        proof {
+            assert(slabs@ =~= seq![s]);
+            lemma_vals_unit::<V::E>(s);
+            let vs = crate::cursor::vals_of::<V::E>(slabs@);
+            <Held<V, C> as VGet>::lemma_svs(vs);
+            V::lemma_own(value);
+            assert(<Held<V, C> as VGet>::svs(vs) =~= Seq::new(len as nat, |_i: int| value.sv()));
+            K::lemma_computes();
+            // one slab, of `len` values
+            assert(slab_lens(slabs@) =~= seq![len as nat]);
+            crate::fenwick::lemma_sum_one(slab_lens(slabs@), 0);
+        }
+        let mut ws = Vec::with_capacity(1);
+        ws.push(<K::G as Weigh<V::E, K::W>>::compute::<K::I>(&slabs[0]));
+        match <K::G as LoadWeigh<'static, V::E, V::X, K::W>>::load_check(ws.as_slice(), slabs.as_slice(), len, i64::MIN, i64::MAX) {
+            Ok(()) => {},
+            Err(e) => {
+                proof {
+                    // a load refuses no column the kind keeps
+                    let vs = crate::cursor::vals_of::<V::E>(slabs@);
+                    if K::keeps(<Held<V, C> as VGet>::svs(vs)) {
+                        K::lemma_refuses(vs);
+                    }
+                }
+                return Err(e);
+            },
+        }
+        let core = KCore::<V, C, K>::from_cut(slabs, max_segments);
+        proof {
+            let vs = Seq::new(len as nat, |_i: int| value.sv());
+            <Held<V, C> as VGet>::lemma_svs(core@);
+            V::lemma_own(value);
+            assert(<Held<V, C> as VGet>::svs(core@) =~= vs);
+        }
+        Ok(Column { core })
+    }
+
     /// [`fill`](Self::fill), in slabs of at most `max_segments` runs.
     #[inline(always)]
     pub(super) fn filled(len: usize, value: Get<'_, V>, max_segments: usize) -> (r: Self)
@@ -1205,7 +1263,8 @@ impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
         let counter = self.core.counter();
         let mut f = <V::E as Model<V::X>>::blind();
         let mut feed = SliceFeed::<V, C> { values, pos: 0, _c: PhantomData };
-        let _ins = self.core.splice_bounded(at, del, &mut f, &mut feed);
+        let pre = K::pre(&self.core);
+        let _ins = self.core.splice_bounded(at, del, &mut f, &mut feed, pre);
         proof {
             lemma_spliced::<V, C>(old(self).core@, at as int, del as int, values@, _ins@);
         }
@@ -1238,7 +1297,8 @@ impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
         proof {
             assert(feed.given@ + feed.it.remaining() =~= it0.remaining());
         }
-        let _ins = self.core.splice(at, del, &mut f, &mut feed);
+        let pre = K::pre(&self.core);
+        let _ins = self.core.splice(at, del, &mut f, &mut feed, pre);
         proof {
             if it0.obeys_prophetic_iter_laws() {
                 let vs = it0.remaining();
@@ -1279,7 +1339,8 @@ impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
         proof {
             assert(feed.given@ + feed.it.remaining() =~= it0.remaining());
         }
-        let _ins = self.core.splice(at, del, &mut f, &mut feed);
+        let pre = K::pre(&self.core);
+        let _ins = self.core.splice(at, del, &mut f, &mut feed, pre);
         proof {
             if it0.obeys_prophetic_iter_laws() {
                 let rs = it0.remaining();
@@ -1309,7 +1370,8 @@ impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
         let counter = self.core.counter();
         let mut f = <V::E as Model<V::X>>::blind();
         let mut feed = NoRuns::<<V::E as ReadsAgree<'static, V::X>>::Ins> { none: None };
-        let _ins = self.core.splice_bounded(at, del, &mut f, &mut feed);
+        let pre = K::pre(&self.core);
+        let _ins = self.core.splice_bounded(at, del, &mut f, &mut feed, pre);
         proof {
             let a = old(self).core@;
             let none = Seq::<Held<V, C>>::empty();
@@ -1361,7 +1423,8 @@ impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
         let values = one.as_slice();
         let mut f = <V::E as Model<V::X>>::blind();
         let mut feed = SliceFeed::<V, C> { values, pos: 0, _c: PhantomData };
-        let _ins = self.core.splice_bounded(at, 0, &mut f, &mut feed);
+        let pre = K::pre(&self.core);
+        let _ins = self.core.splice_bounded(at, 0, &mut f, &mut feed, pre);
         proof {
             lemma_spliced::<V, C>(old(self).core@, at as int, 0, values@, _ins@);
             assert(one@ =~= seq![value]);
@@ -1989,7 +2052,10 @@ impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
             opts.max_segments() >= 2,
         ensures
             match fill_of(bytes@, opts.length(), opts.fill().value()) {
-                Some((len, v)) => r matches Ok(c) && c@ == Seq::new(len as nat, |_i: int| v.sv()),
+                Some((len, v)) => {
+                    &&& r matches Ok(c) ==> c@ == Seq::new(len as nat, |_i: int| v.sv())
+                    &&& K::keeps(Seq::new(len as nat, |_i: int| v.sv())) ==> r is Ok
+                },
                 None => {
                     &&& r matches Ok(c) ==> {
                         &&& Column::<V, C>::valid(bytes@)
@@ -2007,7 +2073,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
             if let Some(len) = length {
                 if len as u64 <= i64::MAX as u64 && len <= usize::MAX - 3 {
                     if let Some(v) = fill.fill_value() {
-                        return Ok(Self::filled(len, v, max_segments));
+                        return Self::try_filled(len, v, max_segments);
                     }
                 }
             }

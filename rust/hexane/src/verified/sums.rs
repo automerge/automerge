@@ -286,7 +286,9 @@ impl Sum for i128 {
 /// asks to be proved. A column of no more values than that is not
 /// checked, and a longer one is: so a type whose `room` is every length
 /// a column can have (`usize::MAX`) is never checked, and a type summed
-/// in a signed type must be one of those.
+/// in a signed type must be one of those. An edit of a longer column
+/// reads the values it put in, adds their sum to the column's, and only
+/// where that does not fit reads the whole column.
 pub trait Amount: RleValue {
     /// The type the sums are kept in.
     type Sum: Sum;

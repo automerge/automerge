@@ -604,11 +604,13 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         del: usize,
         f: &mut F,
         feed: &mut R,
+        pre: G::Pre,
     ) -> (ins: Ghost<Seq<E::V>>)
         requires
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
             old(feed).inv(),
+            G::pre_ok(pre, old(self).slabs_spec()),
         ensures
             final(self)@ == old(self)@.take(at as int) + ins@ + old(self)@.skip(at + del),
             final(feed).given() == old(feed).given() + ins@,
@@ -620,9 +622,11 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     {
         let max_segments = self.max_segments;
         let mut p = self.take_parts();
+        let ghost s0 = p.slabs@;
         proof {
             lemma_vals_total::<E>(p.slabs@);
         }
+        let old_len = p.total_len;
         let ins = splice_feed::<E, W, I, G, F, R>(
             &mut p.slabs,
             &mut p.index,
@@ -634,7 +638,17 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             f,
             feed,
         );
-        if !G::dom_check(&p.slabs, p.total_len) {
+        // what the splice put in, and where
+        proof {
+            lemma_vals_total::<E>(p.slabs@);
+        }
+        let ins_len = p.total_len - (old_len - del);
+        proof {
+            let (e0, e1) = (vals_of::<E>(s0), vals_of::<E>(p.slabs@));
+            assert(e1.subrange(at as int, at + ins_len) =~= ins@);
+            assert(e1 =~= e0.take(at as int) + e1.subrange(at as int, at + ins_len) + e0.skip(at + del));
+        }
+        if !G::dom_check_spliced(pre, &p.slabs, &p.index, p.total_len, at, ins_len, Ghost(s0), Ghost(del as int)) {
             out_of_domain();
         }
         self.restore(p);
@@ -650,11 +664,13 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         del: usize,
         f: &mut F,
         feed: &mut R,
+        pre: G::Pre,
     ) -> (ins: Ghost<Seq<E::V>>)
         requires
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
             old(feed).inv(),
+            G::pre_ok(pre, old(self).slabs_spec()),
         ensures
             final(self)@ == old(self)@.take(at as int) + ins@ + old(self)@.skip(at + del),
             final(feed).given() == old(feed).given() + ins@,
@@ -666,9 +682,11 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     {
         let max_segments = self.max_segments;
         let mut p = self.take_parts();
+        let ghost s0 = p.slabs@;
         proof {
             lemma_vals_total::<E>(p.slabs@);
         }
+        let old_len = p.total_len;
         let ins = splice_feed_bounded::<E, W, I, G, F, R>(
             &mut p.slabs,
             &mut p.index,
@@ -680,7 +698,17 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             f,
             feed,
         );
-        if !G::dom_check(&p.slabs, p.total_len) {
+        // what the splice put in, and where
+        proof {
+            lemma_vals_total::<E>(p.slabs@);
+        }
+        let ins_len = p.total_len - (old_len - del);
+        proof {
+            let (e0, e1) = (vals_of::<E>(s0), vals_of::<E>(p.slabs@));
+            assert(e1.subrange(at as int, at + ins_len) =~= ins@);
+            assert(e1 =~= e0.take(at as int) + e1.subrange(at as int, at + ins_len) + e0.skip(at + del));
+        }
+        if !G::dom_check_spliced(pre, &p.slabs, &p.index, p.total_len, at, ins_len, Ghost(s0), Ghost(del as int)) {
             out_of_domain();
         }
         self.restore(p);

@@ -13,8 +13,9 @@ use crate::btree::{SlabAggregate, SlabBTree};
 #[cfg(verus_keep_ghost)]
 use crate::column::Slab;
 use crate::column_core::ColumnCore;
+use crate::cursor::Weigh;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{all_ok, vals_of, Slabs, Weigh};
+use crate::cursor::{all_ok, vals_of, Slabs};
 use crate::index::{BitIndex, IndexOps};
 use crate::weights::{CopyWeigh, LenModel, LoadWeigh};
 use crate::Leb128;
@@ -58,6 +59,21 @@ pub(crate) trait Kind<V: ColumnValueRef<C>, C: Codec>: VKeeps<V, C> {
         ensures
             Self::keeps(<Held<V, C> as VGet>::svs(vals_of::<V::E>(s))),
     ;
+
+    /// A load weighs each slab as it is (`Weigh::compute`): it does not
+    /// accumulate the weights as the runs pass.
+    proof fn lemma_computes()
+        ensures
+            !<Self::G as LoadWeigh<'static, V::E, V::X, Self::W>>::accumulates(),
+    ;
+
+    /// What the check after a splice may know of the column of `core`
+    /// before it (`Weigh::Pre`): of a prefix column too long for its sums
+    /// to be sure to fit, what it adds up to.
+    fn pre(core: &KCore<V, C, Self>) -> (r: <Self::G as Weigh<V::E, Self::W>>::Pre)
+        ensures
+            <Self::G as Weigh<V::E, Self::W>>::pre_ok(r, core.slabs_spec()),
+    ;
 }
 
 impl<V: ColumnValueRef<C>, C: Codec> Kind<V, C> for LenIndex {
@@ -72,6 +88,13 @@ impl<V: ColumnValueRef<C>, C: Codec> Kind<V, C> for LenIndex {
 
     proof fn lemma_kept(s: Seq<Slab<<V::E as Slabs>::Tail>>) {
     }
+
+    proof fn lemma_computes() {
+    }
+
+    #[inline(always)]
+    fn pre(_core: &KCore<V, C, LenIndex>) {
+    }
 }
 
 impl<V: ColumnValueRef<C>, C: Codec> Kind<V, C> for LenBitIndex {
@@ -85,6 +108,13 @@ impl<V: ColumnValueRef<C>, C: Codec> Kind<V, C> for LenBitIndex {
     }
 
     proof fn lemma_kept(s: Seq<Slab<<V::E as Slabs>::Tail>>) {
+    }
+
+    proof fn lemma_computes() {
+    }
+
+    #[inline(always)]
+    fn pre(_core: &KCore<V, C, LenBitIndex>) {
     }
 }
 

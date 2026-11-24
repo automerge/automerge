@@ -15,6 +15,7 @@ use super::super::sums::{
     lemma_svs_slabs, lemma_vsum,
 };
 use super::*;
+use crate::verified::kind::KCore;
 
 use crate::btree::SlabBTree;
 #[cfg(verus_keep_ghost)]
@@ -23,7 +24,7 @@ use crate::btree::{PrefixAggregate, SlabAggregate};
 use crate::column::Slab;
 use crate::column_core::too_many_slabs;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{lemma_lens_ok, slab_lens, Slabs, Weigh};
+use crate::cursor::{lemma_lens_ok, lemma_vals_own, slab_lens, Slabs, Weigh};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::total;
 #[cfg(verus_keep_ghost)]
@@ -53,6 +54,54 @@ impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Kind<V, C> for SumIndex {
 
     proof fn lemma_kept(s: Seq<Slab<<V::E as Slabs>::Tail>>) {
         lemma_svs_slabs::<V, C>(s);
+    }
+
+    proof fn lemma_computes() {
+    }
+
+    /// Where the column is longer than its sums are sure to fit, what it
+    /// adds up to, from its index.
+    fn pre(core: &KCore<V, C, SumIndex>) -> (r: Option<V::Sum>) {
+        core.lemma_column();
+        if core.len() <= V::safe_len() {
+            return None;
+        }
+        let ix = match core.index_opt() {
+            Some(ix) => ix,
+            None => {
+                return None;
+            },
+        };
+        if core.slabs().len() == usize::MAX {
+            return None;
+        }
+        let ghost s = core.slabs_spec();
+        proof {
+            lemma_lens_ok::<V::E, V::X>(s);
+            lemma_btree_index(*ix);
+            assert forall|i: int| 0 <= i < s.len() implies {
+                &&& #[trigger] ix@[i].spec_len() == s[i].len
+                &&& ix@[i].spec_prefix() == vsum::<Get<'static, V>, SumOf<V>>(
+                    <V::X as Decoders<'static>>::vals(s[i]),
+                )
+            } by {
+                assert(<SumModel<V, C> as Weigh<V::E, SumWeight<V::Sum>>>::wrel(ix.ws()[i], s[i]));
+            }
+            lemma_svs_slabs::<V, C>(s);
+        }
+        let t = p_prefix::<V::X, SumOf<V>>(core.slabs(), ix, core.len());
+        proof {
+            // the index's sum of all the values, which fits
+            let o = vals_of::<V::X>(s);
+            let sv = <Get<'static, V> as VGet>::svs(o);
+            lemma_vals_own::<V::E, V::X>(s);
+            <Get<'static, V> as VGet>::lemma_svs(o);
+            assert(before::<V::X>(s, core@.len() as int) =~= o);
+            lemma_vsum::<V>(o);
+            assert(sv.take(sv.len() as int) =~= sv);
+            V::Sum::lemma_of_int(summed::<V>(sv), 0);
+        }
+        Some(t)
     }
 }
 

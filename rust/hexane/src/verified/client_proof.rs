@@ -19375,7 +19375,10 @@ fn told_by_load_finalize<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it:
         r matches Ok(c) ==> it.given().len() <= c@.len() && c@.take(it.given().len() as int) == it.given(),
         it.done() ==> (r matches Ok(c) ==> c@ == it.given()),
         match it.filling() {
-            Some((len, v)) => r matches Ok(c) && c@ == Seq::new(len as nat, |_i: int| v.sv()),
+            Some((len, v)) => {
+                &&& r matches Ok(c) ==> c@ == Seq::new(len as nat, |_i: int| v.sv())
+                &&& K::keeps(Seq::new(len as nat, |_i: int| v.sv())) ==> r is Ok
+            },
             None => {
                 &&& r matches Ok(c) ==> {
                     &&& Column::<V, C>::valid(it.bytes())

@@ -79,7 +79,10 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> ColumnLoadIter<'a, V, C
                 == self.given(),
             self.done() ==> (r matches Ok(c) ==> c@ == self.given()),
             match self.filling() {
-                Some((len, v)) => r matches Ok(c) && c@ == Seq::new(len as nat, |_i: int| v.sv()),
+                Some((len, v)) => {
+                    &&& r matches Ok(c) ==> c@ == Seq::new(len as nat, |_i: int| v.sv())
+                    &&& K::keeps(Seq::new(len as nat, |_i: int| v.sv())) ==> r is Ok
+                },
                 None => {
                     &&& r matches Ok(c) ==> {
                         &&& Column::<V, C>::valid(self.bytes())
@@ -94,8 +97,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> ColumnLoadIter<'a, V, C
             },
     {
         if let Some((value, len)) = self.fill {
-            let c = Column::<V, C, K>::filled(len, value, self.max_segments);
-            return Ok(c);
+            return Column::<V, C, K>::try_filled(len, value, self.max_segments);
         }
         let ghost (data, p) = (self.core.ld.data(), self.core.ld.pulled());
         proof {

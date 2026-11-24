@@ -21,10 +21,12 @@ use crate::cursor::{all_ok, lemma_lens_ok, lemma_vals_own, lemma_vals_total, sla
 use crate::cursor::{Slabs, Weigh};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{lemma_sum_le, sum, total};
+#[cfg(verus_keep_ghost)]
+use crate::index::wlens;
 use crate::index::IndexOps;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{each, lemma_upto, lens_ok, vals_of};
-use crate::iter_core::{Decode, Decoders};
+use crate::iter_core::{Decode, Decoders, ICore};
 #[cfg(verus_keep_ghost)]
 use crate::prefix_core::{lemma_vsum_cat, lemma_vsum_run, reps, vsum};
 use crate::prefix_core::{p_slab_sum, PrefixOps, PrefixOpsNu, PrefixWeight};
@@ -910,6 +912,181 @@ pub(super) fn slab_fits<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(slab: 
     Some(u)
 }
 
+/// `t` and the sum of the values at `at..at + n` of the column of
+/// `slabs`, kept with `index`, where that fits; for sums of an unsigned
+/// type. It reads those values alone, run by run, from where the index
+/// finds `at`. `None` where it does not fit, and also, to be read
+/// whole, of a column of `usize::MAX` slabs.
+pub(super) fn window_fits<V: PrefixValue + ColumnValueRef<C>, C: Codec, W, I: IndexOps<W>>(
+    slabs: &[Slab<<V::E as Slabs>::Tail>],
+    index: &I,
+    at: usize,
+    n: usize,
+    t: V::Sum,
+) -> (r: Option<V::Sum>)
+    requires
+        all_ok::<V::E>(slabs@),
+        index.ok(),
+        wlens::<W, I>(index.ws()) == slab_lens(slabs@),
+        at + n <= total(slab_lens(slabs@)),
+        total(slab_lens(slabs@)) <= usize::MAX,
+        V::Sum::lo() == 0,
+    ensures
+        r matches Some(u) ==> u.as_int() == t.as_int() + summed::<V>(
+            <Get<'static, V> as VGet>::svs(vals_of::<V::X>(slabs@).subrange(at as int, at + n)),
+        ),
+{
+    let ghost s = slabs@;
+    let ghost v = vals_of::<V::X>(s);
+    proof {
+        lemma_lens_ok::<V::E, V::X>(s);
+        lemma_vals_total::<V::E>(s);
+        lemma_vals_own::<V::E, V::X>(s);
+        V::Sum::lemma_as_int(t);
+    }
+    if n == 0 {
+        proof {
+            assert(v.subrange(at as int, at + n) =~= Seq::<Get<'static, V>>::empty());
+            lemma_svs_none::<Get<'static, V>>();
+        }
+        return Some(t);
+    }
+    if slabs.len() == usize::MAX {
+        return None;
+    }
+    let (si, off) = index.ix_find(at);
+    proof {
+        assert(index.ws().map_values(|w: W| I::wlen(w)) =~= slab_lens(s));
+    }
+    let mut it = ICore::at::<V::X>(slabs, si, off, at, n);
+    let ghost w = v.subrange(at as int, at + n);
+    let ghost sw = <Get<'static, V> as VGet>::svs(w);
+    proof {
+        it.lemma_out_len::<V::X>(s);
+        assert(it.out::<V::X>(s) == w);
+        <Get<'static, V> as VGet>::lemma_svs(w);
+        assert(sw.take(0) =~= Seq::<<V as VSpec>::S>::empty());
+        assert(w.skip(0) =~= w);
+    }
+    let mut u = t;
+    let ghost mut k: int = 0;
+    loop
+        invariant
+            s == slabs@,
+            w == vals_of::<V::X>(s).subrange(at as int, at + n),
+            sw == <Get<'static, V> as VGet>::svs(w),
+            sw.len() == w.len(),
+            w.len() == n,
+            forall|i: int| 0 <= i < w.len() ==> (#[trigger] sw[i]) == w[i].sv(),
+            V::Sum::lo() == 0,
+            t.as_int() >= 0,
+            it.wf::<V::X>(s),
+            0 <= k <= n,
+            it.out::<V::X>(s) == w.skip(k),
+            it.items_left == n - k,
+            u.as_int() == t.as_int() + summed::<V>(sw.take(k)),
+        ensures
+            u.as_int() == t.as_int() + summed::<V>(sw),
+        decreases n - k,
+    {
+        if it.items_left == 0 {
+            proof {
+                assert(sw.take(k) =~= sw);
+            }
+            break ;
+        }
+        match it.run_once::<V::X>(slabs, usize::MAX) {
+            Some(run) => {
+                let p = V::to_part(run.value);
+                let ghost c = run.count as int;
+                let ghost a = V::amount(run.value.sv());
+                proof {
+                    let r = Seq::new(run.count as nat, |_i: int| run.value.sv());
+                    assert forall|j: int| k <= j < k + c implies #[trigger] sw[j] == run.value.sv() by {
+                        assert(w.skip(k).take(c)[j - k] == run.value);
+                    }
+                    assert(sw.take(k + c) =~= sw.take(k) + r);
+                    lemma_sum_cat::<V>(sw.take(k), r);
+                    lemma_sum_run::<V>(run.count as nat, run.value.sv());
+                    assert(w.skip(k).skip(c) =~= w.skip(k + c));
+                    lemma_sum_mono::<V>(sw, k);
+                    lemma_sum_mono::<V>(sw, k + c);
+                    V::lemma_amount(run.value.sv());
+                    assert(a * c >= 0) by (nonlinear_arith)
+                        requires
+                            a >= 0,
+                            c >= 0,
+                    ;
+                    V::Sum::lemma_as_int(u);
+                    V::Sum::lemma_as_int(p);
+                }
+                let q = match p.c_mul(run.count) {
+                    Some(q) => q,
+                    None => {
+                        return None;
+                    },
+                };
+                match u.c_add(q) {
+                    Some(x) => {
+                        u = x;
+                    },
+                    None => {
+                        return None;
+                    },
+                }
+                proof {
+                    k = k + c;
+                }
+            },
+            None => {
+                return None;
+            },
+        }
+    }
+    Some(u)
+}
+
+/// A splice that takes values out of a column whose sums fit and puts
+/// values in whose sum, added to what the column added up to, fits,
+/// leaves a column whose sums fit; for sums of an unsigned type. The
+/// sums of the column it leaves are at most that: what it took out
+/// added nothing below zero.
+proof fn lemma_spliced_fits<V: PrefixValue>(
+    o: Seq<<V as VSpec>::S>,
+    nw: Seq<<V as VSpec>::S>,
+    at: int,
+    del: int,
+    ins: int,
+)
+    requires
+        V::Sum::lo() == 0,
+        0 <= at,
+        0 <= del,
+        at + del <= o.len(),
+        0 <= ins,
+        at + ins <= nw.len(),
+        nw == o.take(at) + nw.subrange(at, at + ins) + o.skip(at + del),
+        summed::<V>(o) + summed::<V>(nw.subrange(at, at + ins)) <= V::Sum::hi(),
+    ensures
+        sums_fit::<V>(nw),
+{
+    let a = o.take(at);
+    let d = o.subrange(at, at + del);
+    let b = o.skip(at + del);
+    let x = nw.subrange(at, at + ins);
+    assert(o =~= a + d + b);
+    lemma_sum_cat::<V>(a + d, b);
+    lemma_sum_cat::<V>(a, d);
+    lemma_sum_mono::<V>(d, 0);
+    lemma_sum_cat::<V>(a + x, b);
+    lemma_sum_cat::<V>(a, x);
+    assert forall|k: int| 0 <= k <= nw.len() implies V::Sum::lo() <= #[trigger] summed::<V>(nw.take(k))
+        <= V::Sum::hi() by {
+        lemma_sum_mono::<V>(nw, k);
+        assert(nw.take(nw.len() as int) =~= nw);
+    }
+}
+
 /// Whether the sums of the values of `slabs`, `len` of them, fit:
 /// exactly, reading every value where the column is long enough for
 /// them not to.
@@ -1092,6 +1269,71 @@ impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Weigh<V::E, SumWeight<V::Sum>
             sum_overflows();
         }
         true
+    }
+
+    /// The sum of the column's values, where it was known.
+    type Pre = Option<V::Sum>;
+
+    open spec fn pre_ok(p: Option<V::Sum>, s: Seq<Slab<<V::E as Slabs>::Tail>>) -> bool {
+        p matches Some(t) ==> t.as_int() == summed::<V>(<Get<'static, V> as VGet>::svs(vals_of::<V::X>(s)))
+    }
+
+    /// Where the column is too long for its sums to be sure to fit, and
+    /// what it added up to before the splice is known: what the splice
+    /// put in is read, and if that sum and its own fit, so do all the
+    /// column's sums (`lemma_spliced_fits`). Else the whole check.
+    #[inline]
+    #[allow(unused_variables)] // `old`, `del` and `u` are for the proof
+    fn dom_check_spliced<I: IndexOps<SumWeight<V::Sum>>>(
+        pre: Option<V::Sum>,
+        slabs: &Vec<Slab<<V::E as Slabs>::Tail>>,
+        index: &I,
+        len: usize,
+        at: usize,
+        ins: usize,
+        old: Ghost<Seq<Slab<<V::E as Slabs>::Tail>>>,
+        del: Ghost<int>,
+    ) -> (r: bool) {
+        if len > V::safe_len() {
+            if let Some(t) = pre {
+                proof {
+                    V::lemma_safe();
+                }
+                if let Some(u) = window_fits::<V, C, SumWeight<V::Sum>, I>(slabs.as_slice(), index, at, ins, t) {
+                    proof {
+                        let (s0, s1) = (old@, slabs@);
+                        let (e0, e1) = (crate::cursor::vals_of::<V::E>(s0), crate::cursor::vals_of::<V::E>(s1));
+                        let (h0, h1) = (<Held<V, C> as VGet>::svs(e0), <Held<V, C> as VGet>::svs(e1));
+                        lemma_svs_slabs::<V, C>(s0);
+                        lemma_svs_slabs::<V, C>(s1);
+                        lemma_vals_total::<V::E>(s1);
+                        lemma_vals_own::<V::E, V::X>(s1);
+                        <Held<V, C> as VGet>::lemma_svs(e0);
+                        <Held<V, C> as VGet>::lemma_svs(e1);
+                        <Get<'static, V> as VGet>::lemma_svs(vals_of::<V::X>(s1));
+                        // the splice's values, as a specification has them
+                        let x = e1.subrange(at as int, at + ins);
+                        lemma_svs_add::<Held<V, C>>(e0.take(at as int), x);
+                        lemma_svs_add::<Held<V, C>>(e0.take(at as int) + x, e0.skip(at + del@));
+                        lemma_svs_sub::<Held<V, C>>(e0, 0, at as int);
+                        lemma_svs_sub::<Held<V, C>>(e0, at + del@, e0.len() as int);
+                        lemma_svs_sub::<Held<V, C>>(e1, at as int, at + ins);
+                        assert(e0.take(at as int) == e0.subrange(0, at as int));
+                        assert(e0.skip(at + del@) == e0.subrange(at + del@, e0.len() as int));
+                        assert(h0.take(at as int) == h0.subrange(0, at as int));
+                        assert(h0.skip(at + del@) == h0.subrange(at + del@, h0.len() as int));
+                        // and as the reader gives them
+                        let v1 = vals_of::<V::X>(s1);
+                        lemma_svs_sub::<Get<'static, V>>(v1, at as int, at + ins);
+                        assert(h1 =~= h0.take(at as int) + h1.subrange(at as int, at + ins) + h0.skip(at + del@));
+                        V::Sum::lemma_as_int(u);
+                        lemma_spliced_fits::<V>(h0, h1, at as int, del@, ins as int);
+                    }
+                    return true;
+                }
+            }
+        }
+        Self::dom_check(slabs, len)
     }
 
     #[inline(always)]

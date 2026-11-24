@@ -11,7 +11,7 @@
 //! test that starts passing means the bug is gone — or that the test
 //! stopped reaching it, which is worth checking before deleting.
 
-use hexane::{Column, DeltaColumn, Iter, LoadOpts, PrefixColumn};
+use hexane::{Column, DeltaColumn, Iter, LoadOpts};
 
 /// `try_resume` accepts any column, and the write counter alone cannot
 /// tell two of them apart — every fresh column starts at zero. So an
@@ -120,25 +120,5 @@ fn load_with_rejects_an_out_of_domain_fill() {
     match c {
         Err(_) => {}
         Ok(c) => panic!("accepted an out-of-domain fill -> {:?}", c.to_vec()),
-    }
-}
-
-/// A load of empty data with a length and a fill reads as `length` copies
-/// of the fill, and the length comes from the caller, who may have read
-/// it from untrusted data. Of a prefix column whose fill's sum would
-/// overflow the type it keeps its sums in, the old API's `load_with`
-/// returned an error (`load_fill_checks_weights.rs`), as it does for the
-/// same values in loaded data; the verified one panics ("prefix sum
-/// overflows its type").
-#[cfg(target_pointer_width = "64")]
-#[test]
-#[ignore = "known bug: a prefix column's fill whose sums overflow panics"]
-fn a_fill_overflowing_the_prefix_is_rejected() {
-    let opts = LoadOpts::new().with_length(1 << 40).with_fill(u32::MAX);
-    let r = std::panic::catch_unwind(|| PrefixColumn::<u32>::load_with(&[], opts).map(|c| c.len()));
-    match r {
-        Err(_) => panic!("load panicked on a fill whose sums overflow"),
-        Ok(Ok(len)) => panic!("load accepted a fill whose sums overflow: len = {len}"),
-        Ok(Err(_)) => {}
     }
 }

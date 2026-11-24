@@ -1418,8 +1418,11 @@ impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
     /// a slab may hold.
     ///
     /// With a length and a fill value, empty `bytes` load as that many
-    /// copies of the value, if a column can be that long (`fill_of`). If
-    /// it cannot, or with no fill value, `bytes` load as what they are;
+    /// copies of the value, if a column can be that long (`fill_of`):
+    /// where the column's kind of index cannot keep them (a prefix column
+    /// whose sums would not fit, `VKeeps::keeps`), that is an error, the
+    /// one a load of the same values saved gives. If a column cannot be
+    /// that long, or with no fill value, `bytes` load as what they are;
     /// and a column of another length than the one asked for is an error
     /// ([`PackError::InvalidLength`]), as empty `bytes` are for every
     /// length but 0.
@@ -1433,7 +1436,10 @@ impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
             opts.max_segments() >= 2,
         ensures
             match fill_of(bytes@, opts.length(), opts.fill().value()) {
-                Some((len, v)) => r matches Ok(c) && c@ == Seq::new(len as nat, |_i: int| v.sv()),
+                Some((len, v)) => {
+                    &&& r matches Ok(c) ==> c@ == Seq::new(len as nat, |_i: int| v.sv())
+                    &&& K::keeps(Seq::new(len as nat, |_i: int| v.sv())) ==> r is Ok
+                },
                 None => {
                     &&& r matches Ok(c) ==> {
                         &&& Column::<V, C>::valid(bytes@)

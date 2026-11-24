@@ -127,7 +127,8 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> ColumnLoadIter<'a, V, C
 
     /// Read and check what is left, and give the column: as
     /// [`load_with`](Column::load_with) gives it, and beginning
-    /// with the runs given. A fill gives its column. No error unless a
+    /// with the runs given. A fill gives its column, or the error
+    /// `load_with` gives of it. No error unless a
     /// step failed, or the bytes are no column `load_with` takes.
     #[inline(always)]
     pub fn finalize(self) -> (r: Result<Column<V, C, K>, PackError>)
@@ -138,7 +139,10 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> ColumnLoadIter<'a, V, C
                 == self.given(),
             self.done() ==> (r matches Ok(c) ==> c@ == self.given()),
             match self.filling() {
-                Some((len, v)) => r matches Ok(c) && c@ == Seq::new(len as nat, |_i: int| v.sv()),
+                Some((len, v)) => {
+                    &&& r matches Ok(c) ==> c@ == Seq::new(len as nat, |_i: int| v.sv())
+                    &&& K::keeps(Seq::new(len as nat, |_i: int| v.sv())) ==> r is Ok
+                },
                 None => {
                     &&& r matches Ok(c) ==> {
                         &&& Column::<V, C>::valid(self.bytes())
