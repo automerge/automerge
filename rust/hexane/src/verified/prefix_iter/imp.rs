@@ -47,7 +47,7 @@ use vstd::prelude::*;
 
 verus! {
 
-impl<'a, V: VSummed> VerifiedPrefixedValue<'a, V> {
+impl<'a, V: PrefixValue> PrefixedValue<'a, V> {
     #[inline]
     pub(super) fn total_impl(&self) -> (r: V::Sum)
         ensures
@@ -65,17 +65,17 @@ impl<'a, V: VSummed> VerifiedPrefixedValue<'a, V> {
     }
 }
 
-impl<'a, V: VSummed> Copy for VerifiedPrefixedValue<'a, V> {
+impl<'a, V: PrefixValue> Copy for PrefixedValue<'a, V> {
 
 }
 
-impl<'a, V: VSummed> Copy for VerifiedPrefixSeek<'a, V> {
+impl<'a, V: PrefixValue> Copy for PrefixSeek<'a, V> {
 
 }
 
 // ── What the running sum is ─────────────────────────────────────────────────
 /// One more value adds its amount to the sum of a range.
-pub(super) proof fn lemma_step<V: VSummed>(c: Seq<<V as VSpec>::S>, b: int, k: int)
+pub(super) proof fn lemma_step<V: PrefixValue>(c: Seq<<V as VSpec>::S>, b: int, k: int)
     requires
         0 <= b <= k < c.len(),
     ensures
@@ -87,7 +87,7 @@ pub(super) proof fn lemma_step<V: VSummed>(c: Seq<<V as VSpec>::S>, b: int, k: i
 /// The running sum of an iterator at `pos` whose sum counts from
 /// `base_at`, as the shared cores keep it, is what the values from
 /// `base_at` up to `pos` add up to.
-pub(super) proof fn lemma_running<'a, V: VSummed + VValue<C>, C: VCodec>(
+pub(super) proof fn lemma_running<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(
     s: Seq<Slab<<V::E as Slabs>::Tail>>,
     base: V::Sum,
     sum: V::Sum,
@@ -125,7 +125,7 @@ pub(super) proof fn lemma_running<'a, V: VSummed + VValue<C>, C: VCodec>(
 
 /// What the values before index `i` add up to, as the shared cores
 /// keep it, is the sum of the column's first `i` values.
-pub(super) proof fn lemma_sum_before<'a, V: VSummed + VValue<C>, C: VCodec>(s: Seq<Slab<<V::E as Slabs>::Tail>>, i: int)
+pub(super) proof fn lemma_sum_before<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(s: Seq<Slab<<V::E as Slabs>::Tail>>, i: int)
     requires
         0 <= i <= vals_of::<V::X>(s).len(),
     ensures
@@ -142,7 +142,7 @@ pub(super) proof fn lemma_sum_before<'a, V: VSummed + VValue<C>, C: VCodec>(s: S
     lemma_vsum::<V>(b);
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
     /// The running sum is kept as the shared cores ask, over the index
     /// of a column whose sums fit.
     #[verifier::type_invariant]
@@ -184,7 +184,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 
     /// What the `i`th of the values left is given as.
-    pub(super) proof fn lemma_gives(&self, i: int, pv: VerifiedPrefixedValue<'a, V>)
+    pub(super) proof fn lemma_gives(&self, i: int, pv: PrefixedValue<'a, V>)
         requires
             self.ok(),
             0 <= i < self.inner.items().len(),
@@ -335,9 +335,9 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
             use_type_invariant(&self.inner);
         }
         *self =
-        VerifiedPrefixIter {
+        PrefixIter {
             ix: self.ix,
-            inner: VerifiedIter { it, slabs: self.inner.slabs, col: self.inner.col },
+            inner: Iter { it, slabs: self.inner.slabs, col: self.inner.col },
             total: sum,
             base,
             base_at,
@@ -567,7 +567,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
         self.advance_to(range.start);
     }
 
-    pub(super) fn shift_next_impl(&mut self, range: Range<usize>) -> (r: Option<VerifiedPrefixedValue<'a, V>>)
+    pub(super) fn shift_next_impl(&mut self, range: Range<usize>) -> (r: Option<PrefixedValue<'a, V>>)
         requires
             range.start >= old(self).pos(),
         ensures
@@ -624,7 +624,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
         r
     }
 
-    pub(super) fn next_run_impl(&mut self) -> (r: Option<Run<VerifiedPrefixedValue<'a, V>>>)
+    pub(super) fn next_run_impl(&mut self) -> (r: Option<Run<PrefixedValue<'a, V>>>)
         ensures
             final(self).column() == old(self).column(),
             final(self).source() == old(self).source(),
@@ -671,7 +671,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
         }
         match r {
             Some(run) => {
-                let pv = VerifiedPrefixedValue { value: run.value, total: sum };
+                let pv = PrefixedValue { value: run.value, total: sum };
                 proof {
                     let o = me.inner.items();
                     let n = run.count as int;
@@ -703,14 +703,14 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
         }
     }
 
-    pub(super) fn runs_impl(self) -> (r: VerifiedRuns<'a, V, C, SumIndex>)
+    pub(super) fn runs_impl(self) -> (r: Runs<'a, V, C, SumIndex>)
         ensures
             r.iter() == self.plain(),
     {
-        VerifiedRuns(self.inner)
+        Runs(self.inner)
     }
 
-    pub(super) fn delta_nth_impl(&mut self, n: usize) -> (r: Option<VerifiedPrefixSeek<'a, V>>)
+    pub(super) fn delta_nth_impl(&mut self, n: usize) -> (r: Option<PrefixSeek<'a, V>>)
         ensures
             n < old(self).rest().len() ==> {
                 &&& r matches Some(seek)
@@ -755,7 +755,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
         }
         match r {
             Some((value, delta)) => {
-                let pv = VerifiedPrefixedValue { value, total: sum };
+                let pv = PrefixedValue { value, total: sum };
                 proof {
                     let s = me.inner.slabs@;
                     let p = me.inner.it.pos as int;
@@ -765,7 +765,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
                     // `delta` is what the values passed over add up to
                     lemma_running::<V, C>(s, vsum::<Get<'a, V>, SumOf<V>>(before::<V::X>(s, p)), delta, p, p + n);
                 }
-                Some(VerifiedPrefixSeek { pos: self.inner.it.pos - 1, delta, pv })
+                Some(PrefixSeek { pos: self.inner.it.pos - 1, delta, pv })
             },
             None => {
                 proof {
@@ -778,7 +778,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
         }
     }
 
-    pub(super) fn suspend_impl(&self) -> (s: VerifiedPrefixIterState<V>)
+    pub(super) fn suspend_impl(&self) -> (s: PrefixIterState<V>)
         ensures
             s.pos() == self.pos(),
             s.end_pos() == self.end_pos(),
@@ -793,11 +793,11 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
             use_type_invariant(self);
             self.lemma_sums();
         }
-        VerifiedPrefixIterState { inner: self.inner.suspend(), base_at: self.base_at, _phantom: PhantomData }
+        PrefixIterState { inner: self.inner.suspend(), base_at: self.base_at, _phantom: PhantomData }
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> where V::Sum: VCount {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> where V::Sum: UnsignedPrefix {
     /// The sums the search counts by are those of the values left.
     pub(super) proof fn lemma_counted(&self, j: int)
         requires
@@ -811,7 +811,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> where V
     }
 
     #[verifier::spinoff_prover]
-    pub(super) fn advance_prefix_impl(&mut self, n: V::Sum) -> (r: Option<VerifiedPrefixSeek<'a, V>>)
+    pub(super) fn advance_prefix_impl(&mut self, n: V::Sum) -> (r: Option<PrefixSeek<'a, V>>)
         ensures
             final(self).column() == old(self).column(),
             final(self).source() == old(self).source(),
@@ -885,7 +885,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> where V
         let ghost o = me.inner.items();
         match r {
             Some(value) => {
-                let pv = VerifiedPrefixedValue::<V> { value, total: sum };
+                let pv = PrefixedValue::<V> { value, total: sum };
                 let delta = pv.prefix().w_sub(was);
                 proof {
                     let k = self.inner.it.pos - me.inner.it.pos - 1;
@@ -904,7 +904,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> where V
                         }
                     }
                 }
-                Some(VerifiedPrefixSeek { pos: self.inner.it.pos - 1, delta, pv })
+                Some(PrefixSeek { pos: self.inner.it.pos - 1, delta, pv })
             },
             None => {
                 proof {
@@ -921,9 +921,9 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> where V
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
     #[inline(always)]
-    pub(super) fn next_impl(&mut self) -> (r: Option<VerifiedPrefixedValue<'a, V>>)
+    pub(super) fn next_impl(&mut self) -> (r: Option<PrefixedValue<'a, V>>)
         ensures
             match r {
                 Some(pv) => {
@@ -969,7 +969,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
         }
         match r {
             Some(value) => {
-                let pv = VerifiedPrefixedValue { value, total: sum };
+                let pv = PrefixedValue { value, total: sum };
                 proof {
                     me.lemma_moved(*self, 1);
                     me.lemma_gives(0, pv);
@@ -989,7 +989,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 
     #[inline]
-    pub(super) fn nth_impl(&mut self, n: usize) -> (r: Option<VerifiedPrefixedValue<'a, V>>)
+    pub(super) fn nth_impl(&mut self, n: usize) -> (r: Option<PrefixedValue<'a, V>>)
         ensures
             n < old(self).rest().len() ==> {
                 &&& r == Some(old(self).items()[n as int])
@@ -1031,7 +1031,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
         }
         match r {
             Some(value) => {
-                let pv = VerifiedPrefixedValue { value, total: sum };
+                let pv = PrefixedValue { value, total: sum };
                 proof {
                     me.lemma_moved(*self, n + 1);
                     me.lemma_gives(n as int, pv);
@@ -1050,7 +1050,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
     pub(super) fn clone_impl(&self) -> (r: Self)
         ensures
             r.items() == self.items(),
@@ -1066,9 +1066,9 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
             use_type_invariant(self);
             use_type_invariant(&self.inner);
         }
-        let r = VerifiedPrefixIter {
+        let r = PrefixIter {
             ix: self.ix,
-            inner: VerifiedIter { it: self.inner.it.dup(), slabs: self.inner.slabs, col: self.inner.col },
+            inner: Iter { it: self.inner.it.dup(), slabs: self.inner.slabs, col: self.inner.col },
             total: self.total,
             base: self.base,
             base_at: self.base_at,
@@ -1080,7 +1080,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
     pub(super) fn default_impl() -> (r: Self)
         ensures
             r.items().len() == 0,
@@ -1092,7 +1092,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
             r.base_pos() == 0,
             r.total().as_int() == 0,
     {
-        let inner: VerifiedIter<'a, V, C, SumIndex> = VerifiedIter { it: ICore::empty::<V::X>(), slabs: &[], col: None };
+        let inner: Iter<'a, V, C, SumIndex> = Iter { it: ICore::empty::<V::X>(), slabs: &[], col: None };
         let zero = <V::Sum as VSum>::zero();
         proof {
             let s = inner.slabs@;
@@ -1107,18 +1107,18 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
             V::lemma_safe();
             lemma_sums_fit::<V>(<Get<'a, V> as VGet>::svs(vals_of::<V::X>(s)));
         }
-        VerifiedPrefixIter { ix: None, inner, total: zero, base: zero, base_at: 0 }
+        PrefixIter { ix: None, inner, total: zero, base: zero, base_at: 0 }
     }
 }
 
-impl<V: VSummed> VerifiedPrefixIterState<V> {
+impl<V: PrefixValue> PrefixIterState<V> {
     /// The sum counts from the iterator's place or before it.
     #[verifier::type_invariant]
     pub(super) open spec fn inv(&self) -> bool {
         self.base_at <= self.inner.pos
     }
 
-    pub(super) proof fn lemma_fits_impl<C: VCodec>(&self, column: &VerifiedColumn<V, C, SumIndex>) where V: VValue<C>
+    pub(super) proof fn lemma_fits_impl<C: Codec>(&self, column: &Column<V, C, SumIndex>) where V: ColumnValueRef<C>
         requires
             self.fits(column),
         ensures
@@ -1134,10 +1134,10 @@ impl<V: VSummed> VerifiedPrefixIterState<V> {
         use_type_invariant(self);
     }
 
-    pub(super) fn try_resume_impl<'a, C: VCodec>(&self, column: &'a VerifiedColumn<V, C, SumIndex>) -> (r: Result<
-        VerifiedPrefixIter<'a, V, C>,
+    pub(super) fn try_resume_impl<'a, C: Codec>(&self, column: &'a Column<V, C, SumIndex>) -> (r: Result<
+        PrefixIter<'a, V, C>,
         PackError,
-    >) where V: VValue<C>
+    >) where V: ColumnValueRef<C>
         ensures
             r is Ok <==> self.fits(column),
             r is Ok ==> self.edits() == column.edits(),
@@ -1175,7 +1175,7 @@ impl<V: VSummed> VerifiedPrefixIterState<V> {
             V::Sum::lemma_as_int(base);
             V::Sum::lemma_of_int(b - a, a);
         }
-        let it = VerifiedPrefixIter { ix, inner, total: sum, base, base_at: self.base_at };
+        let it = PrefixIter { ix, inner, total: sum, base, base_at: self.base_at };
         proof {
             it.lemma_sums();
         }
@@ -1183,9 +1183,9 @@ impl<V: VSummed> VerifiedPrefixIterState<V> {
     }
 }
 
-impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
+impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Column<V, C, SumIndex> {
     #[inline(always)]
-    pub(super) fn prefix_iter_impl(&self) -> (it: VerifiedPrefixIter<'_, V, C>)
+    pub(super) fn prefix_iter_impl(&self) -> (it: PrefixIter<'_, V, C>)
         ensures
             it.rest() == self@,
             it.column() == self@,
@@ -1207,10 +1207,10 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
             V::Sum::lemma_as_int(zero);
             V::Sum::lemma_of_int(0, 0);
         }
-        VerifiedPrefixIter { ix, inner, total: zero, base: zero, base_at: 0 }
+        PrefixIter { ix, inner, total: zero, base: zero, base_at: 0 }
     }
 
-    pub(super) fn prefix_iter_range_impl(&self, start: usize, end: usize) -> (it: VerifiedPrefixIter<'_, V, C>)
+    pub(super) fn prefix_iter_range_impl(&self, start: usize, end: usize) -> (it: PrefixIter<'_, V, C>)
         requires
             start <= end <= self@.len(),
         ensures
@@ -1228,7 +1228,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
         it
     }
 
-    pub(super) fn get_prefixed_impl(&self, index: usize) -> (r: Option<VerifiedPrefixedValue<'_, V>>)
+    pub(super) fn get_prefixed_impl(&self, index: usize) -> (r: Option<PrefixedValue<'_, V>>)
         ensures
             index < self@.len() ==> {
                 &&& r matches Some(pv)
@@ -1243,7 +1243,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
         it.nth(index)
     }
 
-    pub(super) fn delta_impl(&self, from: usize, to: usize) -> (r: Option<VerifiedPrefixSeek<'_, V>>)
+    pub(super) fn delta_impl(&self, from: usize, to: usize) -> (r: Option<PrefixSeek<'_, V>>)
         requires
             from <= to,
         ensures
@@ -1270,7 +1270,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
     /// What the iterator has left is a window of those.
     pub(super) proof fn lemma_prefixed(&self)
         ensures
@@ -1293,7 +1293,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
     pub(super) proof fn lemma_shift_impl(&self)
         ensures
             0 <= self.shift_at(),
@@ -1304,13 +1304,13 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     {
         let xs = self.items();
         lemma_singles(xs);
-        assert(xs.map_values(|x: VerifiedPrefixedValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
-            |x: VerifiedPrefixedValue<'a, V>| seq![x],
+        assert(xs.map_values(|x: PrefixedValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
+            |x: PrefixedValue<'a, V>| seq![x],
         ));
     }
 
     #[inline(always)]
-    pub(super) fn shift_step_impl(&mut self) -> (r: Option<VerifiedPrefixedValue<'a, V>>)
+    pub(super) fn shift_step_impl(&mut self) -> (r: Option<PrefixedValue<'a, V>>)
         ensures
             final(self).shift_vals() == old(self).shift_vals(),
             match r {
@@ -1337,7 +1337,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 
     #[inline(always)]
-    pub(super) fn shift_nth_impl(&mut self, n: usize) -> (r: Option<VerifiedPrefixedValue<'a, V>>)
+    pub(super) fn shift_nth_impl(&mut self, n: usize) -> (r: Option<PrefixedValue<'a, V>>)
         ensures
             final(self).shift_vals() == old(self).shift_vals(),
             n < old(self).shift_items().len() ==> {
@@ -1361,8 +1361,8 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
             if n < old(self).items().len() {
                 let xs = old(self).items().take(n + 1);
                 lemma_singles(xs);
-                assert(xs.map_values(|x: VerifiedPrefixedValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
-                    |x: VerifiedPrefixedValue<'a, V>| seq![x],
+                assert(xs.map_values(|x: PrefixedValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
+                    |x: PrefixedValue<'a, V>| seq![x],
                 ));
             }
         }
@@ -1382,8 +1382,8 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
             use_type_invariant(self);
             use_type_invariant(&self.inner);
         }
-        let inner = VerifiedIter { it: self.inner.it.dup(), slabs: self.inner.slabs, col: self.inner.col };
-        VerifiedPrefixIter { ix: self.ix, inner, total: self.total, base: self.base, base_at: self.base_at }
+        let inner = Iter { it: self.inner.it.dup(), slabs: self.inner.slabs, col: self.inner.col };
+        PrefixIter { ix: self.ix, inner, total: self.total, base: self.base, base_at: self.base_at }
     }
 
     #[inline(always)]
@@ -1425,7 +1425,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
             use_type_invariant(&*self);
             self.lemma_sums();
         }
-        VerifiedPrefixIter::set_max(self, end);
+        PrefixIter::set_max(self, end);
         proof {
             use_type_invariant(&*self);
             self.lemma_sums();
@@ -1447,7 +1447,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
             self.lemma_sums();
             self.lemma_prefixed();
         }
-        VerifiedPrefixIter::advance_to(self, target);
+        PrefixIter::advance_to(self, target);
         proof {
             use_type_invariant(&*self);
             self.lemma_sums();
@@ -1468,7 +1468,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
             self.lemma_sums();
             self.lemma_prefixed();
         }
-        VerifiedPrefixIter::advance_by(self, amount);
+        PrefixIter::advance_by(self, amount);
         proof {
             use_type_invariant(&*self);
             self.lemma_sums();
@@ -1478,7 +1478,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 
     #[inline(always)]
-    pub(super) fn seek_to_impl(&mut self, at: usize) -> (r: Option<VerifiedPrefixedValue<'a, V>>)
+    pub(super) fn seek_to_impl(&mut self, at: usize) -> (r: Option<PrefixedValue<'a, V>>)
         ensures
             final(self).shift_vals() == old(self).shift_vals(),
             at < old(self).shift_at() ==> {
@@ -1544,12 +1544,12 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
         }
         // the window's end, and then its start, as the iterator's own
         // `shift` moves
-        VShiftable::set_max(self, range.end);
+        Shiftable::set_max(self, range.end);
         let ghost p1 = self.shift_at();
         proof {
             self.lemma_shift();
         }
-        VShiftable::advance_to(self, range.start);
+        Shiftable::advance_to(self, range.start);
         proof {
             self.lemma_shift();
             assert(p1 == p);
@@ -1557,7 +1557,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 
     #[inline(always)]
-    pub(super) fn shift_next_v_shiftable_impl(&mut self, range: Range<usize>) -> (r: Option<VerifiedPrefixedValue<'a, V>>)
+    pub(super) fn shift_next_v_shiftable_impl(&mut self, range: Range<usize>) -> (r: Option<PrefixedValue<'a, V>>)
         requires
             range.start >= old(self).shift_at(),
         ensures
@@ -1576,13 +1576,13 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     {
         let ghost (s, e) = (range.start as int, range.end as int);
         let ghost (v, p) = (self.prefixed(), self.shift_at());
-        VShiftable::set_max(self, range.end);
+        Shiftable::set_max(self, range.end);
         proof {
             self.lemma_shift();
         }
-        let q = VShiftable::get_pos(self);
+        let q = Shiftable::get_pos(self);
         let ghost o = self.shift_items();
-        let r = VShiftable::shift_nth(self, range.start - q);
+        let r = Shiftable::shift_nth(self, range.start - q);
         proof {
             let w = window(v, s, e);
             let k = s - p;
@@ -1590,8 +1590,8 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
                 assert(o[k] == w[0]);
                 let xs = o.take(k + 1);
                 lemma_singles(xs);
-                assert(xs.map_values(|x: VerifiedPrefixedValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
-                    |x: VerifiedPrefixedValue<'a, V>| seq![x],
+                assert(xs.map_values(|x: PrefixedValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
+                    |x: PrefixedValue<'a, V>| seq![x],
                 ));
             }
         }
@@ -1599,7 +1599,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
     pub(super) proof fn lemma_shift_model_impl(&self)
         ensures
             self.shift_vals() == self.prefixed(),
@@ -1617,39 +1617,39 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 
     #[inline(always)]
-    pub(super) fn unshift_impl(self) -> (r: VerifiedUnshift<Self>)
+    pub(super) fn unshift_impl(self) -> (r: Unshift<Self>)
         ensures
             r.unshift_vals() == self.prefixed(),
             r.unshift_left() == self.items(),
     {
-        VerifiedUnshift::new(self)
+        Unshift::new(self)
     }
 
     #[inline(always)]
-    pub(super) fn ranges_impl<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+    pub(super) fn ranges_impl<'r>(self, ranges: &'r [Range<usize>]) -> (r: Ranges<'r, Self>)
         ensures
             r.ranges_vals() == self.prefixed(),
             r.ranges_left() == windows(self.prefixed(), ranges@),
     {
-        VerifiedRanges::new(self, ranges)
+        Ranges::new(self, ranges)
     }
 }
 
 } // verus!
 
-impl<'a, V: VSummed> std::fmt::Debug for VerifiedPrefixedValue<'a, V>
+impl<'a, V: PrefixValue> std::fmt::Debug for PrefixedValue<'a, V>
 where
     Get<'a, V>: std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedPrefixedValue")
+        f.debug_struct("PrefixedValue")
             .field("value", &self.value)
             .field("total", &self.total)
             .finish()
     }
 }
 
-impl<'a, V: VSummed> PartialEq for VerifiedPrefixedValue<'a, V>
+impl<'a, V: PrefixValue> PartialEq for PrefixedValue<'a, V>
 where
     Get<'a, V>: PartialEq,
     V::Sum: PartialEq,
@@ -1659,12 +1659,12 @@ where
     }
 }
 
-impl<'a, V: VSummed> std::fmt::Debug for VerifiedPrefixSeek<'a, V>
+impl<'a, V: PrefixValue> std::fmt::Debug for PrefixSeek<'a, V>
 where
     Get<'a, V>: std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedPrefixSeek")
+        f.debug_struct("PrefixSeek")
             .field("pos", &self.pos)
             .field("delta", &self.delta)
             .field("pv", &self.pv)
@@ -1672,7 +1672,7 @@ where
     }
 }
 
-impl<'a, V: VSummed> PartialEq for VerifiedPrefixSeek<'a, V>
+impl<'a, V: PrefixValue> PartialEq for PrefixSeek<'a, V>
 where
     Get<'a, V>: PartialEq,
     V::Sum: PartialEq,
@@ -1682,9 +1682,9 @@ where
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> std::fmt::Debug for VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> std::fmt::Debug for PrefixIter<'a, V, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedPrefixIter")
+        f.debug_struct("PrefixIter")
             .field("total", &self.total)
             .field("pos", &self.inner.pos())
             .finish()

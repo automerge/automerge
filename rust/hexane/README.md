@@ -615,10 +615,10 @@ indexes, a B-tree or a Fenwick tree), prefix (sums and accumulators)
 and delta columns; their loads (also run by
 run), saves, splices, edit cursors and `copy_ranges`; their iterators,
 searches and runs; the streaming encoders and decoders; the raw
-column; both codecs, and a client's own (`VCodec`), with the sizes of
+column; both codecs, and a client's own (`Codec`), with the sizes of
 LEB128 numbers (`lebsize`, `ulebsize`); and the
 repositioning of every iterator
-(`VShiftable`, which a client's own iterator may implement, with a
+(`Shiftable`, which a client's own iterator may implement, with a
 lookahead and a walk over ranges).
 
 Its specification can be read apart from the code and the proofs:
@@ -641,8 +641,8 @@ standard library, is all in one file, `src/trusted.rs`:
 
 Of what a client hands it, it asks: of an iterator, the laws Verus asks
 of every iterator; and of a client's own value type, encoding, codec or
-repositionable iterator, the laws of `VNewtype`, `VPack`, `VCodec` or
-`VShiftable` (a client checked by Verus proves them).
+repositionable iterator, the laws of `VNewtype`, `RleValue`, `Codec` or
+`Shiftable` (a client checked by Verus proves them).
 
 That a splice ends is proved where it takes a slice (and so for
 `from_values`, `insert`, `push` and the deletes), of every kind of

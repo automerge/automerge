@@ -32,7 +32,7 @@ pub(crate) type KCore<V, C, K> = ColumnCore<
 
 /// What a kind of index is to the verified core, for columns of `V`
 /// under codec `C`.
-pub(crate) trait Kind<V: VValue<C>, C: VCodec>: VKeeps<V, C> {
+pub(crate) trait Kind<V: ColumnValueRef<C>, C: Codec>: VKeeps<V, C> {
     /// What the index holds of a slab.
     type W: SlabAggregate;
 
@@ -60,7 +60,7 @@ pub(crate) trait Kind<V: VValue<C>, C: VCodec>: VKeeps<V, C> {
     ;
 }
 
-impl<V: VValue<C>, C: VCodec> Kind<V, C> for LenIndex {
+impl<V: ColumnValueRef<C>, C: Codec> Kind<V, C> for LenIndex {
     type W = usize;
 
     type I = SlabBTree<usize>;
@@ -74,7 +74,7 @@ impl<V: VValue<C>, C: VCodec> Kind<V, C> for LenIndex {
     }
 }
 
-impl<V: VValue<C>, C: VCodec> Kind<V, C> for LenBitIndex {
+impl<V: ColumnValueRef<C>, C: Codec> Kind<V, C> for LenBitIndex {
     type W = usize;
 
     type I = BitIndex<usize>;

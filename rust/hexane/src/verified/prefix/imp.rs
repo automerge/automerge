@@ -41,7 +41,7 @@ use vstd::prelude::*;
 
 verus! {
 
-impl<V: VSummed + VValue<C>, C: VCodec> Kind<V, C> for SumIndex {
+impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Kind<V, C> for SumIndex {
     type W = SumWeight<V::Sum>;
 
     type I = SlabBTree<SumWeight<V::Sum>>;
@@ -56,7 +56,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> Kind<V, C> for SumIndex {
     }
 }
 
-impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
+impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Column<V, C, SumIndex> {
     /// The index as the readers of the sums take it, with what they ask
     /// of it; none for a column an edit's panic left without its parts,
     /// which is empty.
@@ -256,7 +256,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
     }
 }
 
-impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> where V::Sum: VCount {
+impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Column<V, C, SumIndex> where V::Sum: UnsignedPrefix {
     pub(super) fn get_index_for_prefix_impl(&self, target: V::Sum) -> (r: usize)
         ensures
             r <= self@.len() + 1,

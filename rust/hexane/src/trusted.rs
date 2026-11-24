@@ -38,7 +38,7 @@ use crate::column::Splice;
 use crate::delta::DeltaRun;
 use crate::leb128_codec::DecodeError;
 use crate::raw::RawSlab;
-use crate::verified::{VCodec, VValue, VerifiedColumn};
+use crate::verified::{Codec, Column, ColumnValueRef};
 #[cfg(feature = "bijou64")]
 use crate::Bijou64;
 use crate::{Leb128, PackError};
@@ -167,7 +167,7 @@ pub struct ExDeltaRun(DeltaRun);
 // from src/verified/mod.rs
 /// What Verus is told of the standard library's `Extend`: that it is a
 /// trait with this method. Of an implementation it assumes nothing: what
-/// [`VerifiedColumn`]'s does is stated there, and proved. (Verus's
+/// [`Column`]'s does is stated there, and proved. (Verus's
 /// library specifies `IntoIterator` and `FromIterator`, and not this
 /// trait.)
 #[verifier::external_trait_specification]
@@ -670,16 +670,16 @@ pub(crate) fn splice_failed(e: PackError)
 // from src/verified/encoder.rs
 /// Panics: what an encoder saved is no column that loads. A caller has
 /// to show that it is not one a load is sure to take
-/// (`VerifiedColumn::loadable`): that the values `vs` save
+/// (`Column::loadable`): that the values `vs` save
 /// to bytes too long for it, or are more than a column counts. The
 /// words are those of the `unwrap` in
 /// [`EncoderApi::into_column`](crate::EncoderApi::into_column).
 #[verifier::external_body]
 #[cold]
 #[inline(never)]
-pub(crate) fn unloadable<V: VValue<C>, C: VCodec>(e: PackError, Ghost(vs): Ghost<Seq<V::S>>) -> VerifiedColumn<V, C>
+pub(crate) fn unloadable<V: ColumnValueRef<C>, C: Codec>(e: PackError, Ghost(vs): Ghost<Seq<V::S>>) -> Column<V, C>
     requires
-        VerifiedColumn::<V, C>::encoding(vs).len() > 0xffff_fff5 || vs.len() > usize::MAX - 3,
+        Column::<V, C>::encoding(vs).len() > 0xffff_fff5 || vs.len() > usize::MAX - 3,
     ensures
         false,
 {
@@ -882,7 +882,7 @@ pub fn refused(msg: &'static str) -> PackError {
 
 // from src/verified/mod.rs
 /// The error of a
-/// [`VerifiedIterState::try_resume`](crate::verified::VerifiedIterState::try_resume)
+/// [`IterState::try_resume`](crate::verified::IterState::try_resume)
 /// on a column that the state does not fit. Nothing is assumed of it.
 #[verifier::external_body]
 #[cold]

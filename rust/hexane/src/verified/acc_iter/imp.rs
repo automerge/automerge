@@ -50,7 +50,7 @@ pub(super) proof fn lemma_undo<A: VGroup>(p: A, a: A)
     A::lemma_plus(p, p, p);
 }
 
-impl<'a, V: VAccumulated> VerifiedAccValue<'a, V> {
+impl<'a, V: VAccumulated> AccValue<'a, V> {
     pub(super) proof fn lemma_prefix_impl(&self, p: V::Acc)
         requires
             self.total() == <V::Acc as VGroup>::plus(p, V::adds(self.value.sv())),
@@ -82,15 +82,15 @@ impl<'a, V: VAccumulated> VerifiedAccValue<'a, V> {
     }
 }
 
-impl<'a, V: VAccumulated> VerifiedAccSeek<'a, V> {
+impl<'a, V: VAccumulated> AccSeek<'a, V> {
     pub(super) fn clone_impl(&self) -> (r: Self)
         ensures
             r == *self,
     {
-        VerifiedAccSeek {
+        AccSeek {
             pos: self.pos,
             delta: self.delta.dup(),
-            pv: VerifiedAccValue { value: self.pv.value, total: self.pv.total.dup() },
+            pv: AccValue { value: self.pv.value, total: self.pv.total.dup() },
         }
     }
 }
@@ -112,7 +112,7 @@ pub(super) proof fn lemma_step<V: VAccumulated>(c: Seq<<V as VSpec>::S>, b: int,
 /// The running sum of an iterator at `pos` whose sum counts from
 /// `base_at`, as the shared cores keep it, is what the values from
 /// `base_at` up to `pos` add up to.
-pub(super) proof fn lemma_running<'a, V: VAccumulated + VValue<C>, C: VCodec>(
+pub(super) proof fn lemma_running<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
     s: Seq<Slab<<V::E as Slabs>::Tail>>,
     base: V::Acc,
     sum: V::Acc,
@@ -146,7 +146,7 @@ pub(super) proof fn lemma_running<'a, V: VAccumulated + VValue<C>, C: VCodec>(
 
 /// What the values before index `i` add up to, as the shared cores
 /// keep it, is `accumulated` of the column's first `i` values.
-pub(super) proof fn lemma_acc_before<'a, V: VAccumulated + VValue<C>, C: VCodec>(s: Seq<Slab<<V::E as Slabs>::Tail>>, i: int)
+pub(super) proof fn lemma_acc_before<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(s: Seq<Slab<<V::E as Slabs>::Tail>>, i: int)
     requires
         0 <= i <= vals_of::<V::X>(s).len(),
     ensures
@@ -163,7 +163,7 @@ pub(super) proof fn lemma_acc_before<'a, V: VAccumulated + VValue<C>, C: VCodec>
     lemma_vacc::<V>(b);
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     /// The running sum is kept as the shared cores ask, over the index
     /// of the column.
     #[verifier::type_invariant]
@@ -203,7 +203,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 
     /// What the `i`th of the values left is given as.
-    pub(super) proof fn lemma_gives(&self, i: int, pv: VerifiedAccValue<'a, V>)
+    pub(super) proof fn lemma_gives(&self, i: int, pv: AccValue<'a, V>)
         requires
             self.ok(),
             0 <= i < self.inner.items().len(),
@@ -337,7 +337,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             r.base_pos() == 0,
             r.total() == <V::Acc as VGroup>::zero(),
     {
-        let inner: VerifiedIter<'a, V, C, AccIndex> = VerifiedIter { it: ICore::empty::<V::X>(), slabs: &[], col: None };
+        let inner: Iter<'a, V, C, AccIndex> = Iter { it: ICore::empty::<V::X>(), slabs: &[], col: None };
         let zero = <V::Acc as VAccum>::new_zero();
         let base = <V::Acc as VAccum>::new_zero();
         proof {
@@ -349,7 +349,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             assert(before::<V::X>(s, 0) =~= Seq::<Get<'a, V>>::empty());
             <V::Acc as VGroup>::lemma_plus(zero, zero, zero);
         }
-        VerifiedAccIter { ix: None, inner, total: zero, base, base_at: 0 }
+        AccIter { ix: None, inner, total: zero, base, base_at: 0 }
     }
 
     /// The iterator, taken out of its place to be moved: an accumulator
@@ -457,7 +457,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
         let (mut sum, mut base) = (own.total, own.base);
         p_reset::<V::X, AccOf<V>>(&it, slabs, &mut sum, &mut base);
         let at = it.pos;
-        *self = VerifiedAccIter { ix, inner: VerifiedIter { it, slabs, col }, total: sum, base, base_at: at };
+        *self = AccIter { ix, inner: Iter { it, slabs, col }, total: sum, base, base_at: at };
         proof {
             use_type_invariant(&*self);
             self.lemma_sums();
@@ -591,7 +591,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
         self.advance_to(range.start);
     }
 
-    pub(super) fn shift_next_impl(&mut self, range: Range<usize>) -> (r: Option<VerifiedAccValue<'a, V>>)
+    pub(super) fn shift_next_impl(&mut self, range: Range<usize>) -> (r: Option<AccValue<'a, V>>)
         requires
             range.start >= old(self).pos(),
         ensures
@@ -648,7 +648,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
         r
     }
 
-    pub(super) fn next_run_impl(&mut self) -> (r: Option<Run<VerifiedAccValue<'a, V>>>)
+    pub(super) fn next_run_impl(&mut self) -> (r: Option<Run<AccValue<'a, V>>>)
         ensures
             final(self).column() == old(self).column(),
             final(self).source() == old(self).source(),
@@ -691,14 +691,14 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
         let (mut it, mut sum, base) = (own.inner.it, own.total, own.base);
         let max = it.items_left;
         let r = p_next_run_from::<V::X, AccOf<V>>(&mut it, slabs, max, &mut sum, &base);
-        *self = VerifiedAccIter { ix, inner: VerifiedIter { it, slabs, col }, total: sum, base, base_at };
+        *self = AccIter { ix, inner: Iter { it, slabs, col }, total: sum, base, base_at };
         proof {
             use_type_invariant(&*self);
             self.inner.it.lemma_out_len::<V::X>(self.inner.slabs@);
         }
         match r {
             Some(run) => {
-                let pv = VerifiedAccValue { value: run.value, total: self.total.dup() };
+                let pv = AccValue { value: run.value, total: self.total.dup() };
                 proof {
                     let o = me.inner.items();
                     let n = run.count as int;
@@ -730,14 +730,14 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
         }
     }
 
-    pub(super) fn runs_impl(self) -> (r: VerifiedRuns<'a, V, C, AccIndex>)
+    pub(super) fn runs_impl(self) -> (r: Runs<'a, V, C, AccIndex>)
         ensures
             r.iter() == self.plain(),
     {
-        VerifiedRuns(self.inner)
+        Runs(self.inner)
     }
 
-    pub(super) fn delta_nth_impl(&mut self, n: usize) -> (r: Option<VerifiedAccSeek<'a, V>>)
+    pub(super) fn delta_nth_impl(&mut self, n: usize) -> (r: Option<AccSeek<'a, V>>)
         ensures
             n < old(self).rest().len() ==> {
                 &&& r matches Some(seek)
@@ -777,13 +777,13 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
         let (ix, slabs, col, base_at) = (own.ix, own.inner.slabs, own.inner.col, own.base_at);
         let (mut it, mut sum, base) = (own.inner.it, own.total, own.base);
         let r = p_delta_nth::<V::X, AccOf<V>>(&mut it, slabs, ix, n, &mut sum, &base);
-        *self = VerifiedAccIter { ix, inner: VerifiedIter { it, slabs, col }, total: sum, base, base_at };
+        *self = AccIter { ix, inner: Iter { it, slabs, col }, total: sum, base, base_at };
         proof {
             use_type_invariant(&*self);
         }
         match r {
             Some((value, delta)) => {
-                let pv = VerifiedAccValue { value, total: self.total.dup() };
+                let pv = AccValue { value, total: self.total.dup() };
                 proof {
                     let s = me.inner.slabs@;
                     let p = me.inner.it.pos as int;
@@ -793,7 +793,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
                     // `delta` is what the values passed over add up to
                     lemma_running::<V, C>(s, vsum::<Get<'a, V>, AccOf<V>>(before::<V::X>(s, p)), delta, p, p + n);
                 }
-                Some(VerifiedAccSeek { pos: self.inner.it.pos - 1, delta, pv })
+                Some(AccSeek { pos: self.inner.it.pos - 1, delta, pv })
             },
             None => {
                 proof {
@@ -806,7 +806,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
         }
     }
 
-    pub(super) fn suspend_impl(&self) -> (s: VerifiedAccIterState<V>)
+    pub(super) fn suspend_impl(&self) -> (s: AccIterState<V>)
         ensures
             s.pos() == self.pos(),
             s.end_pos() == self.end_pos(),
@@ -821,13 +821,13 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             use_type_invariant(self);
             self.lemma_sums();
         }
-        VerifiedAccIterState { inner: self.inner.suspend(), base_at: self.base_at, _phantom: PhantomData }
+        AccIterState { inner: self.inner.suspend(), base_at: self.base_at, _phantom: PhantomData }
     }
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     #[inline(always)]
-    pub(super) fn next_impl(&mut self) -> (r: Option<VerifiedAccValue<'a, V>>)
+    pub(super) fn next_impl(&mut self) -> (r: Option<AccValue<'a, V>>)
         ensures
             match r {
                 Some(pv) => {
@@ -868,13 +868,13 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
         let (ix, slabs, col, base_at) = (own.ix, own.inner.slabs, own.inner.col, own.base_at);
         let (mut it, mut sum, base) = (own.inner.it, own.total, own.base);
         let r = p_next::<V::X, AccOf<V>>(&mut it, slabs, &mut sum, &base);
-        *self = VerifiedAccIter { ix, inner: VerifiedIter { it, slabs, col }, total: sum, base, base_at };
+        *self = AccIter { ix, inner: Iter { it, slabs, col }, total: sum, base, base_at };
         proof {
             use_type_invariant(&*self);
         }
         match r {
             Some(value) => {
-                let pv = VerifiedAccValue { value, total: self.total.dup() };
+                let pv = AccValue { value, total: self.total.dup() };
                 proof {
                     me.lemma_moved(*self, 1);
                     me.lemma_gives(0, pv);
@@ -894,7 +894,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 
     #[inline]
-    pub(super) fn nth_impl(&mut self, n: usize) -> (r: Option<VerifiedAccValue<'a, V>>)
+    pub(super) fn nth_impl(&mut self, n: usize) -> (r: Option<AccValue<'a, V>>)
         ensures
             n < old(self).rest().len() ==> {
                 &&& r == Some(old(self).items()[n as int])
@@ -931,13 +931,13 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
         let (ix, slabs, col, base_at) = (own.ix, own.inner.slabs, own.inner.col, own.base_at);
         let (mut it, mut sum, base) = (own.inner.it, own.total, own.base);
         let r = p_nth::<V::X, AccOf<V>>(&mut it, slabs, ix, n, &mut sum, &base);
-        *self = VerifiedAccIter { ix, inner: VerifiedIter { it, slabs, col }, total: sum, base, base_at };
+        *self = AccIter { ix, inner: Iter { it, slabs, col }, total: sum, base, base_at };
         proof {
             use_type_invariant(&*self);
         }
         match r {
             Some(value) => {
-                let pv = VerifiedAccValue { value, total: self.total.dup() };
+                let pv = AccValue { value, total: self.total.dup() };
                 proof {
                     me.lemma_moved(*self, n + 1);
                     me.lemma_gives(n as int, pv);
@@ -956,7 +956,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     pub(super) fn clone_impl(&self) -> (r: Self)
         ensures
             r.items() == self.items(),
@@ -972,9 +972,9 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             use_type_invariant(self);
             use_type_invariant(&self.inner);
         }
-        let r = VerifiedAccIter {
+        let r = AccIter {
             ix: self.ix,
-            inner: VerifiedIter { it: self.inner.it.dup(), slabs: self.inner.slabs, col: self.inner.col },
+            inner: Iter { it: self.inner.it.dup(), slabs: self.inner.slabs, col: self.inner.col },
             total: self.total.dup(),
             base: self.base.dup(),
             base_at: self.base_at,
@@ -986,14 +986,14 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 }
 
-impl<V: VAccumulated> VerifiedAccIterState<V> {
+impl<V: VAccumulated> AccIterState<V> {
     /// The sum counts from the iterator's place or before it.
     #[verifier::type_invariant]
     pub(super) open spec fn inv(&self) -> bool {
         self.base_at <= self.inner.pos
     }
 
-    pub(super) proof fn lemma_fits_impl<C: VCodec>(&self, column: &VerifiedColumn<V, C, AccIndex>) where V: VValue<C>
+    pub(super) proof fn lemma_fits_impl<C: Codec>(&self, column: &Column<V, C, AccIndex>) where V: ColumnValueRef<C>
         requires
             self.fits(column),
         ensures
@@ -1009,10 +1009,10 @@ impl<V: VAccumulated> VerifiedAccIterState<V> {
         use_type_invariant(self);
     }
 
-    pub(super) fn try_resume_impl<'a, C: VCodec>(&self, column: &'a VerifiedColumn<V, C, AccIndex>) -> (r: Result<
-        VerifiedAccIter<'a, V, C>,
+    pub(super) fn try_resume_impl<'a, C: Codec>(&self, column: &'a Column<V, C, AccIndex>) -> (r: Result<
+        AccIter<'a, V, C>,
         PackError,
-    >) where V: VValue<C>
+    >) where V: ColumnValueRef<C>
         ensures
             r is Ok <==> self.fits(column),
             r is Ok ==> self.edits() == column.edits(),
@@ -1050,7 +1050,7 @@ impl<V: VAccumulated> VerifiedAccIterState<V> {
             lemma_acc_before::<V, C>(s, self.inner.pos as int);
             <V::Acc as VGroup>::lemma_minus(accumulated::<V>(column@.take(self.inner.pos as int)), base);
         }
-        let it = VerifiedAccIter { ix, inner, total: sum, base, base_at: self.base_at };
+        let it = AccIter { ix, inner, total: sum, base, base_at: self.base_at };
         proof {
             it.lemma_sums();
         }
@@ -1058,9 +1058,9 @@ impl<V: VAccumulated> VerifiedAccIterState<V> {
     }
 }
 
-impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
+impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
     #[inline(always)]
-    pub(super) fn prefix_iter_impl(&self) -> (it: VerifiedAccIter<'_, V, C>)
+    pub(super) fn prefix_iter_impl(&self) -> (it: AccIter<'_, V, C>)
         ensures
             it.rest() == self@,
             it.column() == self@,
@@ -1081,10 +1081,10 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
             assert(before::<V::X>(s, 0) =~= Seq::<Get<'static, V>>::empty());
             <V::Acc as VGroup>::lemma_plus(zero, zero, zero);
         }
-        VerifiedAccIter { ix, inner, total: zero, base, base_at: 0 }
+        AccIter { ix, inner, total: zero, base, base_at: 0 }
     }
 
-    pub(super) fn prefix_iter_range_impl(&self, start: usize, end: usize) -> (it: VerifiedAccIter<'_, V, C>)
+    pub(super) fn prefix_iter_range_impl(&self, start: usize, end: usize) -> (it: AccIter<'_, V, C>)
         requires
             start <= end <= self@.len(),
         ensures
@@ -1102,7 +1102,7 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
         it
     }
 
-    pub(super) fn get_prefixed_impl(&self, index: usize) -> (r: Option<VerifiedAccValue<'_, V>>)
+    pub(super) fn get_prefixed_impl(&self, index: usize) -> (r: Option<AccValue<'_, V>>)
         ensures
             index < self@.len() ==> {
                 &&& r matches Some(pv)
@@ -1117,7 +1117,7 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
         it.nth(index)
     }
 
-    pub(super) fn delta_impl(&self, from: usize, to: usize) -> (r: Option<VerifiedAccSeek<'_, V>>)
+    pub(super) fn delta_impl(&self, from: usize, to: usize) -> (r: Option<AccSeek<'_, V>>)
         requires
             from <= to,
         ensures
@@ -1144,7 +1144,7 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
     }
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     /// What the iterator has left is a window of those.
     pub(super) proof fn lemma_accumulated_items(&self)
         ensures
@@ -1167,7 +1167,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     pub(super) proof fn lemma_shift_impl(&self)
         ensures
             0 <= self.shift_at(),
@@ -1178,13 +1178,13 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     {
         let xs = self.items();
         lemma_singles(xs);
-        assert(xs.map_values(|x: VerifiedAccValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
-            |x: VerifiedAccValue<'a, V>| seq![x],
+        assert(xs.map_values(|x: AccValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
+            |x: AccValue<'a, V>| seq![x],
         ));
     }
 
     #[inline(always)]
-    pub(super) fn shift_step_impl(&mut self) -> (r: Option<VerifiedAccValue<'a, V>>)
+    pub(super) fn shift_step_impl(&mut self) -> (r: Option<AccValue<'a, V>>)
         ensures
             final(self).shift_vals() == old(self).shift_vals(),
             match r {
@@ -1211,7 +1211,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 
     #[inline(always)]
-    pub(super) fn shift_nth_impl(&mut self, n: usize) -> (r: Option<VerifiedAccValue<'a, V>>)
+    pub(super) fn shift_nth_impl(&mut self, n: usize) -> (r: Option<AccValue<'a, V>>)
         ensures
             final(self).shift_vals() == old(self).shift_vals(),
             n < old(self).shift_items().len() ==> {
@@ -1235,8 +1235,8 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             if n < old(self).items().len() {
                 let xs = old(self).items().take(n + 1);
                 lemma_singles(xs);
-                assert(xs.map_values(|x: VerifiedAccValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
-                    |x: VerifiedAccValue<'a, V>| seq![x],
+                assert(xs.map_values(|x: AccValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
+                    |x: AccValue<'a, V>| seq![x],
                 ));
             }
         }
@@ -1256,8 +1256,8 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             use_type_invariant(self);
             use_type_invariant(&self.inner);
         }
-        let inner = VerifiedIter { it: self.inner.it.dup(), slabs: self.inner.slabs, col: self.inner.col };
-        VerifiedAccIter { ix: self.ix, inner, total: self.total.dup(), base: self.base.dup(), base_at: self.base_at }
+        let inner = Iter { it: self.inner.it.dup(), slabs: self.inner.slabs, col: self.inner.col };
+        AccIter { ix: self.ix, inner, total: self.total.dup(), base: self.base.dup(), base_at: self.base_at }
     }
 
     #[inline(always)]
@@ -1299,7 +1299,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             use_type_invariant(&*self);
             self.lemma_sums();
         }
-        VerifiedAccIter::set_max(self, end);
+        AccIter::set_max(self, end);
         proof {
             use_type_invariant(&*self);
             self.lemma_sums();
@@ -1321,7 +1321,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             self.lemma_sums();
             self.lemma_accumulated_items();
         }
-        VerifiedAccIter::advance_to(self, target);
+        AccIter::advance_to(self, target);
         proof {
             use_type_invariant(&*self);
             self.lemma_sums();
@@ -1342,7 +1342,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             self.lemma_sums();
             self.lemma_accumulated_items();
         }
-        VerifiedAccIter::advance_by(self, amount);
+        AccIter::advance_by(self, amount);
         proof {
             use_type_invariant(&*self);
             self.lemma_sums();
@@ -1352,7 +1352,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 
     #[inline(always)]
-    pub(super) fn seek_to_impl(&mut self, at: usize) -> (r: Option<VerifiedAccValue<'a, V>>)
+    pub(super) fn seek_to_impl(&mut self, at: usize) -> (r: Option<AccValue<'a, V>>)
         ensures
             final(self).shift_vals() == old(self).shift_vals(),
             at < old(self).shift_at() ==> {
@@ -1418,12 +1418,12 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
         }
         // the window's end, and then its start, as the iterator's own
         // `shift` moves
-        VShiftable::set_max(self, range.end);
+        Shiftable::set_max(self, range.end);
         let ghost p1 = self.shift_at();
         proof {
             self.lemma_shift();
         }
-        VShiftable::advance_to(self, range.start);
+        Shiftable::advance_to(self, range.start);
         proof {
             self.lemma_shift();
             assert(p1 == p);
@@ -1431,7 +1431,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 
     #[inline(always)]
-    pub(super) fn shift_next_v_shiftable_impl(&mut self, range: Range<usize>) -> (r: Option<VerifiedAccValue<'a, V>>)
+    pub(super) fn shift_next_v_shiftable_impl(&mut self, range: Range<usize>) -> (r: Option<AccValue<'a, V>>)
         requires
             range.start >= old(self).shift_at(),
         ensures
@@ -1450,13 +1450,13 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     {
         let ghost (s, e) = (range.start as int, range.end as int);
         let ghost (v, p) = (self.accumulated_items(), self.shift_at());
-        VShiftable::set_max(self, range.end);
+        Shiftable::set_max(self, range.end);
         proof {
             self.lemma_shift();
         }
-        let q = VShiftable::get_pos(self);
+        let q = Shiftable::get_pos(self);
         let ghost o = self.shift_items();
-        let r = VShiftable::shift_nth(self, range.start - q);
+        let r = Shiftable::shift_nth(self, range.start - q);
         proof {
             let w = window(v, s, e);
             let k = s - p;
@@ -1464,8 +1464,8 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
                 assert(o[k] == w[0]);
                 let xs = o.take(k + 1);
                 lemma_singles(xs);
-                assert(xs.map_values(|x: VerifiedAccValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
-                    |x: VerifiedAccValue<'a, V>| seq![x],
+                assert(xs.map_values(|x: AccValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
+                    |x: AccValue<'a, V>| seq![x],
                 ));
             }
         }
@@ -1473,7 +1473,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     pub(super) proof fn lemma_shift_model_impl(&self)
         ensures
             self.shift_vals() == self.accumulated_items(),
@@ -1491,39 +1491,39 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 
     #[inline(always)]
-    pub(super) fn unshift_impl(self) -> (r: VerifiedUnshift<Self>)
+    pub(super) fn unshift_impl(self) -> (r: Unshift<Self>)
         ensures
             r.unshift_vals() == self.accumulated_items(),
             r.unshift_left() == self.items(),
     {
-        VerifiedUnshift::new(self)
+        Unshift::new(self)
     }
 
     #[inline(always)]
-    pub(super) fn ranges_impl<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+    pub(super) fn ranges_impl<'r>(self, ranges: &'r [Range<usize>]) -> (r: Ranges<'r, Self>)
         ensures
             r.ranges_vals() == self.accumulated_items(),
             r.ranges_left() == windows(self.accumulated_items(), ranges@),
     {
-        VerifiedRanges::new(self, ranges)
+        Ranges::new(self, ranges)
     }
 }
 
 } // verus!
 
-impl<'a, V: VAccumulated> std::fmt::Debug for VerifiedAccValue<'a, V>
+impl<'a, V: VAccumulated> std::fmt::Debug for AccValue<'a, V>
 where
     Get<'a, V>: std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedAccValue")
+        f.debug_struct("AccValue")
             .field("value", &self.value)
             .field("total", &self.total)
             .finish()
     }
 }
 
-impl<'a, V: VAccumulated> PartialEq for VerifiedAccValue<'a, V>
+impl<'a, V: VAccumulated> PartialEq for AccValue<'a, V>
 where
     Get<'a, V>: PartialEq,
     V::Acc: PartialEq,
@@ -1533,12 +1533,12 @@ where
     }
 }
 
-impl<'a, V: VAccumulated> std::fmt::Debug for VerifiedAccSeek<'a, V>
+impl<'a, V: VAccumulated> std::fmt::Debug for AccSeek<'a, V>
 where
     Get<'a, V>: std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedAccSeek")
+        f.debug_struct("AccSeek")
             .field("pos", &self.pos)
             .field("delta", &self.delta)
             .field("pv", &self.pv)
@@ -1546,7 +1546,7 @@ where
     }
 }
 
-impl<'a, V: VAccumulated> PartialEq for VerifiedAccSeek<'a, V>
+impl<'a, V: VAccumulated> PartialEq for AccSeek<'a, V>
 where
     Get<'a, V>: PartialEq,
     V::Acc: PartialEq,
@@ -1556,9 +1556,9 @@ where
     }
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> std::fmt::Debug for VerifiedAccIter<'a, V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> std::fmt::Debug for AccIter<'a, V, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedAccIter")
+        f.debug_struct("AccIter")
             .field("total", &self.total)
             .field("pos", &self.inner.pos())
             .finish()

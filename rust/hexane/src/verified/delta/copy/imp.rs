@@ -19,7 +19,7 @@ use crate::splices::{
 use crate::splices::{does_anything, normalize_slice};
 #[cfg(verus_keep_ghost)]
 use crate::verified::after_call;
-use crate::verified::codec::VCodec;
+use crate::verified::codec::Codec;
 use crate::verified::model::NoVisit;
 use crate::Splice;
 use std::ops::Range;
@@ -67,7 +67,7 @@ pub(super) proof fn lemma_applied_kept<T: VDelta>(d: Seq<Option<i64>>, s: Seq<Op
     assert(vals::<T>(r) =~= r.map_values(|x: Option<i64>| T::of(x)));
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     pub(super) fn copy_ranges_impl(&mut self, src: Self, splices: &[Splice])
         requires
             in_order(splices@, old(self)@.len() as int),
@@ -129,7 +129,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
         proof {
             lemma_applied_kept::<T>(k0, ks, splices@);
         }
-        *self = VerifiedDeltaColumn { core: store };
+        *self = DeltaColumn { core: store };
     }
 }
 

@@ -1,13 +1,13 @@
 //! The iterator of a delta column: the column's values, each the sum
 //! of the differences the column keeps up to it.
 //!
-//! [`iter`](VerifiedDeltaColumn::iter) and
-//! [`iter_range`](VerifiedDeltaColumn::iter_range) of a
-//! [`VerifiedDeltaColumn`] give a [`VerifiedDeltaIter`]. It moves as a
-//! [`VerifiedIter`](crate::verified::VerifiedIter) does and says the
+//! [`iter`](DeltaColumn::iter) and
+//! [`iter_range`](DeltaColumn::iter_range) of a
+//! [`DeltaColumn`] give a [`DeltaIter`]. It moves as a
+//! [`Iter`](crate::verified::Iter) does and says the
 //! same of each move: what it has left (`rest`) is the column's values
-//! from where it stands ([`pos`](VerifiedDeltaIter::pos)) to where its
-//! window ends ([`end_pos`](VerifiedDeltaIter::end_pos)), as far as the
+//! from where it stands ([`pos`](DeltaIter::pos)) to where its
+//! window ends ([`end_pos`](DeltaIter::end_pos)), as far as the
 //! column goes.
 //!
 //! It keeps as it goes the sum of the differences before it, so that
@@ -29,7 +29,7 @@
 
 #[cfg(verus_keep_ghost)]
 use super::diffs::{delta_run_units, delta_units};
-use super::{bounds_of, DCore, DIt, DKind, VDeltaValue, VerifiedDeltaColumn, DE, DX};
+use super::{bounds_of, DCore, DIt, DKind, DeltaColumn, DeltaValue, DE, DX};
 #[cfg(verus_keep_ghost)]
 use super::{
     delta_prefix, delta_run_fits, delta_run_values, delta_runs_at, delta_within, deltas, vals,
@@ -48,11 +48,11 @@ use crate::fenwick::total;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{past, resumes, window, Decode};
 use crate::iter_core::{Decoders, ICore};
-use crate::verified::codec::VCodec;
-use crate::verified::VerifiedIterState;
+use crate::verified::codec::Codec;
+use crate::verified::IterState;
 #[cfg(verus_keep_ghost)]
 use crate::verified::{head_run, runs_of, sorted};
-use crate::verified::{VShiftable, VerifiedRanges, VerifiedUnshift};
+use crate::verified::{Ranges, Shiftable, Unshift};
 #[cfg(verus_keep_ghost)]
 use crate::window::windows;
 use crate::{DeltaRun, Leb128, PackError};
@@ -70,7 +70,7 @@ pub(super) use imp::{kept_in, lemma_kept_hit};
 
 verus! {
 
-/// An iterator over the values of a [`VerifiedDeltaColumn`], or over
+/// An iterator over the values of a [`DeltaColumn`], or over
 /// those in a range of it.
 ///
 /// It stands at an index of the column ([`pos`](Self::pos)) and has a
@@ -78,7 +78,7 @@ verus! {
 /// left to give (`rest`) is the column's values from the one to the
 /// other, as far as the column goes. Each method says what
 /// it gives, what is left after it, and where the iterator then stands.
-pub struct VerifiedDeltaIter<'a, T: VDeltaValue<C>, C: VCodec = Leb128> {
+pub struct DeltaIter<'a, T: DeltaValue<C>, C: Codec = Leb128> {
     it: ICore<<DX<T, C> as Decoders<'a>>::D>,
     slabs: &'a [Slab<<DE<T, C> as Slabs>::Tail>],
     /// The sum of the differences before the iterator, wrapping as an
@@ -90,7 +90,7 @@ pub struct VerifiedDeltaIter<'a, T: VDeltaValue<C>, C: VCodec = Leb128> {
     col: Option<&'a DCore<T, C>>,
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
     /// The values of the column the iterator reads: all of them,
     /// whatever the iterator's window.
     pub closed spec fn column(&self) -> Seq<T> {
@@ -107,9 +107,9 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
     /// The column the iterator reads, as it was when the iterator was
     /// made of it; a default iterator reads none. No method of the
     /// iterator changes it.
-    pub closed spec fn source(&self) -> Option<VerifiedDeltaColumn<T, C>> {
+    pub closed spec fn source(&self) -> Option<DeltaColumn<T, C>> {
         match self.col {
-            Some(c) => Some(VerifiedDeltaColumn { core: *c }),
+            Some(c) => Some(DeltaColumn { core: *c }),
             None => None,
         }
     }
@@ -337,7 +337,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
     /// The run says which values the iterator moved past
     /// (`delta_run_values`), and they are the type's
     /// (`delta_run_fits`): it is what
-    /// [`splice_runs`](VerifiedDeltaColumn::splice_runs) takes.
+    /// [`splice_runs`](DeltaColumn::splice_runs) takes.
     ///
     /// A run is as long as the differences make it, up to the window's
     /// end: how the column lies in memory does not cut it short.
@@ -373,9 +373,9 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
 
     /// An iterator of the runs of differences the iterator has left to
     /// give ([`next_run`](Self::next_run)): what
-    /// [`splice_runs`](VerifiedDeltaColumn::splice_runs) takes.
+    /// [`splice_runs`](DeltaColumn::splice_runs) takes.
     #[inline(always)]
-    pub fn runs(self) -> (r: VerifiedDeltaRuns<'a, T, C>)
+    pub fn runs(self) -> (r: DeltaRuns<'a, T, C>)
         ensures
             r.iter() == self,
     {
@@ -384,13 +384,13 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
 
     /// Where the iterator stands and where its window ends, to keep
     /// without the borrow of the column:
-    /// [`VerifiedDeltaIterState::try_resume`] gives an iterator from it.
+    /// [`DeltaIterState::try_resume`] gives an iterator from it.
     ///
     /// The state fits the column the iterator reads: resumed on that
     /// column, as it is, it gives an iterator that stands where this one
     /// does and has the same values left.
     #[inline(always)]
-    pub fn suspend(&self) -> (s: VerifiedDeltaIterState)
+    pub fn suspend(&self) -> (s: DeltaIterState)
         ensures
             s.pos() == self.pos(),
             s.end_pos() == self.end_pos(),
@@ -556,7 +556,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, T: VDeltaValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> vstd::std_specs::iter::IteratorSpecImpl for DeltaIter<'a, T, C> {
     /// The iterator keeps to what Verus asks of an iterator: `next` gives
     /// `remaining()`, one value after another, and then `None`.
     open spec fn obeys_prophetic_iter_laws(&self) -> bool {
@@ -584,7 +584,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl f
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> Iterator for VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> Iterator for DeltaIter<'a, T, C> {
     type Item = T;
 
     /// The next value, if one is left.
@@ -654,13 +654,13 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> Iterator for VerifiedDeltaIter<'a, T, C> 
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, T: VDeltaValue<C>, C: VCodec> vstd::std_specs::iter::ExactSizeIteratorSpecImpl for VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> vstd::std_specs::iter::ExactSizeIteratorSpecImpl for DeltaIter<'a, T, C> {
     open spec fn exact_len(&self) -> usize {
         self.rest().len() as usize
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> ExactSizeIterator for VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> ExactSizeIterator for DeltaIter<'a, T, C> {
     /// How many values are left.
     #[inline]
     fn len(&self) -> (len: usize)
@@ -671,7 +671,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> ExactSizeIterator for VerifiedDeltaIter<'
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> Clone for VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> Clone for DeltaIter<'a, T, C> {
     /// An iterator of its own with the same values left.
     #[inline(always)]
     fn clone(&self) -> (r: Self)
@@ -686,7 +686,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> Clone for VerifiedDeltaIter<'a, T, C> {
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> Default for VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> Default for DeltaIter<'a, T, C> {
     /// An iterator with nothing to give.
     #[inline(always)]
     fn default() -> (r: Self)
@@ -701,10 +701,10 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> Default for VerifiedDeltaIter<'a, T, C> {
     }
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// An iterator over the values.
     #[inline(always)]
-    pub fn iter(&self) -> (it: VerifiedDeltaIter<'_, T, C>)
+    pub fn iter(&self) -> (it: DeltaIter<'_, T, C>)
         ensures
             it.rest() == self@,
             it.column() == self@,
@@ -718,10 +718,10 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
     /// An iterator over the values `start..end`.
     ///
     /// The iterator moves from the column's start to `start` as
-    /// [`advance_by`](VerifiedDeltaIter::advance_by) does: the column's
+    /// [`advance_by`](DeltaIter::advance_by) does: the column's
     /// index gives the sum of the differences before `start`.
     #[inline(always)]
-    pub fn iter_range(&self, start: usize, end: usize) -> (it: VerifiedDeltaIter<'_, T, C>)
+    pub fn iter_range(&self, start: usize, end: usize) -> (it: DeltaIter<'_, T, C>)
         requires
             start <= end <= self@.len(),
         ensures
@@ -761,14 +761,14 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> IntoIterator for &'a VerifiedDeltaColumn<T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> IntoIterator for &'a DeltaColumn<T, C> {
     type Item = T;
 
-    type IntoIter = VerifiedDeltaIter<'a, T, C>;
+    type IntoIter = DeltaIter<'a, T, C>;
 
-    /// An iterator over the values ([`VerifiedDeltaColumn::iter`]).
+    /// An iterator over the values ([`DeltaColumn::iter`]).
     #[inline(always)]
-    fn into_iter(self) -> (it: VerifiedDeltaIter<'a, T, C>)
+    fn into_iter(self) -> (it: DeltaIter<'a, T, C>)
         ensures
             it.rest() == self@,
             it.column() == self@,
@@ -781,20 +781,20 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> IntoIterator for &'a VerifiedDeltaColumn<
 }
 
 /// An iterator of the runs of differences of a delta column's values,
-/// which [`VerifiedDeltaIter::runs`] gives: each run is of as many
+/// which [`DeltaIter::runs`] gives: each run is of as many
 /// equal differences as lie together in what the iterator had left
 /// (`delta_runs_at` of their `runs_of`), with the number before it.
-pub struct VerifiedDeltaRuns<'a, T: VDeltaValue<C>, C: VCodec = Leb128>(VerifiedDeltaIter<'a, T, C>);
+pub struct DeltaRuns<'a, T: DeltaValue<C>, C: Codec = Leb128>(DeltaIter<'a, T, C>);
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaRuns<'a, T, C> {
     /// The iterator of values whose runs these are, where it stands now.
-    pub closed spec fn iter(&self) -> VerifiedDeltaIter<'a, T, C> {
+    pub closed spec fn iter(&self) -> DeltaIter<'a, T, C> {
         self.0
     }
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, T: VDeltaValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for VerifiedDeltaRuns<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> vstd::std_specs::iter::IteratorSpecImpl for DeltaRuns<'a, T, C> {
     /// The iterator keeps to what Verus asks of an iterator: `next` gives
     /// `remaining()`, one run after another, and then `None`.
     open spec fn obeys_prophetic_iter_laws(&self) -> bool {
@@ -831,10 +831,10 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl f
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> Iterator for VerifiedDeltaRuns<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> Iterator for DeltaRuns<'a, T, C> {
     type Item = DeltaRun;
 
-    /// The next run, if one is left ([`VerifiedDeltaIter::next_run`]).
+    /// The next run, if one is left ([`DeltaIter::next_run`]).
     #[inline(always)]
     fn next(&mut self) -> (r: Option<DeltaRun>)
         ensures
@@ -870,21 +870,21 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> Iterator for VerifiedDeltaRuns<'a, T, C> 
     }
 }
 
-/// Where a [`VerifiedDeltaIter`] stood and where its window ended, kept
-/// without the borrow of the column: [`VerifiedDeltaIter::suspend`]
+/// Where a [`DeltaIter`] stood and where its window ended, kept
+/// without the borrow of the column: [`DeltaIter::suspend`]
 /// gives it, and [`try_resume`](Self::try_resume) an iterator from it.
 ///
 /// It holds the iterator's place in the column's slabs, and how many
 /// slabs and edits the column counted then, as a
-/// [`VerifiedIterState`] does. It does not hold the sum of the
+/// [`IterState`] does. It does not hold the sum of the
 /// differences before the place: `try_resume` takes that from the
 /// column it resumes on. It is of no value type: a state fits any delta
 /// column whose slabs it is a place in.
-pub struct VerifiedDeltaIterState {
-    inner: VerifiedIterState,
+pub struct DeltaIterState {
+    inner: IterState,
 }
 
-impl VerifiedDeltaIterState {
+impl DeltaIterState {
     /// Where the iterator stood: its `pos()`.
     pub closed spec fn pos(&self) -> usize {
         self.inner.pos
@@ -896,7 +896,7 @@ impl VerifiedDeltaIterState {
     }
 
     /// The count of edits of the column the state was taken of
-    /// (`VerifiedDeltaColumn::edits`).
+    /// (`DeltaColumn::edits`).
     pub closed spec fn edits(&self) -> usize {
         self.inner.counter
     }
@@ -905,7 +905,7 @@ impl VerifiedDeltaIterState {
     /// edits and the slabs that the state does, the state's place is one
     /// in those slabs, and it is in the column or at its end.
     /// [`try_resume`](Self::try_resume) gives an iterator exactly then.
-    pub closed spec fn fits<T: VDeltaValue<C>, C: VCodec>(&self, column: &VerifiedDeltaColumn<T, C>) -> bool {
+    pub closed spec fn fits<T: DeltaValue<C>, C: Codec>(&self, column: &DeltaColumn<T, C>) -> bool {
         let lens = slab_lens(column.core.slabs_spec());
         &&& self.inner.counter == column.core.count()
         &&& self.inner.num_slabs == lens.len()
@@ -917,7 +917,7 @@ impl VerifiedDeltaIterState {
     /// column that has been edited since counts others
     /// (`lemma_after_edits`), so the state does not fit it, and
     /// [`try_resume`](Self::try_resume) refuses it.
-    pub proof fn lemma_fits<T: VDeltaValue<C>, C: VCodec>(&self, column: &VerifiedDeltaColumn<T, C>)
+    pub proof fn lemma_fits<T: DeltaValue<C>, C: Codec>(&self, column: &DeltaColumn<T, C>)
         requires
             self.fits(column),
         ensures
@@ -931,24 +931,24 @@ impl VerifiedDeltaIterState {
     /// ([`PackError::InvalidResume`]) if it does not.
     ///
     /// A state fits the column it was taken of, as long as that is not
-    /// edited ([`VerifiedDeltaIter::suspend`]). The iterator given is
+    /// edited ([`DeltaIter::suspend`]). The iterator given is
     /// one of `column` whatever column the state was taken of: it gives
     /// the values of `column` in the state's window, and the sum it
     /// keeps is of that column's differences. Where the state stands at
     /// the column's end, the iterator's window ends there.
     ///
     /// An edit moves the column's count of edits
-    /// (`VerifiedDeltaColumn::edits`), as each method that edits says,
+    /// (`DeltaColumn::edits`), as each method that edits says,
     /// so a state taken before an edit is refused after it
     /// (`lemma_fits`), and after more edits unless they are
     /// `usize::MAX + 1` or more (`lemma_after_edits`).
     ///
     /// The sum of the differences before the place is found as
-    /// [`advance_by`](VerifiedDeltaIter::advance_by) finds it, with the
+    /// [`advance_by`](DeltaIter::advance_by) finds it, with the
     /// column's index.
     #[inline(always)]
-    pub fn try_resume<'a, T: VDeltaValue<C>, C: VCodec>(&self, column: &'a VerifiedDeltaColumn<T, C>) -> (r: Result<
-        VerifiedDeltaIter<'a, T, C>,
+    pub fn try_resume<'a, T: DeltaValue<C>, C: Codec>(&self, column: &'a DeltaColumn<T, C>) -> (r: Result<
+        DeltaIter<'a, T, C>,
         PackError,
     >)
         ensures
@@ -966,12 +966,12 @@ impl VerifiedDeltaIterState {
     }
 }
 
-// ── Repositioning (`VShiftable`) ───────────────────────────────────────────
+// ── Repositioning (`Shiftable`) ───────────────────────────────────────────
 
 /// The iterator repositioned as any of the verified ones is: its model is
 /// its column's values, from where it stands to the end of its window,
 /// each value an item.
-impl<'a, T: VDeltaValue<C>, C: VCodec> VShiftable for VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> Shiftable for DeltaIter<'a, T, C> {
     closed spec fn shift_vals(&self) -> Seq<T> {
         self.column()
     }
@@ -1034,17 +1034,17 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VShiftable for VerifiedDeltaIter<'a, T, C
 
     #[inline(always)]
     fn set_max(&mut self, end: usize) {
-        VerifiedDeltaIter::set_max(self, end)
+        DeltaIter::set_max(self, end)
     }
 
     #[inline(always)]
     fn advance_to(&mut self, target: usize) {
-        VerifiedDeltaIter::advance_to(self, target)
+        DeltaIter::advance_to(self, target)
     }
 
     #[inline(always)]
     fn advance_by(&mut self, amount: usize) {
-        VerifiedDeltaIter::advance_by(self, amount)
+        DeltaIter::advance_by(self, amount)
     }
 
     #[inline(always)]
@@ -1054,17 +1054,17 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VShiftable for VerifiedDeltaIter<'a, T, C
 
     #[inline(always)]
     fn shift(&mut self, range: Range<usize>) {
-        VerifiedDeltaIter::shift(self, range)
+        DeltaIter::shift(self, range)
     }
 
     #[inline(always)]
     fn shift_next(&mut self, range: Range<usize>) -> (r: Option<T>) {
-        VerifiedDeltaIter::shift_next(self, range)
+        DeltaIter::shift_next(self, range)
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
-    /// The iterator's repositioning model ([`VShiftable`]) in the terms
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
+    /// The iterator's repositioning model ([`Shiftable`]) in the terms
     /// of its own specification: the values it ranges over are its
     /// column's; it stands at `pos()`; what it has left is `rest()`,
     /// each item a value.
@@ -1080,10 +1080,10 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
     }
 
     /// A lookahead: the iterator wrapped so that the value it gives next
-    /// can be looked at first ([`VerifiedUnshift::peek`]), as the old
+    /// can be looked at first ([`Unshift::peek`]), as the old
     /// API's `Shiftable::unshift` gives.
     #[inline(always)]
-    pub fn unshift(self) -> (r: VerifiedUnshift<Self>)
+    pub fn unshift(self) -> (r: Unshift<Self>)
         ensures
             r.unshift_vals() == self.column(),
             r.unshift_left() == self.rest(),
@@ -1101,7 +1101,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
     ///
     /// When it comes to a range that starts before where it stands.
     #[inline(always)]
-    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: Ranges<'r, Self>)
         ensures
             r.ranges_vals() == self.column(),
             r.ranges_left() == windows(self.column(), ranges@),
@@ -1113,7 +1113,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
 /// The runs of a delta column, repositioned as its values are: the model
 /// is each value as a delta run of one, with the number before it, and
 /// an item, a run, stands for as many of those as it counts.
-impl<'a, T: VDeltaValue<C>, C: VCodec> VShiftable for VerifiedDeltaRuns<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> Shiftable for DeltaRuns<'a, T, C> {
     closed spec fn shift_vals(&self) -> Seq<DeltaRun> {
         delta_units(self.0.column())
     }
@@ -1165,32 +1165,32 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VShiftable for VerifiedDeltaRuns<'a, T, C
 
     #[inline(always)]
     fn dup(&self) -> (r: Self) {
-        VerifiedDeltaRuns(VShiftable::dup(&self.0))
+        DeltaRuns(Shiftable::dup(&self.0))
     }
 
     #[inline(always)]
     fn get_pos(&self) -> (r: usize) {
-        VShiftable::get_pos(&self.0)
+        Shiftable::get_pos(&self.0)
     }
 
     #[inline(always)]
     fn get_max(&self) -> (r: usize) {
-        VShiftable::get_max(&self.0)
+        Shiftable::get_max(&self.0)
     }
 
     #[inline(always)]
     fn set_max(&mut self, end: usize) {
-        VShiftable::set_max(&mut self.0, end)
+        Shiftable::set_max(&mut self.0, end)
     }
 
     #[inline(always)]
     fn advance_to(&mut self, target: usize) {
-        VShiftable::advance_to(&mut self.0, target)
+        Shiftable::advance_to(&mut self.0, target)
     }
 
     #[inline(always)]
     fn advance_by(&mut self, amount: usize) {
-        VShiftable::advance_by(&mut self.0, amount)
+        Shiftable::advance_by(&mut self.0, amount)
     }
 
     #[inline(always)]
@@ -1200,7 +1200,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VShiftable for VerifiedDeltaRuns<'a, T, C
 
     #[inline(always)]
     fn shift(&mut self, range: Range<usize>) {
-        VShiftable::shift(&mut self.0, range)
+        Shiftable::shift(&mut self.0, range)
     }
 
     #[inline(always)]
@@ -1209,8 +1209,8 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VShiftable for VerifiedDeltaRuns<'a, T, C
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
-    /// The runs' repositioning model ([`VShiftable`]) in the terms of
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaRuns<'a, T, C> {
+    /// The runs' repositioning model ([`Shiftable`]) in the terms of
     /// their own specification: they range over the column's values, each
     /// as a delta run of one; they stand where their iterator of values
     /// does; their items are the runs of the differences that has left,
@@ -1235,11 +1235,11 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
     }
 
     /// A lookahead: the runs wrapped so that the run they give next can
-    /// be looked at first ([`VerifiedUnshift::peek`]), as the old API's
+    /// be looked at first ([`Unshift::peek`]), as the old API's
     /// `Shiftable::unshift` gives. (It cannot be moved to a window: its
     /// items are not each one value.)
     #[inline(always)]
-    pub fn unshift(self) -> (r: VerifiedUnshift<Self>)
+    pub fn unshift(self) -> (r: Unshift<Self>)
         ensures
             r.unshift_vals() == self.shift_vals(),
             r.unshift_left() == self.shift_items(),
@@ -1257,7 +1257,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
     ///
     /// When it comes to a range that starts before where it stands.
     #[inline(always)]
-    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: Ranges<'r, Self>)
         ensures
             r.ranges_vals() == self.shift_vals(),
             r.ranges_left() == windows(self.shift_vals(), ranges@),

@@ -1,6 +1,6 @@
-//! Edits of a [`VerifiedDeltaColumn`] at a cursor: [`VerifiedDeltaEdit`],
-//! which [`VerifiedDeltaColumn::edit`] and
-//! [`VerifiedDeltaColumn::edit_at`] open.
+//! Edits of a [`DeltaColumn`] at a cursor: [`DeltaEdit`],
+//! which [`DeltaColumn::edit`] and
+//! [`DeltaColumn::edit_at`] open.
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each
@@ -9,7 +9,7 @@
 
 #[cfg(verus_keep_ghost)]
 use super::{all_dom, delta_runs_fit, delta_runs_values, vals, VDelta, DE, DX};
-use super::{DKind, ECore, VDeltaValue, VerifiedDeltaColumn};
+use super::{DKind, DeltaColumn, DeltaValue, ECore};
 #[cfg(verus_keep_ghost)]
 use crate::delta::ddomain::DeltaWrite;
 #[cfg(verus_keep_ghost)]
@@ -18,7 +18,7 @@ use crate::rle::lift::Lift;
 use crate::rle::model::{RleOps, WriteOps};
 #[cfg(verus_keep_ghost)]
 use crate::verified::after_call;
-use crate::verified::codec::VCodec;
+use crate::verified::codec::Codec;
 use crate::{DeltaRun, Leb128};
 use vstd::prelude::*;
 
@@ -28,10 +28,10 @@ use imp::*;
 
 verus! {
 
-/// An edit of a [`VerifiedDeltaColumn`] in progress: a cursor that walks
+/// An edit of a [`DeltaColumn`] in progress: a cursor that walks
 /// the column once, front to back, and writes the edited column as it
-/// goes. [`VerifiedDeltaColumn::edit`] and
-/// [`VerifiedDeltaColumn::edit_at`] open one.
+/// goes. [`DeltaColumn::edit`] and
+/// [`DeltaColumn::edit_at`] open one.
 ///
 /// A cursor passes over values ([`seek`](Self::seek),
 /// [`advance`](Self::advance)), which keeps them; puts values before the
@@ -47,9 +47,9 @@ verus! {
 /// another, and [`finish`](Self::finish) hands the edited column back:
 ///
 /// ```
-/// use hexane::verified::VerifiedDeltaColumn;
+/// use hexane::verified::DeltaColumn;
 ///
-/// let mut col = VerifiedDeltaColumn::<u64>::from_values(&[10, 20, 30, 40, 50]);
+/// let mut col = DeltaColumn::<u64>::from_values(&[10, 20, 30, 40, 50]);
 /// let mut e = col.edit();
 /// e.seek(1).delete(2).insert(25).seek(4).replace_with(45);
 /// e.finish();
@@ -74,13 +74,13 @@ verus! {
 /// stays as it was (`kept`).
 ///
 /// The values a cursor writes are ones a delta column of `T` can keep
-/// (`fits`), as [`splice`](VerifiedDeltaColumn::splice) asks of its
+/// (`fits`), as [`splice`](DeltaColumn::splice) asks of its
 /// values. What no step can ask is that the edited column's values lie
 /// within 2^63 of each other, which a delta column's must:
 /// [`finish`](Self::finish) panics where they do not.
 #[must_use = "an edit gives the column back when `finish` is called"]
-pub struct VerifiedDeltaEdit<'a, T: VDeltaValue<C>, C: VCodec = Leb128> {
-    col: &'a mut VerifiedDeltaColumn<T, C>,
+pub struct DeltaEdit<'a, T: DeltaValue<C>, C: Codec = Leb128> {
+    col: &'a mut DeltaColumn<T, C>,
     /// the column's slabs, which the cursor has while it is open
     held: ECore<T, C>,
     core: ECur<T, C>,
@@ -90,11 +90,11 @@ pub struct VerifiedDeltaEdit<'a, T: VDeltaValue<C>, C: VCodec = Leb128> {
     changed: bool,
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// A cursor to edit the column with, standing at its first value.
-    /// See [`VerifiedDeltaEdit`].
+    /// See [`DeltaEdit`].
     #[inline(always)]
-    pub fn edit(&mut self) -> (e: VerifiedDeltaEdit<'_, T, C>)
+    pub fn edit(&mut self) -> (e: DeltaEdit<'_, T, C>)
         ensures
             e.wf(),
             e.orig() == old(self)@,
@@ -109,7 +109,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
 
     /// A cursor to edit the column with, standing at the value at `at`
     /// (at the end, where `at` is the column's length), with the values
-    /// before it kept. See [`VerifiedDeltaEdit`].
+    /// before it kept. See [`DeltaEdit`].
     ///
     /// The cursor's `result()` is the column as it will be when the
     /// borrow of it ends: what `finish` says of that is what is known of
@@ -120,7 +120,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
     /// If `at` is past the column's end, which the `requires` rules out
     /// of a verified caller.
     #[inline(always)]
-    pub fn edit_at(&mut self, at: usize) -> (e: VerifiedDeltaEdit<'_, T, C>)
+    pub fn edit_at(&mut self, at: usize) -> (e: DeltaEdit<'_, T, C>)
         requires
             at <= old(self)@.len(),
         ensures
@@ -136,7 +136,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEdit<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaEdit<'a, T, C> {
     /// The cursor is one a column gave, or one a step of such a cursor
     /// left: every step asks for this and keeps it.
     pub closed spec fn wf(&self) -> bool {
@@ -183,7 +183,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEdit<'a, T, C> {
     /// The column as it will be when the edit is over and its borrow
     /// ends. [`finish`](Self::finish) says what it holds.
     #[verifier::prophetic]
-    pub closed spec fn result(&self) -> VerifiedDeltaColumn<T, C> {
+    pub closed spec fn result(&self) -> DeltaColumn<T, C> {
         *final(self.col)
     }
 
@@ -333,7 +333,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEdit<'a, T, C> {
     /// the value before its first), whatever the cursor stands after.
     ///
     /// Each run's values are ones the column can keep
-    /// (`delta_runs_fit`; [`VerifiedDeltaColumn::run_fits`] is a check
+    /// (`delta_runs_fit`; [`DeltaColumn::run_fits`] is a check
     /// that shows it). The cursor has changed the column if a value was
     /// written.
     #[inline(always)]

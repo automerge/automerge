@@ -5,11 +5,11 @@
 //! does and leave Verus to take it on trust. Here the same contracts
 //! ([`RleOps`](crate::rle::model::RleOps), [`WriteOps`](crate::rle::model::WriteOps),
 //! [`Lift`](crate::rle::lift::Lift)) are *proved*: for every type that
-//! says how it packs ([`VPack`]), over every codec ([`VCodec`]), and for
+//! says how it packs ([`RleValue`]), over every codec ([`Codec`]), and for
 //! `Option`s of them. So a column over these types rests on no trusted
 //! value code.
 //!
-//! [`VPack`] is proved for `u64` and `i64`, which are the codec's own
+//! [`RleValue`] is proved for `u64` and `i64`, which are the codec's own
 //! numbers, and for every type that says how it is one of those
 //! ([`VNewtype`]): `u32`, `i32`, `usize` and `NonZeroU32` here, and a
 //! client's own types.
@@ -22,7 +22,7 @@
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
-use super::codec::VCodec;
+use super::codec::Codec;
 #[cfg(verus_keep_ghost)]
 use crate::rle::lift::Lift;
 #[cfg(verus_keep_ghost)]
@@ -62,13 +62,13 @@ verus! {
 /// where none do; that `unpack` and `value_len` agree with it; that
 /// `same` is `==`; and that `compare` is an order in which a value is
 /// equal to itself only.
-pub trait VPack: Copy + Sized {
+pub trait RleValue: Copy + Sized {
     /// The bytes of `v`.
-    spec fn enc<C: VCodec>(v: Self) -> Seq<u8>;
+    spec fn enc<C: Codec>(v: Self) -> Seq<u8>;
 
     /// A value is one to ten bytes, and no two values' bytes start the
     /// same string.
-    proof fn lemma_enc<C: VCodec>(v: Self, w: Self, s: Seq<u8>, t: Seq<u8>)
+    proof fn lemma_enc<C: Codec>(v: Self, w: Self, s: Seq<u8>, t: Seq<u8>)
         ensures
             0 < Self::enc::<C>(v).len() <= 10,
             Self::enc::<C>(v) + s == Self::enc::<C>(w) + t ==> v == w,
@@ -100,7 +100,7 @@ pub trait VPack: Copy + Sized {
 
     /// The value at the start of `data` and its length, or an error
     /// where no value's bytes start `data`.
-    fn try_unpack<C: VCodec>(data: &[u8]) -> (r: Result<(usize, Self), PackError>)
+    fn try_unpack<C: Codec>(data: &[u8]) -> (r: Result<(usize, Self), PackError>)
         ensures
             match r {
                 Ok((n, v)) => n <= data.len() && data@.take(n as int) == Self::enc::<C>(v),
@@ -109,7 +109,7 @@ pub trait VPack: Copy + Sized {
     ;
 
     /// The value known to start `data`, and its length.
-    fn unpack<C: VCodec>(data: &[u8]) -> (r: (usize, Self))
+    fn unpack<C: Codec>(data: &[u8]) -> (r: (usize, Self))
         requires
             exists|v: Self| (#[trigger] Self::enc::<C>(v)).is_prefix_of(data@),
         ensures
@@ -119,26 +119,26 @@ pub trait VPack: Copy + Sized {
     ;
 
     /// The length of the value that starts `data`, without reading it.
-    fn value_len<C: VCodec>(data: &[u8]) -> (r: Option<usize>)
+    fn value_len<C: Codec>(data: &[u8]) -> (r: Option<usize>)
         ensures
             forall|v: Self| (#[trigger] Self::enc::<C>(v)).is_prefix_of(data@) ==> r == Some(Self::enc::<C>(v).len() as usize),
         no_unwind
     ;
 
     /// Append the bytes of `v`; their number.
-    fn pack<C: VCodec>(v: &Self, buf: &mut Vec<u8>) -> (n: usize)
+    fn pack<C: Codec>(v: &Self, buf: &mut Vec<u8>) -> (n: usize)
         ensures
             final(buf)@ == old(buf)@ + Self::enc::<C>(*v),
             n == Self::enc::<C>(*v).len(),
     ;
 }
 
-impl VPack for u64 {
-    open spec fn enc<C: VCodec>(v: u64) -> Seq<u8> {
+impl RleValue for u64 {
+    open spec fn enc<C: Codec>(v: u64) -> Seq<u8> {
         C::enc_u(v)
     }
 
-    proof fn lemma_enc<C: VCodec>(v: u64, w: u64, s: Seq<u8>, t: Seq<u8>) {
+    proof fn lemma_enc<C: Codec>(v: u64, w: u64, s: Seq<u8>, t: Seq<u8>) {
         C::lemma_u(v, w, s, t);
     }
 
@@ -160,32 +160,32 @@ impl VPack for u64 {
     }
 
     #[inline(always)]
-    fn try_unpack<C: VCodec>(data: &[u8]) -> Result<(usize, u64), PackError> {
+    fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, u64), PackError> {
         C::read_u(data)
     }
 
     #[inline(always)]
-    fn unpack<C: VCodec>(data: &[u8]) -> (usize, u64) {
+    fn unpack<C: Codec>(data: &[u8]) -> (usize, u64) {
         imp::vpack_unpack_u64::<C>(data)
     }
 
     #[inline(always)]
-    fn value_len<C: VCodec>(data: &[u8]) -> Option<usize> {
+    fn value_len<C: Codec>(data: &[u8]) -> Option<usize> {
         C::len_u(data)
     }
 
     #[inline(always)]
-    fn pack<C: VCodec>(v: &u64, buf: &mut Vec<u8>) -> usize {
+    fn pack<C: Codec>(v: &u64, buf: &mut Vec<u8>) -> usize {
         imp::vpack_pack_u64::<C>(v, buf)
     }
 }
 
-impl VPack for i64 {
-    open spec fn enc<C: VCodec>(v: i64) -> Seq<u8> {
+impl RleValue for i64 {
+    open spec fn enc<C: Codec>(v: i64) -> Seq<u8> {
         C::enc_i(v)
     }
 
-    proof fn lemma_enc<C: VCodec>(v: i64, w: i64, s: Seq<u8>, t: Seq<u8>) {
+    proof fn lemma_enc<C: Codec>(v: i64, w: i64, s: Seq<u8>, t: Seq<u8>) {
         C::lemma_i(v, w, s, t);
     }
 
@@ -207,22 +207,22 @@ impl VPack for i64 {
     }
 
     #[inline(always)]
-    fn try_unpack<C: VCodec>(data: &[u8]) -> Result<(usize, i64), PackError> {
+    fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, i64), PackError> {
         C::read_i(data)
     }
 
     #[inline(always)]
-    fn unpack<C: VCodec>(data: &[u8]) -> (usize, i64) {
+    fn unpack<C: Codec>(data: &[u8]) -> (usize, i64) {
         imp::vpack_unpack_i64::<C>(data)
     }
 
     #[inline(always)]
-    fn value_len<C: VCodec>(data: &[u8]) -> Option<usize> {
+    fn value_len<C: Codec>(data: &[u8]) -> Option<usize> {
         C::len_i(data)
     }
 
     #[inline(always)]
-    fn pack<C: VCodec>(v: &i64, buf: &mut Vec<u8>) -> usize {
+    fn pack<C: Codec>(v: &i64, buf: &mut Vec<u8>) -> usize {
         imp::vpack_pack_i64::<C>(v, buf)
     }
 }
@@ -231,8 +231,8 @@ impl VPack for i64 {
 /// A value type that is stored as another's values: each value as its
 /// own `Base` value, and not every `Base` value need be one.
 ///
-/// A type that implements this is a [`VPack`], and so a value type of
-/// [`VerifiedColumn`](super::VerifiedColumn), alone and in an `Option`.
+/// A type that implements this is a [`RleValue`], and so a value type of
+/// [`Column`](super::Column), alone and in an `Option`.
 /// It is how this crate's `u32`, `i32`, `usize` and `NonZeroU32` are
 /// value types, and how a client's own type is one: a column of it holds
 /// the bytes a column of `Base` would hold for the values' `Base`
@@ -251,7 +251,7 @@ impl VPack for i64 {
 /// it gives what `from_base` does).
 pub trait VNewtype: Copy + Sized {
     /// The type it is stored as.
-    type Base: VPack;
+    type Base: RleValue;
 
     /// The `Base` value of `v`.
     spec fn base(v: Self) -> Self::Base;
@@ -300,12 +300,12 @@ pub trait VNewtype: Copy + Sized {
     }
 }
 
-impl<T: VNewtype> VPack for T {
-    open spec fn enc<C: VCodec>(v: T) -> Seq<u8> {
+impl<T: VNewtype> RleValue for T {
+    open spec fn enc<C: Codec>(v: T) -> Seq<u8> {
         T::Base::enc::<C>(T::base(v))
     }
 
-    proof fn lemma_enc<C: VCodec>(v: T, w: T, s: Seq<u8>, t: Seq<u8>) {
+    proof fn lemma_enc<C: Codec>(v: T, w: T, s: Seq<u8>, t: Seq<u8>) {
         imp::vpack_lemma_enc_t::<T, C>(v, w, s, t)
     }
 
@@ -328,22 +328,22 @@ impl<T: VNewtype> VPack for T {
     }
 
     #[inline(always)]
-    fn try_unpack<C: VCodec>(data: &[u8]) -> Result<(usize, T), PackError> {
+    fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, T), PackError> {
         imp::vpack_try_unpack_t::<T, C>(data)
     }
 
     #[inline(always)]
-    fn unpack<C: VCodec>(data: &[u8]) -> (usize, T) {
+    fn unpack<C: Codec>(data: &[u8]) -> (usize, T) {
         imp::vpack_unpack_t::<T, C>(data)
     }
 
     #[inline(always)]
-    fn value_len<C: VCodec>(data: &[u8]) -> Option<usize> {
+    fn value_len<C: Codec>(data: &[u8]) -> Option<usize> {
         T::Base::value_len::<C>(data)
     }
 
     #[inline(always)]
-    fn pack<C: VCodec>(v: &T, buf: &mut Vec<u8>) -> usize {
+    fn pack<C: Codec>(v: &T, buf: &mut Vec<u8>) -> usize {
         T::Base::pack::<C>(&v.to_base(), buf)
     }
 }

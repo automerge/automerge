@@ -1,4 +1,4 @@
-//! A column's load, run by run ([`VerifiedColumn::load_iter`]), as the
+//! A column's load, run by run ([`Column::load_iter`]), as the
 //! old API's [`Column::load_iter`](crate::Column::load_iter) gives it.
 //!
 //! This file is a specification, to be read as the guide to reviewing
@@ -14,7 +14,7 @@ use super::seal;
 use super::LenIndex;
 #[cfg(verus_keep_ghost)]
 use super::{fill_of, Held, VGet};
-use super::{Get, VCodec, VValue, VerifiedColumn};
+use super::{Codec, Column, ColumnValueRef, Get};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::ReadsAgree;
 #[cfg(verus_keep_ghost)]
@@ -42,7 +42,7 @@ verus! {
 ///
 /// [`try_next_run`]: Self::try_next_run
 /// [`finalize`]: Self::finalize
-pub struct VerifiedLoadIter<'a, V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C> = LenIndex> {
+pub struct ColumnLoadIter<'a, V: ColumnValueRef<C>, C: Codec = Leb128, K: VIndex<V, C> = LenIndex> {
     core: KLoad<'a, V, C, K>,
     /// empty bytes, and a fill value with a length: one run of that
     fill: Option<(Get<'a, V>, usize)>,
@@ -52,7 +52,7 @@ pub struct VerifiedLoadIter<'a, V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C
     max_segments: usize,
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedLoadIter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> ColumnLoadIter<'a, V, C, K> {
     /// What the load keeps to, from one call to the next.
     pub closed spec fn wf(&self) -> bool {
         &&& self.core.inv()
@@ -129,11 +129,11 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedLoadIter<'a, V, C, K>
     }
 
     /// Read and check what is left, and give the column: as
-    /// [`load_with`](VerifiedColumn::load_with) gives it, and beginning
+    /// [`load_with`](Column::load_with) gives it, and beginning
     /// with the runs given. A fill gives its column. No error unless a
     /// step failed, or the bytes are no column `load_with` takes.
     #[inline(always)]
-    pub fn finalize(self) -> (r: Result<VerifiedColumn<V, C, K>, PackError>)
+    pub fn finalize(self) -> (r: Result<Column<V, C, K>, PackError>)
         requires
             self.wf(),
         ensures
@@ -144,13 +144,13 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedLoadIter<'a, V, C, K>
                 Some((len, v)) => r matches Ok(c) && c@ == Seq::new(len as nat, |_i: int| v.sv()),
                 None => {
                     &&& r matches Ok(c) ==> {
-                        &&& VerifiedColumn::<V, C>::valid(self.bytes())
-                        &&& c@ == VerifiedColumn::<V, C>::values(self.bytes())
+                        &&& Column::<V, C>::valid(self.bytes())
+                        &&& c@ == Column::<V, C>::values(self.bytes())
                         &&& self.length() matches Some(len) ==> c@.len() == len
                     }
-                    &&& !self.failed() && VerifiedColumn::<V, C>::loadable(self.bytes()) && K::keeps(
-                        VerifiedColumn::<V, C>::values(self.bytes()),
-                    ) && (self.length() matches Some(len) ==> VerifiedColumn::<V, C>::values(self.bytes()).len()
+                    &&& !self.failed() && Column::<V, C>::loadable(self.bytes()) && K::keeps(
+                        Column::<V, C>::values(self.bytes()),
+                    ) && (self.length() matches Some(len) ==> Column::<V, C>::values(self.bytes()).len()
                         == len) ==> r is Ok
                 },
             },
@@ -159,17 +159,17 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedLoadIter<'a, V, C, K>
     }
 }
 
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     /// A load of the saved column `bytes`, with options ([`LoadOpts`]),
-    /// run by run: [`VerifiedLoadIter::try_next_run`] gives its runs in
-    /// turn, and [`VerifiedLoadIter::finalize`] the column, as
+    /// run by run: [`ColumnLoadIter::try_next_run`] gives its runs in
+    /// turn, and [`ColumnLoadIter::finalize`] the column, as
     /// [`load_with`](Self::load_with) would. Pulling runs is not needed:
     /// `load_iter(bytes, opts).finalize()` is a plain load.
     ///
     /// A slab holds two runs or more: [`Column`](crate::Column) panics
     /// when asked for fewer, and here that is a `requires`.
     #[inline(always)]
-    pub fn load_iter<'a, F: MaybeFill<Get<'a, V>>>(bytes: &'a [u8], opts: LoadOpts<F>) -> (r: VerifiedLoadIter<'a, V, C, K>)
+    pub fn load_iter<'a, F: MaybeFill<Get<'a, V>>>(bytes: &'a [u8], opts: LoadOpts<F>) -> (r: ColumnLoadIter<'a, V, C, K>)
         requires
             opts.max_segments() >= 2,
         ensures

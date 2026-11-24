@@ -35,7 +35,7 @@ pub(super) type KEdit<V, C, K> = EditCore<
 /// Give the cursor `core` every run `feed` has, until it has no more.
 #[verifier::exec_allows_no_decreases_clause]
 #[inline(always)]
-pub(super) fn insert_feed<V: VValue<C>, C: VCodec, K: VIndex<V, C>, R: RunFeed<V::E>>(core: &mut KEdit<V, C, K>, feed: &mut R)
+pub(super) fn insert_feed<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, R: RunFeed<V::E>>(core: &mut KEdit<V, C, K>, feed: &mut R)
     requires
         old(core).inv(),
         old(core).held(),
@@ -84,9 +84,9 @@ pub(super) fn insert_feed<V: VValue<C>, C: VCodec, K: VIndex<V, C>, R: RunFeed<V
     }
 }
 
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     #[inline(always)]
-    pub(super) fn edit_impl(&mut self) -> (e: VerifiedEdit<'_, V, C, K>)
+    pub(super) fn edit_impl(&mut self) -> (e: Edit<'_, V, C, K>)
         ensures
             e.wf(),
             e.orig() == old(self)@,
@@ -103,7 +103,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
         e
     }
 
-    pub(super) fn edit_at_impl(&mut self, at: usize) -> (e: VerifiedEdit<'_, V, C, K>)
+    pub(super) fn edit_at_impl(&mut self, at: usize) -> (e: Edit<'_, V, C, K>)
         requires
             at <= old(self)@.len(),
         ensures
@@ -124,11 +124,11 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
         proof {
             lemma_svs_sub(old(self).core@, 0, at as int);
         }
-        VerifiedEdit { col: self, core, counter, changed: false }
+        Edit { col: self, core, counter, changed: false }
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Edit<'a, V, C, K> {
     pub(super) proof fn lemma_at_impl(&self)
         requires
             self.wf(),
@@ -275,7 +275,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
         proof {
             self.lemma_at();
         }
-        let n = to.checked_sub(self.core.pos()).expect("VerifiedEdit::seek is forward-only");
+        let n = to.checked_sub(self.core.pos()).expect("Edit::seek is forward-only");
         self.step_advance(n);
         self
     }
@@ -453,7 +453,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
             self.result()@ == self.now(),
             self.result().edits() == after_call(self.began(), self.changed()),
     {
-        let VerifiedEdit { col: column, core: cursor, counter: before, changed: edit } = self;
+        let Edit { col: column, core: cursor, counter: before, changed: edit } = self;
         proof {
             cursor.lemma_at();
             let a = cursor.orig_vals();

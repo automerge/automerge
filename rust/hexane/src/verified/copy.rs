@@ -1,5 +1,5 @@
-//! Ranges of one [`VerifiedColumn`] copied into another at several places
-//! in one pass: [`VerifiedColumn::copy_ranges`].
+//! Ranges of one [`Column`] copied into another at several places
+//! in one pass: [`Column::copy_ranges`].
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each
@@ -9,7 +9,7 @@
 use super::model::Model;
 #[cfg(verus_keep_ghost)]
 use super::{after_call, Held, VGet};
-use super::{VCodec, VIndex, VValue, VerifiedColumn};
+use super::{Codec, Column, ColumnValueRef, VIndex};
 #[cfg(verus_keep_ghost)]
 use crate::splices::{applied, in_order, ranges_ascend, splices_do};
 use crate::Splice;
@@ -21,7 +21,7 @@ use imp::*;
 
 verus! {
 
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     /// Copy ranges of `src` into the column, at several places in one
     /// pass. Each splice `sp` of `splices`, one after another, deletes
     /// `sp.delete` values at `sp.pos` and puts there the values of `src`

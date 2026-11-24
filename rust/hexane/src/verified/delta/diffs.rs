@@ -1,6 +1,6 @@
 //! The differences a delta column keeps, as a specification: the runs
-//! that a column's iterator gives (`VerifiedDeltaIter::next_run`,
-//! `VerifiedDeltaIter::runs`) are said in them.
+//! that a column's iterator gives (`DeltaIter::next_run`,
+//! `DeltaIter::runs`) are said in them.
 //!
 //! A delta column keeps of each number its difference from the last
 //! number before it (`delta_prefix`; nulls are passed over), and of a

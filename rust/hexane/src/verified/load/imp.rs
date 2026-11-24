@@ -34,7 +34,7 @@ pub(super) type KLoad<'a, V, C, K> = LoadCore<
     <<V as seal::Sealed<C>>::E as Loading<'a, <V as seal::Sealed<C>>::X>>::Ld,
 >;
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedLoadIter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> ColumnLoadIter<'a, V, C, K> {
     pub(super) fn try_next_run_impl(&mut self) -> (r: Result<Option<Run<Get<'a, V>>>, PackError>)
         requires
             old(self).wf(),
@@ -71,7 +71,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedLoadIter<'a, V, C, K>
         r
     }
 
-    pub(super) fn finalize_impl(self) -> (r: Result<VerifiedColumn<V, C, K>, PackError>)
+    pub(super) fn finalize_impl(self) -> (r: Result<Column<V, C, K>, PackError>)
         requires
             self.wf(),
         ensures
@@ -82,19 +82,19 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedLoadIter<'a, V, C, K>
                 Some((len, v)) => r matches Ok(c) && c@ == Seq::new(len as nat, |_i: int| v.sv()),
                 None => {
                     &&& r matches Ok(c) ==> {
-                        &&& VerifiedColumn::<V, C>::valid(self.bytes())
-                        &&& c@ == VerifiedColumn::<V, C>::values(self.bytes())
+                        &&& Column::<V, C>::valid(self.bytes())
+                        &&& c@ == Column::<V, C>::values(self.bytes())
                         &&& self.length() matches Some(len) ==> c@.len() == len
                     }
-                    &&& !self.failed() && VerifiedColumn::<V, C>::loadable(self.bytes()) && K::keeps(
-                        VerifiedColumn::<V, C>::values(self.bytes()),
-                    ) && (self.length() matches Some(len) ==> VerifiedColumn::<V, C>::values(self.bytes()).len()
+                    &&& !self.failed() && Column::<V, C>::loadable(self.bytes()) && K::keeps(
+                        Column::<V, C>::values(self.bytes()),
+                    ) && (self.length() matches Some(len) ==> Column::<V, C>::values(self.bytes()).len()
                         == len) ==> r is Ok
                 },
             },
     {
         if let Some((value, len)) = self.fill {
-            let c = VerifiedColumn::<V, C, K>::filled(len, value, self.max_segments);
+            let c = Column::<V, C, K>::filled(len, value, self.max_segments);
             return Ok(c);
         }
         let ghost (data, p) = (self.core.ld.data(), self.core.ld.pulled());
@@ -108,7 +108,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedLoadIter<'a, V, C, K>
         }
         match self.core.finish::<K::I>(self.max_segments, self.length, i64::MIN, i64::MAX) {
             Ok(core) => {
-                let c = VerifiedColumn { core };
+                let c = Column { core };
                 proof {
                     // the column begins with what was given
                     let n = p.len() as int;
@@ -127,8 +127,8 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedLoadIter<'a, V, C, K>
     }
 }
 
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
-    pub(super) fn load_iter_impl<'a, F: MaybeFill<Get<'a, V>>>(bytes: &'a [u8], opts: LoadOpts<F>) -> (r: VerifiedLoadIter<'a, V, C, K>)
+impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
+    pub(super) fn load_iter_impl<'a, F: MaybeFill<Get<'a, V>>>(bytes: &'a [u8], opts: LoadOpts<F>) -> (r: ColumnLoadIter<'a, V, C, K>)
         requires
             opts.max_segments() >= 2,
         ensures
@@ -151,7 +151,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             }
         }
         let core = LoadCore::start(bytes, max_segments);
-        let r: VerifiedLoadIter<'a, V, C, K> = VerifiedLoadIter { core, fill: fill_run, emitted: false, length, max_segments };
+        let r: ColumnLoadIter<'a, V, C, K> = ColumnLoadIter { core, fill: fill_run, emitted: false, length, max_segments };
         proof {
             <Get<'a, V> as VGet>::lemma_svs(r.core.ld.pulled());
         }

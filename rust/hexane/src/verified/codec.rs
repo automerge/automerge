@@ -3,7 +3,7 @@
 //! A column writes its numbers (run headers, null counts, and the
 //! integers it holds) with a codec. [`Column`](crate::Column) reaches
 //! one through the [`Codec`](crate::Codec) trait, of which Verus sees
-//! nothing. [`VCodec`] is that trait with specifications: what the bytes
+//! nothing. [`Codec`] is that trait with specifications: what the bytes
 //! of a number are, that no two numbers' bytes start the same string, and
 //! that the reading and writing functions read and write those bytes.
 //! It is *proved* for [`Leb128`](crate::Leb128), from the verified LEB128
@@ -32,7 +32,7 @@ use imp::*;
 
 verus! {
 
-/// A codec for the numbers of a [`VerifiedColumn`](super::VerifiedColumn),
+/// A codec for the numbers of a [`Column`](super::Column),
 /// with what it does specified and proved. The codecs are this crate's
 /// ([`Leb128`](crate::Leb128), and `Bijou64` with the `bijou64`
 /// feature) and a client's own, as a client of the old API may write a
@@ -46,7 +46,7 @@ verus! {
 /// whose bytes start `data`, and fails where none do; that a length is
 /// that of the number a read would read; and that `rewrite_header`
 /// replaces a header with another as it says.
-pub trait VCodec {
+pub trait Codec {
     /// The bytes of an unsigned number.
     spec fn enc_u(n: u64) -> Seq<u8>;
 
@@ -159,7 +159,7 @@ pub trait VCodec {
 #[inline(always)]
 pub fn ulebsize(n: u64) -> (r: u64)
     ensures
-        r == <Leb128 as VCodec>::enc_u(n).len(),
+        r == <Leb128 as Codec>::enc_u(n).len(),
 {
     imp::ulebsize_impl(n)
 }
@@ -170,7 +170,7 @@ pub fn ulebsize(n: u64) -> (r: u64)
 #[inline(always)]
 pub fn lebsize(n: i64) -> (r: u64)
     ensures
-        r == <Leb128 as VCodec>::enc_i(n).len(),
+        r == <Leb128 as Codec>::enc_i(n).len(),
 {
     imp::lebsize_impl(n)
 }

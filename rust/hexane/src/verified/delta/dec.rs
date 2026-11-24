@@ -1,4 +1,4 @@
-//! The decoder of a saved delta column ([`VerifiedDeltaDecoder`]),
+//! The decoder of a saved delta column ([`DeltaDecoder`]),
 //! verified with Verus.
 //!
 //! It reads the differences a saved delta column holds with the slab
@@ -12,7 +12,7 @@
 //! differences of the column (`deltas`), as the runs of a column's
 //! iterator are.
 //!
-//! [`next_delta_run_max`]: VerifiedDeltaDecoder::next_delta_run_max
+//! [`next_delta_run_max`]: DeltaDecoder::next_delta_run_max
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each
@@ -24,9 +24,9 @@
 
 #[cfg(verus_keep_ghost)]
 use super::{all_fit, deltas, vals};
-use super::{DIt, DKind, VDeltaValue, DE, DX};
+use super::{DIt, DKind, DeltaValue, DE, DX};
 #[cfg(verus_keep_ghost)]
-use super::{VDelta, VerifiedDeltaColumn};
+use super::{DeltaColumn, VDelta};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{ReadsAgree, Slabs};
 #[cfg(verus_keep_ghost)]
@@ -40,7 +40,7 @@ use crate::iter_core::past;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::Decode;
 use crate::iter_core::Decoders;
-use crate::verified::codec::VCodec;
+use crate::verified::codec::Codec;
 #[cfg(verus_keep_ghost)]
 use crate::verified::head_run_max;
 #[cfg(verus_keep_ghost)]
@@ -66,13 +66,13 @@ verus! {
 /// standard library's iterator functions speak of `remaining()`, which
 /// is `rest()`. A decoder made of bytes has all the values to give that
 /// the bytes are the saved column of
-/// (`VerifiedDeltaColumn::values`), which are the values of the column
+/// (`DeltaColumn::values`), which are the values of the column
 /// or the encoder that saved them.
 ///
 /// It keeps the sum of the differences it has passed, wrapping as an
 /// `i64` does; that no value of a saved column is a wrapped one is
 /// part of what `valid` says of the bytes.
-pub struct VerifiedDeltaDecoder<'a, T: VDeltaValue<C>, C: VCodec = Leb128> {
+pub struct DeltaDecoder<'a, T: DeltaValue<C>, C: Codec = Leb128> {
     d: <DX<T, C> as Decoders<'a>>::D,
     /// The sum of the differences passed, wrapping as an `i64` does.
     running: i64,
@@ -82,7 +82,7 @@ pub struct VerifiedDeltaDecoder<'a, T: VDeltaValue<C>, C: VCodec = Leb128> {
     at: Ghost<int>,
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaDecoder<'a, T, C> {
     /// The values of the whole saved column that the decoder reads.
     pub closed spec fn column(&self) -> Seq<T> {
         vals::<T>(rz(0, self.ds@))
@@ -119,11 +119,11 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
     #[inline(always)]
     pub fn new(bytes: &'a [u8]) -> (r: Self)
         requires
-            VerifiedDeltaColumn::<T, C>::valid(bytes@),
+            DeltaColumn::<T, C>::valid(bytes@),
         ensures
-            r.column() == VerifiedDeltaColumn::<T, C>::values(bytes@),
+            r.column() == DeltaColumn::<T, C>::values(bytes@),
             r.pos() == 0,
-            r.rest() == VerifiedDeltaColumn::<T, C>::values(bytes@),
+            r.rest() == DeltaColumn::<T, C>::values(bytes@),
     {
         Self::new_impl(bytes)
     }
@@ -139,15 +139,15 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
     /// the type's, which is what is proved: bytes that are taken are a
     /// saved delta column. It is not said that every saved delta column
     /// is taken, as it is not said of
-    /// [`load`](crate::verified::VerifiedDeltaColumn::load).
+    /// [`load`](crate::verified::DeltaColumn::load).
     #[inline(always)]
     pub fn try_new(bytes: &'a [u8]) -> (r: Result<Self, PackError>)
         ensures
             r matches Ok(d) ==> {
-                &&& VerifiedDeltaColumn::<T, C>::valid(bytes@)
-                &&& d.column() == VerifiedDeltaColumn::<T, C>::values(bytes@)
+                &&& DeltaColumn::<T, C>::valid(bytes@)
+                &&& d.column() == DeltaColumn::<T, C>::values(bytes@)
                 &&& d.pos() == 0
-                &&& d.rest() == VerifiedDeltaColumn::<T, C>::values(bytes@)
+                &&& d.rest() == DeltaColumn::<T, C>::values(bytes@)
             },
     {
         Self::try_new_impl(bytes)
@@ -207,7 +207,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, T: VDeltaValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for VerifiedDeltaDecoder<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> vstd::std_specs::iter::IteratorSpecImpl for DeltaDecoder<'a, T, C> {
     /// The decoder keeps to what Verus asks of an iterator: `next`
     /// gives `remaining()`, one value after another, and then `None`.
     open spec fn obeys_prophetic_iter_laws(&self) -> bool {
@@ -235,7 +235,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl f
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> Iterator for VerifiedDeltaDecoder<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> Iterator for DeltaDecoder<'a, T, C> {
     type Item = T;
 
     /// The next value, if one is left.
@@ -282,7 +282,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> Iterator for VerifiedDeltaDecoder<'a, T, 
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> Clone for VerifiedDeltaDecoder<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> Clone for DeltaDecoder<'a, T, C> {
     /// A decoder of its own of the same column, at the same place.
     #[inline(always)]
     fn clone(&self) -> (r: Self)

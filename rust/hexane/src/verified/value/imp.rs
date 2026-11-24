@@ -26,7 +26,7 @@ verus! {
 
 /// Where `data` starts with the bytes of the base value `b`, a value
 /// whose bytes start `data` has the base value `b`.
-pub(super) proof fn lemma_base_front<T: VNewtype, C: VCodec>(data: Seq<u8>, n: int, b: T::Base)
+pub(super) proof fn lemma_base_front<T: VNewtype, C: Codec>(data: Seq<u8>, n: int, b: T::Base)
     requires
         0 <= n <= data.len(),
         data.take(n) == T::Base::enc::<C>(b),
@@ -55,7 +55,7 @@ pub struct VOps<T, C>(PhantomData<(T, C)>);
 #[verifier::reject_recursive_types(C)]
 pub struct VWrite<T, C>(PhantomData<(T, C)>);
 
-impl<'a, T: VPack, C: VCodec> RleOps<'a> for VOps<T, C> {
+impl<'a, T: RleValue, C: Codec> RleOps<'a> for VOps<T, C> {
     type V = T;
 
     open spec fn nullable() -> bool {
@@ -153,7 +153,7 @@ impl<'a, T: VPack, C: VCodec> RleOps<'a> for VOps<T, C> {
     }
 }
 
-impl<'a, T: VPack, C: VCodec> WriteOps<'a> for VWrite<T, C> {
+impl<'a, T: RleValue, C: Codec> WriteOps<'a> for VWrite<T, C> {
     type R = VOps<T, C>;
 
     type Cow = T;
@@ -199,7 +199,7 @@ impl<'a, T: VPack, C: VCodec> WriteOps<'a> for VWrite<T, C> {
     }
 }
 
-impl<'s, T: VPack, C: VCodec> Lift<'s> for VWrite<T, C> {
+impl<'s, T: RleValue, C: Codec> Lift<'s> for VWrite<T, C> {
     type W = VWrite<T, C>;
 
     open spec fn lift(v: T) -> T {
@@ -236,7 +236,7 @@ pub struct VOptOps<T, C>(PhantomData<(T, C)>);
 #[verifier::reject_recursive_types(C)]
 pub struct VOptWrite<T, C>(PhantomData<(T, C)>);
 
-impl<'a, T: VPack, C: VCodec> RleOps<'a> for VOptOps<T, C> {
+impl<'a, T: RleValue, C: Codec> RleOps<'a> for VOptOps<T, C> {
     type V = Option<T>;
 
     open spec fn nullable() -> bool {
@@ -369,7 +369,7 @@ impl<'a, T: VPack, C: VCodec> RleOps<'a> for VOptOps<T, C> {
     }
 }
 
-impl<'a, T: VPack, C: VCodec> WriteOps<'a> for VOptWrite<T, C> {
+impl<'a, T: RleValue, C: Codec> WriteOps<'a> for VOptWrite<T, C> {
     type R = VOptOps<T, C>;
 
     type Cow = Option<T>;
@@ -423,7 +423,7 @@ impl<'a, T: VPack, C: VCodec> WriteOps<'a> for VOptWrite<T, C> {
     }
 }
 
-impl<'s, T: VPack, C: VCodec> Lift<'s> for VOptWrite<T, C> {
+impl<'s, T: RleValue, C: Codec> Lift<'s> for VOptWrite<T, C> {
     type W = VOptWrite<T, C>;
 
     open spec fn lift(v: Option<T>) -> Option<T> {
@@ -450,7 +450,7 @@ impl<'s, T: VPack, C: VCodec> Lift<'s> for VOptWrite<T, C> {
 
 /// No header and no count of a column of plain values is longer than ten
 /// bytes, and its values are at most ten bytes each.
-pub(crate) proof fn lemma_plain_sizes<T: VPack, C: VCodec>(vs: Seq<T>)
+pub(crate) proof fn lemma_plain_sizes<T: RleValue, C: Codec>(vs: Seq<T>)
     ensures
         heads_bound::<VOps<T, C>>(10),
         encs::<VOps<T, C>>(vs).len() <= 10 * vs.len(),
@@ -470,7 +470,7 @@ pub(crate) proof fn lemma_plain_sizes<T: VPack, C: VCodec>(vs: Seq<T>)
 
 /// The same, of a column of values that may be null (a null counts as
 /// one byte here, though it is none in the column).
-pub(crate) proof fn lemma_opt_sizes<T: VPack, C: VCodec>(vs: Seq<Option<T>>)
+pub(crate) proof fn lemma_opt_sizes<T: RleValue, C: Codec>(vs: Seq<Option<T>>)
     ensures
         heads_bound::<VOptOps<T, C>>(10),
         encs::<VOptOps<T, C>>(vs).len() <= 10 * vs.len(),
@@ -491,19 +491,19 @@ pub(crate) proof fn lemma_opt_sizes<T: VPack, C: VCodec>(vs: Seq<Option<T>>)
 }
 
 #[inline(always)]
-pub(super) fn vpack_unpack_u64<C: VCodec>(data: &[u8]) -> (r: (usize, u64))
+pub(super) fn vpack_unpack_u64<C: Codec>(data: &[u8]) -> (r: (usize, u64))
     requires
-        exists|v: u64| (#[trigger] <u64 as VPack>::enc::<C>(v)).is_prefix_of(data@),
+        exists|v: u64| (#[trigger] <u64 as RleValue>::enc::<C>(v)).is_prefix_of(data@),
     ensures
         r.0 <= data.len(),
-        data@.take(r.0 as int) == <u64 as VPack>::enc::<C>(r.1),
+        data@.take(r.0 as int) == <u64 as RleValue>::enc::<C>(r.1),
     no_unwind
 {
     match C::read_u_opt(data) {
         Some(r) => r,
         None => {
             proof {
-                let v = choose|v: u64| (#[trigger] <u64 as VPack>::enc::<C>(v)).is_prefix_of(data@);
+                let v = choose|v: u64| (#[trigger] <u64 as RleValue>::enc::<C>(v)).is_prefix_of(data@);
                 assert(C::enc_u(v).is_prefix_of(data@));
             }
             (0, 0)
@@ -512,10 +512,10 @@ pub(super) fn vpack_unpack_u64<C: VCodec>(data: &[u8]) -> (r: (usize, u64))
 }
 
 #[inline(always)]
-pub(super) fn vpack_pack_u64<C: VCodec>(v: &u64, buf: &mut Vec<u8>) -> (n: usize)
+pub(super) fn vpack_pack_u64<C: Codec>(v: &u64, buf: &mut Vec<u8>) -> (n: usize)
     ensures
-        final(buf)@ == old(buf)@ + <u64 as VPack>::enc::<C>(*v),
-        n == <u64 as VPack>::enc::<C>(*v).len(),
+        final(buf)@ == old(buf)@ + <u64 as RleValue>::enc::<C>(*v),
+        n == <u64 as RleValue>::enc::<C>(*v).len(),
 {
     let pos = buf.len();
     C::put_u(*v, buf);
@@ -523,19 +523,19 @@ pub(super) fn vpack_pack_u64<C: VCodec>(v: &u64, buf: &mut Vec<u8>) -> (n: usize
 }
 
 #[inline(always)]
-pub(super) fn vpack_unpack_i64<C: VCodec>(data: &[u8]) -> (r: (usize, i64))
+pub(super) fn vpack_unpack_i64<C: Codec>(data: &[u8]) -> (r: (usize, i64))
     requires
-        exists|v: i64| (#[trigger] <i64 as VPack>::enc::<C>(v)).is_prefix_of(data@),
+        exists|v: i64| (#[trigger] <i64 as RleValue>::enc::<C>(v)).is_prefix_of(data@),
     ensures
         r.0 <= data.len(),
-        data@.take(r.0 as int) == <i64 as VPack>::enc::<C>(r.1),
+        data@.take(r.0 as int) == <i64 as RleValue>::enc::<C>(r.1),
     no_unwind
 {
     match C::read_i_opt(data) {
         Some(r) => r,
         None => {
             proof {
-                let v = choose|v: i64| (#[trigger] <i64 as VPack>::enc::<C>(v)).is_prefix_of(data@);
+                let v = choose|v: i64| (#[trigger] <i64 as RleValue>::enc::<C>(v)).is_prefix_of(data@);
                 assert(C::enc_i(v).is_prefix_of(data@));
             }
             (0, 0)
@@ -544,20 +544,20 @@ pub(super) fn vpack_unpack_i64<C: VCodec>(data: &[u8]) -> (r: (usize, i64))
 }
 
 #[inline(always)]
-pub(super) fn vpack_pack_i64<C: VCodec>(v: &i64, buf: &mut Vec<u8>) -> (n: usize)
+pub(super) fn vpack_pack_i64<C: Codec>(v: &i64, buf: &mut Vec<u8>) -> (n: usize)
     ensures
-        final(buf)@ == old(buf)@ + <i64 as VPack>::enc::<C>(*v),
-        n == <i64 as VPack>::enc::<C>(*v).len(),
+        final(buf)@ == old(buf)@ + <i64 as RleValue>::enc::<C>(*v),
+        n == <i64 as RleValue>::enc::<C>(*v).len(),
 {
     let pos = buf.len();
     C::put_i(*v, buf);
     buf.len() - pos
 }
 
-pub(super) proof fn vpack_lemma_enc_t<T: VNewtype, C: VCodec>(v: T, w: T, s: Seq<u8>, t: Seq<u8>)
+pub(super) proof fn vpack_lemma_enc_t<T: VNewtype, C: Codec>(v: T, w: T, s: Seq<u8>, t: Seq<u8>)
     ensures
-        0 < <T as VPack>::enc::<C>(v).len() <= 10,
-        <T as VPack>::enc::<C>(v) + s == <T as VPack>::enc::<C>(w) + t ==> v == w,
+        0 < <T as RleValue>::enc::<C>(v).len() <= 10,
+        <T as RleValue>::enc::<C>(v) + s == <T as RleValue>::enc::<C>(w) + t ==> v == w,
 {
     T::Base::lemma_enc::<C>(T::base(v), T::base(w), s, t);
     T::lemma_base(v, w);
@@ -565,7 +565,7 @@ pub(super) proof fn vpack_lemma_enc_t<T: VNewtype, C: VCodec>(v: T, w: T, s: Seq
 
 pub(super) proof fn vpack_lemma_num_t<T: VNewtype>(v: T, w: T)
     ensures
-        <T as VPack>::num(v) == <T as VPack>::num(w) ==> v == w,
+        <T as RleValue>::num(v) == <T as RleValue>::num(w) ==> v == w,
 {
     T::Base::lemma_num(T::base(v), T::base(w));
     T::lemma_base(v, w);
@@ -583,11 +583,11 @@ pub(super) fn vpack_same_t<T: VNewtype>(a: &T, b: &T) -> (r: bool)
 }
 
 #[inline(always)]
-pub(super) fn vpack_try_unpack_t<T: VNewtype, C: VCodec>(data: &[u8]) -> (r: Result<(usize, T), PackError>)
+pub(super) fn vpack_try_unpack_t<T: VNewtype, C: Codec>(data: &[u8]) -> (r: Result<(usize, T), PackError>)
     ensures
         match r {
-            Ok((n, v)) => n <= data.len() && data@.take(n as int) == <T as VPack>::enc::<C>(v),
-            Err(_) => forall|v: T| !(#[trigger] <T as VPack>::enc::<C>(v)).is_prefix_of(data@),
+            Ok((n, v)) => n <= data.len() && data@.take(n as int) == <T as RleValue>::enc::<C>(v),
+            Err(_) => forall|v: T| !(#[trigger] <T as RleValue>::enc::<C>(v)).is_prefix_of(data@),
         },
 {
     match T::Base::try_unpack::<C>(data) {
@@ -605,22 +605,22 @@ pub(super) fn vpack_try_unpack_t<T: VNewtype, C: VCodec>(data: &[u8]) -> (r: Res
 }
 
 #[inline(always)]
-pub(super) fn vpack_unpack_t<T: VNewtype, C: VCodec>(data: &[u8]) -> (r: (usize, T))
+pub(super) fn vpack_unpack_t<T: VNewtype, C: Codec>(data: &[u8]) -> (r: (usize, T))
     requires
-        exists|v: T| (#[trigger] <T as VPack>::enc::<C>(v)).is_prefix_of(data@),
+        exists|v: T| (#[trigger] <T as RleValue>::enc::<C>(v)).is_prefix_of(data@),
     ensures
         r.0 <= data.len(),
-        data@.take(r.0 as int) == <T as VPack>::enc::<C>(r.1),
+        data@.take(r.0 as int) == <T as RleValue>::enc::<C>(r.1),
     no_unwind
 {
     proof {
-        let v = choose|v: T| (#[trigger] <T as VPack>::enc::<C>(v)).is_prefix_of(data@);
+        let v = choose|v: T| (#[trigger] <T as RleValue>::enc::<C>(v)).is_prefix_of(data@);
         assert(T::Base::enc::<C>(T::base(v)).is_prefix_of(data@));
     }
     let (n, b) = T::Base::unpack::<C>(data);
     proof {
         lemma_base_front::<T, C>(data@, n as int, b);
-        let v = choose|v: T| (#[trigger] <T as VPack>::enc::<C>(v)).is_prefix_of(data@);
+        let v = choose|v: T| (#[trigger] <T as RleValue>::enc::<C>(v)).is_prefix_of(data@);
         assert(T::base(v) == b);
     }
     (n, T::from_valid_base(b))

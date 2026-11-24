@@ -33,7 +33,7 @@ use crate::fenwick::total;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::vals_of;
 use crate::iter_core::Decoders;
-use crate::verified::codec::VCodec;
+use crate::verified::codec::Codec;
 use crate::Leb128;
 use std::ops::{Bound, RangeBounds};
 use vstd::prelude::*;
@@ -220,7 +220,7 @@ pub(super) proof fn lemma_hits_finds<T: VDelta>(ds: Seq<Option<i64>>, lo: Bound<
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedFindByRange<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> FindByRange<'a, T, C> {
     /// The search, where there is one, is a search of the slabs that
     /// has given every match before the place it has come to, a place
     /// in the column or its end; and the sums of the column's
@@ -247,7 +247,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedFindByRange<'a, T, C> {
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedFindByRange<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> FindByRange<'a, T, C> {
     pub(super) fn next_impl(&mut self) -> (r: Option<usize>)
         ensures
             // what Verus asks of every iterator's `next`
@@ -293,20 +293,20 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedFindByRange<'a, T, C> {
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedFindByRange<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> FindByRange<'a, T, C> {
     pub(super) fn default_impl() -> (r: Self)
         ensures
             r.finds() == Seq::<usize>::empty(),
     {
         let slabs: &'a [Slab<<DE<T, C> as Slabs>::Tail>] = &[];
-        VerifiedFindByRange { slabs, find: None }
+        FindByRange { slabs, find: None }
     }
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// A finder of the places whose values are within the bounds `lo`
     /// and `hi`.
-    pub(super) fn find_within(&self, lo: Bound<&T>, hi: Bound<&T>) -> (r: VerifiedFindByRange<'_, T, C>)
+    pub(super) fn find_within(&self, lo: Bound<&T>, hi: Bound<&T>) -> (r: FindByRange<'_, T, C>)
         ensures
             r.finds() == delta_finds::<T>(self@, lo, hi, 0),
     {
@@ -320,7 +320,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
                     lemma_hits_finds::<T>(self.kept(), lo, hi, 1, 0, 0);
                     lemma_hits_none(self.kept(), 1, 0, 0);
                 }
-                VerifiedFindByRange::default()
+                FindByRange::default()
             },
             Some((a, b)) => {
                 let (slabs, ix) = self.core.delta_parts();
@@ -339,19 +339,19 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
                     lemma_hits_finds::<T>(self.kept(), lo, hi, a, b, 0);
                 }
                 let fd = d_find_new::<DX<T, C>, DB<T, C>>(ix, a, b, slabs);
-                VerifiedFindByRange { slabs, find: Some(fd) }
+                FindByRange { slabs, find: Some(fd) }
             },
         }
     }
 
-    pub(super) fn find_by_range_impl<R: RangeBounds<T>>(&self, range: R) -> (r: VerifiedFindByRange<'_, T, C>)
+    pub(super) fn find_by_range_impl<R: RangeBounds<T>>(&self, range: R) -> (r: FindByRange<'_, T, C>)
         ensures
             r.finds() == delta_finds::<T>(self@, range.spec_start_bound(), range.spec_end_bound(), 0),
     {
         self.find_within(range.start_bound(), range.end_bound())
     }
 
-    pub(super) fn find_by_value_impl(&self, target: T) -> (r: VerifiedFindByRange<'_, T, C>)
+    pub(super) fn find_by_value_impl(&self, target: T) -> (r: FindByRange<'_, T, C>)
         ensures
             r.finds() == delta_finds::<T>(self@, Bound::Included(&target), Bound::Included(&target), 0),
     {

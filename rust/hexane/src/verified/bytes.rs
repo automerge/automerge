@@ -28,11 +28,11 @@
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
-use super::codec::VCodec;
+use super::codec::Codec;
 #[cfg(verus_keep_ghost)]
 use super::model::Model;
 use super::model::Plain;
-use super::{seal, Owned, VForm, VGet, VSpec, VValue};
+use super::{seal, ColumnValueRef, Owned, VForm, VGet, VSpec};
 #[cfg(verus_keep_ghost)]
 use crate::rle::lift::Lift;
 #[cfg(verus_keep_ghost)]
@@ -66,7 +66,7 @@ verus! {
 
 /// The bytes of the byte string `b` under codec `C`: its length, then
 /// itself.
-pub open spec fn enc_bytes<C: VCodec>(b: Seq<u8>) -> Seq<u8> {
+pub open spec fn enc_bytes<C: Codec>(b: Seq<u8>) -> Seq<u8> {
     C::enc_u(b.len() as u64) + b
 }
 
@@ -231,7 +231,7 @@ pub open spec fn total_len_opt(vs: Seq<Option<Seq<u8>>>) -> nat
     }
 }
 
-impl<C: VCodec> VValue<C> for Vec<u8> {
+impl<C: Codec> ColumnValueRef<C> for Vec<u8> {
     /// The byte strings' own bytes, and for each a length, a header and
     /// a count of ten bytes each.
     open spec fn size_bound(vs: Seq<Seq<u8>>) -> nat {
@@ -256,7 +256,7 @@ impl<C: VCodec> VValue<C> for Vec<u8> {
     }
 }
 
-impl<C: VCodec> VValue<C> for Option<Vec<u8>> {
+impl<C: Codec> ColumnValueRef<C> for Option<Vec<u8>> {
     /// The byte strings' own bytes, and for each value a length, a
     /// header and a count of ten bytes each.
     open spec fn size_bound(vs: Seq<Option<Seq<u8>>>) -> nat {

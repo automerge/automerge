@@ -5,7 +5,7 @@
 //! column's codec. [`Column`](crate::Column) reaches the codec through a
 //! trusted bridge (`bool_wire::Counts`). Here the same contract
 //! ([`CountOps`](crate::bool_wire::CountOps)) is *proved*, for every
-//! codec of the verified API ([`VCodec`]).
+//! codec of the verified API ([`Codec`]).
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each
@@ -15,7 +15,7 @@
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
-use super::codec::VCodec;
+use super::codec::Codec;
 #[cfg(verus_keep_ghost)]
 use crate::bool_wire::{CountOps, CountsOf};
 #[allow(unused_imports)]

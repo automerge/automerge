@@ -6,24 +6,24 @@
 //! other as a byte that says how many bytes follow and then those, the
 //! most significant first: nine bytes at most. A signed number is written
 //! as the unsigned one that counts it in the order 0, −1, 1, −2, 2, …
-//! [`VCodec`] is *proved* here for [`Bijou64`], from the verified bijou64
+//! [`Codec`] is *proved* here for [`Bijou64`], from the verified bijou64
 //! codec in `bijou64`: what the bytes of a number are, that no two
 //! numbers' bytes start the same string, and that the reading and writing
 //! functions read and write those bytes. Every column type of the
-//! verified API is written for any [`VCodec`], so each is proved for
+//! verified API is written for any [`Codec`], so each is proved for
 //! this codec as it is for [`Leb128`](crate::Leb128), with nothing said
 //! twice.
 //!
-//! `use hexane::verified::bijou::VerifiedColumn` gives the API of
-//! [`VerifiedColumn`](super::VerifiedColumn) with the [`Bijou64`] wire
+//! `use hexane::verified::bijou::Column` gives the API of
+//! [`Column`](super::Column) with the [`Bijou64`] wire
 //! format, so a consuming crate picks its codec with one import:
 //!
 //! ```
-//! use hexane::verified::bijou::VerifiedColumn;
+//! use hexane::verified::bijou::Column;
 //!
-//! let mut col = VerifiedColumn::<u32>::new();
+//! let mut col = Column::<u32>::new();
 //! col.push(300u32);
-//! let col = VerifiedColumn::<u32>::load(&col.save()).unwrap();
+//! let col = Column::<u32>::load(&col.save()).unwrap();
 //! assert_eq!(col.get(0), Some(300));
 //! ```
 //!
@@ -39,7 +39,7 @@
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
-use super::codec::VCodec;
+use super::codec::Codec;
 use super::value::refused;
 
 // spec functions and lemmas exist only when Verus compiles the crate
@@ -54,34 +54,34 @@ use imp::*;
 
 verus! {} // verus!
 
-/// A [`VerifiedColumn`](super::VerifiedColumn) whose numbers are written
+/// A [`Column`](super::Column) whose numbers are written
 /// with [`Bijou64`].
-pub type VerifiedColumn<V> = super::VerifiedColumn<V, Bijou64>;
+pub type Column<V> = super::Column<V, Bijou64>;
 
-/// A [`VerifiedDeltaColumn`](super::VerifiedDeltaColumn) whose numbers are
+/// A [`DeltaColumn`](super::DeltaColumn) whose numbers are
 /// written with [`Bijou64`].
-pub type VerifiedDeltaColumn<T> = super::VerifiedDeltaColumn<T, Bijou64>;
+pub type DeltaColumn<T> = super::DeltaColumn<T, Bijou64>;
 
-/// A [`VerifiedPrefixColumn`](super::VerifiedPrefixColumn) whose numbers
+/// A [`PrefixColumn`](super::PrefixColumn) whose numbers
 /// are written with [`Bijou64`].
-pub type VerifiedPrefixColumn<V> = super::VerifiedPrefixColumn<V, Bijou64>;
+pub type PrefixColumn<V> = super::PrefixColumn<V, Bijou64>;
 
-/// A [`VerifiedAccColumn`](super::VerifiedAccColumn) whose numbers are
+/// A [`AccColumn`](super::AccColumn) whose numbers are
 /// written with [`Bijou64`].
-pub type VerifiedAccColumn<V> = super::VerifiedAccColumn<V, Bijou64>;
+pub type AccColumn<V> = super::AccColumn<V, Bijou64>;
 
-/// A [`VerifiedEncoder`](super::VerifiedEncoder) that writes numbers with
+/// A [`Encoder`](super::Encoder) that writes numbers with
 /// [`Bijou64`].
-pub type VerifiedEncoder<'a, V> = super::VerifiedEncoder<'a, V, Bijou64>;
+pub type Encoder<'a, V> = super::Encoder<'a, V, Bijou64>;
 
-/// A [`VerifiedDecoder`](super::VerifiedDecoder) that reads numbers
+/// A [`Decoder`](super::Decoder) that reads numbers
 /// written with [`Bijou64`].
-pub type VerifiedDecoder<'a, V> = super::VerifiedDecoder<'a, V, Bijou64>;
+pub type Decoder<'a, V> = super::Decoder<'a, V, Bijou64>;
 
-/// A [`VerifiedDeltaEncoder`](super::VerifiedDeltaEncoder) that writes
+/// A [`DeltaEncoder`](super::DeltaEncoder) that writes
 /// numbers with [`Bijou64`].
-pub type VerifiedDeltaEncoder<'a, T> = super::VerifiedDeltaEncoder<'a, T, Bijou64>;
+pub type DeltaEncoder<'a, T> = super::DeltaEncoder<'a, T, Bijou64>;
 
-/// A [`VerifiedDeltaDecoder`](super::VerifiedDeltaDecoder) that reads
+/// A [`DeltaDecoder`](super::DeltaDecoder) that reads
 /// numbers written with [`Bijou64`].
-pub type VerifiedDeltaDecoder<'a, T> = super::VerifiedDeltaDecoder<'a, T, Bijou64>;
+pub type DeltaDecoder<'a, T> = super::DeltaDecoder<'a, T, Bijou64>;

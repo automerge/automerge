@@ -29,12 +29,12 @@ use crate::delta::stream::values_too_wide;
 use crate::delta::stream::{lemma_vals_run, span_ok, vhigh, vlow, wide};
 #[cfg(verus_keep_ghost)]
 use crate::rle::state::copies;
-use crate::verified::codec::VCodec;
+use crate::verified::codec::Codec;
 #[cfg(verus_keep_ghost)]
 use crate::verified::model::Model;
-use crate::verified::VerifiedEncoderState;
+use crate::verified::EncoderState;
 #[cfg(verus_keep_ghost)]
-use crate::verified::{only, VGet, VSpec, VerifiedColumn};
+use crate::verified::{only, Column, VGet, VSpec};
 use crate::Leb128;
 use std::ops::Range;
 use vstd::prelude::*;
@@ -174,7 +174,7 @@ pub(super) fn is_wide<T: VDelta>() -> (r: bool)
     T::hi() as i128 - T::lo() as i128 > i64::MAX as i128
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoderState<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaEncoderState<'a, T, C> {
     /// The differences given to the encoder underneath.
     pub(super) open spec fn given(&self) -> Seq<Option<i64>> {
         self.s@.map_values(|s: <<T as DKind<C>>::I as VSpec>::S| <T as DKind<C>>::d_of(s))
@@ -200,8 +200,8 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoderState<'a, T, C> {
             forall|buf: Seq<u8>| #[trigger] r.on(buf),
             forall|buf: Seq<u8>| #[trigger] r.before(buf) == buf,
     {
-        let r = VerifiedDeltaEncoderState {
-            s: VerifiedEncoderState::new(),
+        let r = DeltaEncoderState {
+            s: EncoderState::new(),
             abs: 0,
             low: i64::MAX,
             high: i64::MIN,
@@ -467,9 +467,9 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoderState<'a, T, C> {
         requires
             self.on(old(buf)@),
         ensures
-            final(buf)@ == self.before(old(buf)@) + VerifiedDeltaColumn::<T, C>::encoding(self@),
-            VerifiedDeltaColumn::<T, C>::valid(VerifiedDeltaColumn::<T, C>::encoding(self@)),
-            VerifiedDeltaColumn::<T, C>::values(VerifiedDeltaColumn::<T, C>::encoding(self@)) == self@,
+            final(buf)@ == self.before(old(buf)@) + DeltaColumn::<T, C>::encoding(self@),
+            DeltaColumn::<T, C>::valid(DeltaColumn::<T, C>::encoding(self@)),
+            DeltaColumn::<T, C>::values(DeltaColumn::<T, C>::encoding(self@)) == self@,
             delta_span_ok(self@),
     {
         let ghost vals = self.vals@;
@@ -496,7 +496,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoderState<'a, T, C> {
         }
         self.s.finish(buf);
         proof {
-            let e = VerifiedColumn::<<T as DKind<C>>::I, C>::encoding(given);
+            let e = Column::<<T as DKind<C>>::I, C>::encoding(given);
             // the column underneath holds the differences given
             let mv = <DE<T, C> as Model<DX<T, C>>>::values(e);
             let f = |o: <DE<T, C> as Slabs>::V|
@@ -508,20 +508,20 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoderState<'a, T, C> {
                 }
             }
             // and they are read as the values, each one of the type's
-            assert(VerifiedDeltaColumn::<T, C>::saved_kept(e) == vs);
+            assert(DeltaColumn::<T, C>::saved_kept(e) == vs);
             lemma_kept(vals);
-            VerifiedDeltaColumn::<T, C>::lemma_encoding(e);
+            DeltaColumn::<T, C>::lemma_encoding(e);
         }
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaEncoder<'a, T, C> {
     pub(super) fn new_impl() -> (r: Self)
         ensures
             r.wf(),
             r@ == Seq::<T>::empty(),
     {
-        VerifiedDeltaEncoder { data: Vec::new(), state: VerifiedDeltaEncoderState::new() }
+        DeltaEncoder { data: Vec::new(), state: DeltaEncoderState::new() }
     }
 
     #[inline(always)]
@@ -604,16 +604,16 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
         requires
             self.wf(),
         ensures
-            VerifiedDeltaColumn::<T, C>::valid(r@),
-            VerifiedDeltaColumn::<T, C>::values(r@) == self@,
-            r@ == VerifiedDeltaColumn::<T, C>::encoding(self@),
+            DeltaColumn::<T, C>::valid(r@),
+            DeltaColumn::<T, C>::values(r@) == self@,
+            r@ == DeltaColumn::<T, C>::encoding(self@),
             delta_span_ok(self@),
     {
         let ghost vs = self@;
         let mut data = self.data;
         self.state.finish(&mut data);
         proof {
-            assert(data@ =~= VerifiedDeltaColumn::<T, C>::encoding(vs));
+            assert(data@ =~= DeltaColumn::<T, C>::encoding(vs));
         }
         data
     }
@@ -622,9 +622,9 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
         requires
             self.wf(),
         ensures
-            final(out)@ == old(out)@ + VerifiedDeltaColumn::<T, C>::encoding(self@),
-            VerifiedDeltaColumn::<T, C>::valid(VerifiedDeltaColumn::<T, C>::encoding(self@)),
-            VerifiedDeltaColumn::<T, C>::values(VerifiedDeltaColumn::<T, C>::encoding(self@)) == self@,
+            final(out)@ == old(out)@ + DeltaColumn::<T, C>::encoding(self@),
+            DeltaColumn::<T, C>::valid(DeltaColumn::<T, C>::encoding(self@)),
+            DeltaColumn::<T, C>::values(DeltaColumn::<T, C>::encoding(self@)) == self@,
             delta_span_ok(self@),
             r.start == old(out)@.len(),
             r.end == final(out)@.len(),
@@ -647,11 +647,11 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
             final(out)@ == if only(self@, value) {
                 old(out)@
             } else {
-                old(out)@ + VerifiedDeltaColumn::<T, C>::encoding(self@)
+                old(out)@ + DeltaColumn::<T, C>::encoding(self@)
             },
             !only(self@, value) ==> {
-                &&& VerifiedDeltaColumn::<T, C>::valid(VerifiedDeltaColumn::<T, C>::encoding(self@))
-                &&& VerifiedDeltaColumn::<T, C>::values(VerifiedDeltaColumn::<T, C>::encoding(self@)) == self@
+                &&& DeltaColumn::<T, C>::valid(DeltaColumn::<T, C>::encoding(self@))
+                &&& DeltaColumn::<T, C>::values(DeltaColumn::<T, C>::encoding(self@)) == self@
                 &&& delta_span_ok(self@)
             },
             r.start == old(out)@.len(),
@@ -668,10 +668,10 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
         requires
             forall|it: I::IntoIter| #[trigger] (I::into_iter).ensures((iter,), it) ==> delta_iter_fits(it),
         ensures
-            VerifiedDeltaColumn::<T, C>::valid(r@),
-            r@ == VerifiedDeltaColumn::<T, C>::encoding(VerifiedDeltaColumn::<T, C>::values(r@)),
-            delta_span_ok(VerifiedDeltaColumn::<T, C>::values(r@)),
-            gives(iter, |xs: Seq<I::Item>| VerifiedDeltaColumn::<T, C>::values(r@) == xs),
+            DeltaColumn::<T, C>::valid(r@),
+            r@ == DeltaColumn::<T, C>::encoding(DeltaColumn::<T, C>::values(r@)),
+            delta_span_ok(DeltaColumn::<T, C>::values(r@)),
+            gives(iter, |xs: Seq<I::Item>| DeltaColumn::<T, C>::values(r@) == xs),
     {
         let mut enc = Self::new();
         enc.extend(iter);
@@ -687,10 +687,10 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
         ensures
             ({
                 let d = final(out)@.skip(old(out)@.len() as int);
-                let w = VerifiedDeltaColumn::<T, C>::values(d);
+                let w = DeltaColumn::<T, C>::values(d);
                 &&& final(out)@ == old(out)@ + d
-                &&& VerifiedDeltaColumn::<T, C>::valid(d)
-                &&& d == VerifiedDeltaColumn::<T, C>::encoding(w)
+                &&& DeltaColumn::<T, C>::valid(d)
+                &&& d == DeltaColumn::<T, C>::encoding(w)
                 &&& delta_span_ok(w)
                 &&& gives(iter, |xs: Seq<I::Item>| w == xs)
             }),
@@ -698,13 +698,13 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
             r.end == final(out)@.len(),
     {
         let start = out.len();
-        let mut state = VerifiedDeltaEncoderState::<T, C>::new();
+        let mut state = DeltaEncoderState::<T, C>::new();
         state.extend(out, iter);
         let ghost vs = state@;
         state.finish(out);
         proof {
             let d = out@.skip(start as int);
-            assert(d =~= VerifiedDeltaColumn::<T, C>::encoding(vs));
+            assert(d =~= DeltaColumn::<T, C>::encoding(vs));
             assert(out@ =~= old(out)@ + d);
             assert(Seq::<T>::empty() + vs =~= vs);
         }
@@ -717,10 +717,10 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
         ensures
             ({
                 let d = final(out)@.skip(old(out)@.len() as int);
-                let w = VerifiedDeltaColumn::<T, C>::values(d);
+                let w = DeltaColumn::<T, C>::values(d);
                 &&& final(out)@ == old(out)@ + d
-                &&& VerifiedDeltaColumn::<T, C>::valid(d)
-                &&& d == VerifiedDeltaColumn::<T, C>::encoding(w)
+                &&& DeltaColumn::<T, C>::valid(d)
+                &&& d == DeltaColumn::<T, C>::encoding(w)
                 &&& delta_span_ok(w)
                 &&& gives(
                     iter,
@@ -734,7 +734,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
             r.end == final(out)@.len(),
     {
         let start = out.len();
-        let mut state = VerifiedDeltaEncoderState::<T, C>::new();
+        let mut state = DeltaEncoderState::<T, C>::new();
         state.extend(out, iter);
         let ghost vs = state@;
         proof {
@@ -749,8 +749,8 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
                 assert(out@ =~= old(out)@);
                 let d = out@.skip(start as int);
                 assert(d =~= Seq::<u8>::empty());
-                VerifiedDeltaColumn::<T, C>::lemma_no_bytes();
-                VerifiedDeltaColumn::<T, C>::lemma_encoding(d);
+                DeltaColumn::<T, C>::lemma_no_bytes();
+                DeltaColumn::<T, C>::lemma_encoding(d);
                 assert(out@ =~= old(out)@ + d);
             }
             return start..start;
@@ -758,11 +758,11 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
         state.finish(out);
         proof {
             let d = out@.skip(start as int);
-            assert(d =~= VerifiedDeltaColumn::<T, C>::encoding(vs));
+            assert(d =~= DeltaColumn::<T, C>::encoding(vs));
             assert(out@ =~= old(out)@ + d);
             if out@ == old(out)@ {
                 assert(d =~= Seq::<u8>::empty());
-                VerifiedDeltaColumn::<T, C>::lemma_no_bytes();
+                DeltaColumn::<T, C>::lemma_no_bytes();
             }
         }
         start..out.len()
@@ -771,9 +771,9 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
 
 } // verus!
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> std::fmt::Debug for VerifiedDeltaEncoder<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> std::fmt::Debug for DeltaEncoder<'a, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedDeltaEncoder")
+        f.debug_struct("DeltaEncoder")
             .field("len", &self.state.len())
             .field("abs", &self.state.abs)
             .finish()

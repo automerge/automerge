@@ -8,7 +8,7 @@
 //! that on trust. Here the sums are of this crate's integer types
 //! ([`VSum`]), and what the trusted bridge assumes is *proved* of them.
 //!
-//! What a value adds to a sum is an integer (`VSummed::amount`), and
+//! What a value adds to a sum is an integer (`PrefixValue::amount`), and
 //! the sum of some values is the sum of those integers (`summed`): a
 //! mathematical integer, which no arithmetic of a machine type enters.
 //! A column keeps its sums in a machine type all the same, and adds
@@ -27,14 +27,14 @@
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
-use super::codec::VCodec;
+use super::codec::Codec;
 use super::seal;
-use super::value::VPack;
+use super::value::RleValue;
 #[cfg(verus_keep_ghost)]
 use super::Held;
 #[cfg(verus_keep_ghost)]
 use super::VGet;
-use super::{Get, VForm, VSpec, VValue};
+use super::{ColumnValueRef, Get, VForm, VSpec};
 #[cfg(verus_keep_ghost)]
 use crate::attrib::Accumulate;
 #[cfg(verus_keep_ghost)]
@@ -177,8 +177,8 @@ pub trait VSum: Copy + Default + Debug + AddAssign + SubAssign + Add<Output = Se
 /// A type of sums that are never negative: `u64`, `u128` or `usize`.
 /// The sums of values of such a type do not fall as more are added, so
 /// a prefix column of them can be searched by sum
-/// ([`get_index_for_prefix`](super::VerifiedColumn::get_index_for_prefix)).
-pub trait VCount: VSum {
+/// ([`get_index_for_prefix`](super::Column::get_index_for_prefix)).
+pub trait UnsignedPrefix: VSum {
     /// The least sum of the type is zero.
     proof fn lemma_count()
         ensures
@@ -287,7 +287,7 @@ impl VSum for i128 {
 /// checked, and a longer one is: so a type whose `room` is every length
 /// a column can have (`usize::MAX`) is never checked, and a type summed
 /// in a signed type must be one of those.
-pub trait VAmount: VPack {
+pub trait VAmount: RleValue {
     /// The type the sums are kept in.
     type Sum: VSum;
 
@@ -479,7 +479,7 @@ impl VAmount for NonZeroU32 {
 /// its values add to a sum ([`VAmount`]), an `Option` of one, whose
 /// `None` adds nothing, or `bool`, whose `true` adds one to a sum kept
 /// in a `usize`. No other type can implement this trait.
-pub trait VSummed: VSpec + for <'a>VForm<'a> + seal::SummedSeal {
+pub trait PrefixValue: VSpec + for <'a>VForm<'a> + seal::SummedSeal {
     /// The type the sums are kept in.
     type Sum: VSum;
 
@@ -527,7 +527,7 @@ pub trait VSummed: VSpec + for <'a>VForm<'a> + seal::SummedSeal {
     ;
 }
 
-impl<T: VAmount> VSummed for T {
+impl<T: VAmount> PrefixValue for T {
     type Sum = <T as VAmount>::Sum;
 
     open spec fn amount(v: T) -> int {
@@ -561,7 +561,7 @@ impl<T: VAmount> VSummed for T {
     }
 }
 
-impl<T: VAmount> VSummed for Option<T> {
+impl<T: VAmount> PrefixValue for Option<T> {
     type Sum = <T as VAmount>::Sum;
 
     open spec fn amount(v: Option<T>) -> int {
@@ -598,7 +598,7 @@ impl<T: VAmount> VSummed for Option<T> {
     }
 }
 
-impl VSummed for bool {
+impl PrefixValue for bool {
     type Sum = usize;
 
     open spec fn amount(v: bool) -> int {
@@ -638,7 +638,7 @@ impl VSummed for bool {
 
 /// What the values `vs` add up to: an integer, whatever type a column
 /// keeps its sums in.
-pub open spec fn summed<V: VSummed>(vs: Seq<<V as VSpec>::S>) -> int
+pub open spec fn summed<V: PrefixValue>(vs: Seq<<V as VSpec>::S>) -> int
     decreases vs.len(),
 {
     if vs.len() == 0 {
@@ -651,13 +651,13 @@ pub open spec fn summed<V: VSummed>(vs: Seq<<V as VSpec>::S>) -> int
 /// Whether the sum of the first `k` of the values `vs` fits the type
 /// their sums are kept in, for every `k`. A prefix column's values are
 /// always so.
-pub open spec fn sums_fit<V: VSummed>(vs: Seq<<V as VSpec>::S>) -> bool {
+pub open spec fn sums_fit<V: PrefixValue>(vs: Seq<<V as VSpec>::S>) -> bool {
     forall|k: int| 0 <= k <= vs.len() ==> V::Sum::lo() <= #[trigger] summed::<V>(vs.take(k)) <= V::Sum::hi()
 }
 
 /// The sum of two sequences, one after the other, is the sum of their
 /// sums.
-pub proof fn lemma_sum_cat<V: VSummed>(a: Seq<<V as VSpec>::S>, b: Seq<<V as VSpec>::S>)
+pub proof fn lemma_sum_cat<V: PrefixValue>(a: Seq<<V as VSpec>::S>, b: Seq<<V as VSpec>::S>)
     ensures
         summed::<V>(a + b) == summed::<V>(a) + summed::<V>(b),
     decreases b.len(),
@@ -666,7 +666,7 @@ pub proof fn lemma_sum_cat<V: VSummed>(a: Seq<<V as VSpec>::S>, b: Seq<<V as VSp
 }
 
 /// `n` copies of a value add up to `n` times what it adds.
-pub proof fn lemma_sum_run<V: VSummed>(n: nat, x: <V as VSpec>::S)
+pub proof fn lemma_sum_run<V: PrefixValue>(n: nat, x: <V as VSpec>::S)
     ensures
         summed::<V>(Seq::new(n, |_i: int| x)) == V::amount(x) * n,
     decreases n,
@@ -676,7 +676,7 @@ pub proof fn lemma_sum_run<V: VSummed>(n: nat, x: <V as VSpec>::S)
 
 /// A sum is no larger than its length times the most a value adds, and
 /// is not negative where the sums are of an unsigned type.
-pub proof fn lemma_sum_bound<V: VSummed>(vs: Seq<<V as VSpec>::S>)
+pub proof fn lemma_sum_bound<V: PrefixValue>(vs: Seq<<V as VSpec>::S>)
     ensures
         -(vs.len() * V::most()) <= summed::<V>(vs) <= vs.len() * V::most(),
         V::Sum::lo() == 0 ==> summed::<V>(vs) >= 0,
@@ -687,7 +687,7 @@ pub proof fn lemma_sum_bound<V: VSummed>(vs: Seq<<V as VSpec>::S>)
 
 /// Where the sums are of an unsigned type, the sum of the first `k`
 /// values is no more than the sum of them all.
-pub proof fn lemma_sum_mono<V: VSummed>(vs: Seq<<V as VSpec>::S>, k: int)
+pub proof fn lemma_sum_mono<V: PrefixValue>(vs: Seq<<V as VSpec>::S>, k: int)
     requires
         V::Sum::lo() == 0,
         0 <= k <= vs.len(),
@@ -698,7 +698,7 @@ pub proof fn lemma_sum_mono<V: VSummed>(vs: Seq<<V as VSpec>::S>, k: int)
 }
 
 /// The sums of no more than `safe` values fit.
-pub proof fn lemma_sums_fit<V: VSummed>(vs: Seq<<V as VSpec>::S>)
+pub proof fn lemma_sums_fit<V: PrefixValue>(vs: Seq<<V as VSpec>::S>)
     requires
         vs.len() <= V::safe(),
     ensures
@@ -709,7 +709,7 @@ pub proof fn lemma_sums_fit<V: VSummed>(vs: Seq<<V as VSpec>::S>)
 
 /// Where the sums are of an unsigned type, they all fit if the sum of
 /// all the values does.
-pub proof fn lemma_sums_fit_unsigned<V: VSummed>(vs: Seq<<V as VSpec>::S>)
+pub proof fn lemma_sums_fit_unsigned<V: PrefixValue>(vs: Seq<<V as VSpec>::S>)
     requires
         V::Sum::lo() == 0,
     ensures
@@ -719,7 +719,7 @@ pub proof fn lemma_sums_fit_unsigned<V: VSummed>(vs: Seq<<V as VSpec>::S>)
 }
 
 /// The sums of the first `k` of values whose sums fit, fit.
-pub proof fn lemma_sums_fit_take<V: VSummed>(vs: Seq<<V as VSpec>::S>, k: int)
+pub proof fn lemma_sums_fit_take<V: PrefixValue>(vs: Seq<<V as VSpec>::S>, k: int)
     requires
         sums_fit::<V>(vs),
         0 <= k <= vs.len(),
@@ -733,7 +733,7 @@ pub proof fn lemma_sums_fit_take<V: VSummed>(vs: Seq<<V as VSpec>::S>, k: int)
 /// What the values at the positions from `i` up to `j` add up to is
 /// the sum before `j` less the sum before `i`. Of values whose sums
 /// fit, and no more of them than a column holds, it fits.
-pub proof fn lemma_sum_range<V: VSummed>(vs: Seq<<V as VSpec>::S>, i: int, j: int)
+pub proof fn lemma_sum_range<V: PrefixValue>(vs: Seq<<V as VSpec>::S>, i: int, j: int)
     requires
         0 <= i <= j <= vs.len(),
     ensures

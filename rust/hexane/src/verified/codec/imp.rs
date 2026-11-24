@@ -96,7 +96,7 @@ pub(super) fn read_i64(data: &[u8]) -> (r: Result<(usize, i64), DecodeError>)
     }
 }
 
-impl VCodec for Leb128 {
+impl Codec for Leb128 {
     open spec fn enc_u(n: u64) -> Seq<u8> {
         spec_encode(n as nat)
     }
@@ -226,14 +226,14 @@ impl VCodec for Leb128 {
 
 pub(super) fn ulebsize_impl(n: u64) -> (r: u64)
     ensures
-        r == <Leb128 as VCodec>::enc_u(n).len(),
+        r == <Leb128 as Codec>::enc_u(n).len(),
 {
     encoded_len(n) as u64
 }
 
 pub(super) fn lebsize_impl(n: i64) -> (r: u64)
     ensures
-        r == <Leb128 as VCodec>::enc_i(n).len(),
+        r == <Leb128 as Codec>::enc_i(n).len(),
 {
     encoded_len_signed(n) as u64
 }

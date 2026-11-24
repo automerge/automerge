@@ -4,7 +4,7 @@
 //! A column's core is written against a slab model
 //! ([`Slabs`]): run-length slabs for most value
 //! types ([`RleModel`]), run counts for `bool` ([`BoolModel`]). [`Model`]
-//! is what [`VerifiedColumn`](super::VerifiedColumn) needs of either, and
+//! is what [`Column`](super::Column) needs of either, and
 //! is proved of both: what a saved column is, that there is one for each
 //! sequence of values, how long it can be, and a save and a load that
 //! keep to it.
@@ -17,12 +17,12 @@
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
-use super::codec::VCodec;
+use super::codec::Codec;
 #[cfg(verus_keep_ghost)]
 use super::counts::lemma_bool_size;
 #[cfg(verus_keep_ghost)]
 use super::value::{lemma_opt_sizes, lemma_plain_sizes};
-use super::value::{VOptWrite, VPack, VWrite};
+use super::value::{RleValue, VOptWrite, VWrite};
 #[cfg(verus_keep_ghost)]
 use crate::bool_edit::run_of;
 use crate::bool_edit::{BoolEdit, BoolLoader, BoolModel, BoolRecoder};
@@ -359,7 +359,7 @@ pub(crate) trait Plain: for <'s>Lift<'s, W = Self> {
     ;
 }
 
-impl<T: VPack, C: VCodec> Plain for VWrite<T, C> {
+impl<T: RleValue, C: Codec> Plain for VWrite<T, C> {
     proof fn lemma_plain(v: T) {
     }
 
@@ -371,7 +371,7 @@ impl<T: VPack, C: VCodec> Plain for VWrite<T, C> {
     }
 }
 
-impl<T: VPack, C: VCodec> Plain for VOptWrite<T, C> {
+impl<T: RleValue, C: Codec> Plain for VOptWrite<T, C> {
     proof fn lemma_plain(v: Option<T>) {
     }
 

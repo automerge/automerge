@@ -2,7 +2,7 @@
 //! what their values add up to in a type of the client's own, verified
 //! with Verus.
 //!
-//! A prefix column ([`VerifiedPrefixColumn`](super::VerifiedPrefixColumn))
+//! A prefix column ([`PrefixColumn`](super::PrefixColumn))
 //! adds its values up as integers, in one of this crate's integer
 //! types. An accumulator column adds them up in a type its client
 //! gives, an accumulator ([`VAccum`]): the client says what a value adds
@@ -16,7 +16,7 @@
 //! that on trust. Here the client *proves* those laws of its type
 //! ([`VGroup`]), and what the column answers is proved from them.
 //!
-//! An accumulator column is a [`VerifiedColumn`] kept with an
+//! An accumulator column is a [`Column`] kept with an
 //! [`AccIndex`]: of each slab the index holds, besides the count of its
 //! values, what they add up to (`accumulated`). What a column of the
 //! kind says of its values, and its bytes when saved, are a plain
@@ -32,15 +32,15 @@
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
-use super::codec::VCodec;
+use super::codec::Codec;
 use super::kind::{Kind, VIndex, VKeeps};
 use super::seal;
-use super::value::VPack;
+use super::value::RleValue;
 #[cfg(verus_keep_ghost)]
 use super::Held;
 #[cfg(verus_keep_ghost)]
 use super::VGet;
-use super::{Get, VForm, VSpec, VValue, VerifiedColumn};
+use super::{Column, ColumnValueRef, Get, VForm, VSpec};
 #[cfg(verus_keep_ghost)]
 use crate::attrib::Accumulate;
 #[cfg(verus_keep_ghost)]
@@ -203,7 +203,7 @@ pub trait VAccum: VGroup + Debug {
 ///
 /// It is for a client to give of a type of its own
 /// ([`VNewtype`](super::VNewtype)).
-pub trait VAdds: VPack {
+pub trait VAdds: RleValue {
     /// The accumulator the values are added up in.
     type Acc: VAccum;
 
@@ -315,23 +315,23 @@ pub proof fn lemma_acc_range<V: VAccumulated>(vs: Seq<<V as VSpec>::S>, i: int, 
 /// values and holds what they add up to.
 pub struct AccIndex;
 
-impl<V: VAccumulated + VValue<C>, C: VCodec> VKeeps<V, C> for AccIndex {
+impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> VKeeps<V, C> for AccIndex {
     /// Every column: nothing overflows.
     open spec fn keeps(vs: Seq<<V as VSpec>::S>) -> bool {
         true
     }
 }
 
-impl<V: VAccumulated + VValue<C>, C: VCodec> VIndex<V, C> for AccIndex {
+impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> VIndex<V, C> for AccIndex {
 
 }
 
 /// A column kept with what its values add up to in a type of the
-/// client's own: a [`VerifiedColumn`] with an [`AccIndex`].
-pub type VerifiedAccColumn<V, C = Leb128> = VerifiedColumn<V, C, AccIndex>;
+/// client's own: a [`Column`] with an [`AccIndex`].
+pub type AccColumn<V, C = Leb128> = Column<V, C, AccIndex>;
 
 /// What an accumulator column answers from its index.
-impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
+impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
     /// What the values before position `index` add up to; where `index`
     /// is past the end, what all the values do.
     ///

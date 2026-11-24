@@ -2,7 +2,7 @@
 //! sums of their values, which answer what the values before a position
 //! add up to without reading them all.
 //!
-//! A prefix column is a [`VerifiedColumn`] kept with a [`SumIndex`]:
+//! A prefix column is a [`Column`] kept with a [`SumIndex`]:
 //! of each slab the index holds, besides the count of its values, what
 //! they add up to (`summed`). What a column of the kind says of its
 //! values, and its bytes when saved, are a plain column's. What
@@ -13,7 +13,7 @@
 //!
 //! The sums a prefix column answers with are of the type it keeps them
 //! in, and what is proved of them is said of integers: the sum before
-//! a position ([`get_prefix`](VerifiedColumn::get_prefix)) *is* what
+//! a position ([`get_prefix`](Column::get_prefix)) *is* what
 //! the values before it add up to, for the sums of a prefix column fit.
 //!
 //! This file is a specification, to be read as the guide to reviewing
@@ -24,10 +24,10 @@
 use super::kind::{Kind, VIndex, VKeeps};
 #[cfg(verus_keep_ghost)]
 use super::sums::{summed, sums_fit};
-use super::sums::{SumModel, SumOf, SumWeight, VCount, VSum, VSummed};
+use super::sums::{PrefixValue, SumModel, SumOf, SumWeight, UnsignedPrefix, VSum};
+use super::{Codec, Column, ColumnValueRef};
 #[cfg(verus_keep_ghost)]
 use super::{Get, Held, VGet};
-use super::{VCodec, VValue, VerifiedColumn};
 #[cfg(verus_keep_ghost)]
 use crate::btree::{PrefixAggregate, SlabAggregate};
 #[cfg(verus_keep_ghost)]
@@ -55,23 +55,23 @@ verus! {
 /// holds what they add up to.
 pub struct SumIndex;
 
-impl<V: VSummed + VValue<C>, C: VCodec> VKeeps<V, C> for SumIndex {
+impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> VKeeps<V, C> for SumIndex {
     /// The columns whose sums fit the type they are kept in.
     open spec fn keeps(vs: Seq<<V as super::VSpec>::S>) -> bool {
         sums_fit::<V>(vs)
     }
 }
 
-impl<V: VSummed + VValue<C>, C: VCodec> VIndex<V, C> for SumIndex {
+impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> VIndex<V, C> for SumIndex {
 
 }
 
-/// A column kept with the sums of its values: a [`VerifiedColumn`]
+/// A column kept with the sums of its values: a [`Column`]
 /// with a [`SumIndex`].
-pub type VerifiedPrefixColumn<V, C = Leb128> = VerifiedColumn<V, C, SumIndex>;
+pub type PrefixColumn<V, C = Leb128> = Column<V, C, SumIndex>;
 
 /// What a prefix column answers from its sums.
-impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
+impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Column<V, C, SumIndex> {
     /// What the values before position `index` add up to; where `index`
     /// is past the end, what all the values do.
     ///
@@ -121,7 +121,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
 
 /// What a prefix column of sums that are never negative answers: where
 /// its sums reach a target.
-impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> where V::Sum: VCount {
+impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Column<V, C, SumIndex> where V::Sum: UnsignedPrefix {
     /// The first position that the values before it add up to `target`
     /// or more: no earlier position's do, and where the result is a
     /// position of the column or its end, that one's do. Where the

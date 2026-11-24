@@ -1,4 +1,4 @@
-//! The encoder of the verified public API ([`VerifiedEncoder`]),
+//! The encoder of the verified public API ([`Encoder`]),
 //! verified with Verus.
 //!
 //! It runs the cores that a column's `remap` runs (`rle::enc`,
@@ -15,10 +15,10 @@
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
 use super::model::{Core, Flows, Streams};
-use super::VerifiedColumn;
+use super::Column;
 #[cfg(verus_keep_ghost)]
 use super::{gives, held, mapped, only, Held, VGet, VSpec};
-use super::{Get, Given, VCodec, VValue, MAX_SEG};
+use super::{Codec, ColumnValueRef, Get, Given, MAX_SEG};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::Slabs;
 #[cfg(verus_keep_ghost)]
@@ -50,8 +50,8 @@ verus! {
 ///
 /// It is specified by the values it has been given (`enc@`, each as a
 /// column has it), and what it saves is specified as a column's save
-/// is: the bytes are `VerifiedColumn::encoding` of those values, which
-/// is what a [`VerifiedColumn`] of them saves, and what a load reads
+/// is: the bytes are `Column::encoding` of those values, which
+/// is what a [`Column`] of them saves, and what a load reads
 /// back.
 ///
 /// A value given by reference (a byte string or a string) is kept by
@@ -81,11 +81,11 @@ verus! {
 /// buffer in place and may panic midway (out of memory, or more values
 /// than it can count), and Verus lets a type's hidden invariant be
 /// suspended only across code that it knows cannot unwind.
-pub struct VerifiedEncoder<'a, V: VValue<C>, C: VCodec = Leb128> {
+pub struct Encoder<'a, V: ColumnValueRef<C>, C: Codec = Leb128> {
     e: <V::E as Streams<'a, V::X>>::Enc,
 }
 
-impl<'a, V: VValue<C>, C: VCodec> View for VerifiedEncoder<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> View for Encoder<'a, V, C> {
     type V = Seq<V::S>;
 
     closed spec fn view(&self) -> Seq<V::S> {
@@ -93,7 +93,7 @@ impl<'a, V: VValue<C>, C: VCodec> View for VerifiedEncoder<'a, V, C> {
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> Default for VerifiedEncoder<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> Default for Encoder<'a, V, C> {
     /// An encoder that has been given nothing.
     fn default() -> (r: Self)
         ensures
@@ -105,7 +105,7 @@ impl<'a, V: VValue<C>, C: VCodec> Default for VerifiedEncoder<'a, V, C> {
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> Encoder<'a, V, C> {
     /// The encoder is one that [`new`](Self::new) or
     /// [`with_max_segments`](Self::with_max_segments) gave and this
     /// type's methods have changed: what each of them requires, and
@@ -146,7 +146,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
     /// builder [`EncoderApi::with_max_segments`](crate::EncoderApi::with_max_segments):
     /// what `RleEncoder::new().with_max_segments(max)` gives there, this
     /// gives here. It requires a budget of at least 2, as a column's
-    /// [`with_max_segments`](VerifiedColumn::with_max_segments) does;
+    /// [`with_max_segments`](Column::with_max_segments) does;
     /// the old ones panic on less.
     #[inline(always)]
     pub fn with_max_segments(max_segments: usize) -> (r: Self)
@@ -257,7 +257,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
     /// Give the encoder the values that `iter` gives, in their order.
     ///
     /// The specification speaks of what the iterator gives (`gives`),
-    /// as [`VerifiedColumn::splice_iter`]'s does: of an iterator that
+    /// as [`Column::splice_iter`]'s does: of an iterator that
     /// keeps to what Verus asks of every iterator. Of another it says
     /// nothing but that the encoder is still one.
     ///
@@ -275,15 +275,15 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
     }
 
     /// The values given, saved: the encoding of them, which is what a
-    /// [`VerifiedColumn`] of them saves.
+    /// [`Column`] of them saves.
     #[inline(always)]
     pub fn save(self) -> (r: Vec<u8>)
         requires
             self.wf(),
         ensures
-            VerifiedColumn::<V, C>::valid(r@),
-            VerifiedColumn::<V, C>::values(r@) == self@,
-            r@ == VerifiedColumn::<V, C>::encoding(self@),
+            Column::<V, C>::valid(r@),
+            Column::<V, C>::values(r@) == self@,
+            r@ == Column::<V, C>::encoding(self@),
             r@.len() <= V::size_bound(self@),
     {
         self.save_impl()
@@ -297,10 +297,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         requires
             self.wf(),
         ensures
-            final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(self@),
-            VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(self@)),
-            VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(self@)) == self@,
-            VerifiedColumn::<V, C>::encoding(self@).len() <= V::size_bound(self@),
+            final(out)@ == old(out)@ + Column::<V, C>::encoding(self@),
+            Column::<V, C>::valid(Column::<V, C>::encoding(self@)),
+            Column::<V, C>::values(Column::<V, C>::encoding(self@)) == self@,
+            Column::<V, C>::encoding(self@).len() <= V::size_bound(self@),
             r.start == old(out)@.len(),
             r.end == final(out)@.len(),
     {
@@ -313,7 +313,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
     ///
     /// For an encoder without a segment budget that is all of it, as it
     /// is of a column's
-    /// [`save_to_unless`](VerifiedColumn::save_to_unless). One with a
+    /// [`save_to_unless`](Column::save_to_unless). One with a
     /// budget writes nothing only if every value is `value`, and may
     /// write the values though every one is: it does once it has cut a
     /// slab, as [`EncoderApi::save_to_unless`](crate::EncoderApi::save_to_unless)
@@ -330,10 +330,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
             final(out)@ == old(out)@ ==> only(self@, value.sv()),
             self.max_segments() is None && only(self@, value.sv()) ==> final(out)@ == old(out)@,
             final(out)@ != old(out)@ ==> {
-                &&& final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(self@)
-                &&& VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(self@))
-                &&& VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(self@)) == self@
-                &&& VerifiedColumn::<V, C>::encoding(self@).len() <= V::size_bound(self@)
+                &&& final(out)@ == old(out)@ + Column::<V, C>::encoding(self@)
+                &&& Column::<V, C>::valid(Column::<V, C>::encoding(self@))
+                &&& Column::<V, C>::values(Column::<V, C>::encoding(self@)) == self@
+                &&& Column::<V, C>::encoding(self@).len() <= V::size_bound(self@)
             },
             r.start == old(out)@.len(),
             r.end == final(out)@.len(),
@@ -346,10 +346,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
     #[inline(always)]
     pub fn encode<I: IntoIterator<Item = Get<'a, V>>>(iter: I) -> (r: Vec<u8>)
         ensures
-            VerifiedColumn::<V, C>::valid(r@),
-            r@ == VerifiedColumn::<V, C>::encoding(VerifiedColumn::<V, C>::values(r@)),
-            r@.len() <= V::size_bound(VerifiedColumn::<V, C>::values(r@)),
-            gives(iter, |xs: Seq<I::Item>| VerifiedColumn::<V, C>::values(r@) == VGet::svs(xs)),
+            Column::<V, C>::valid(r@),
+            r@ == Column::<V, C>::encoding(Column::<V, C>::values(r@)),
+            r@.len() <= V::size_bound(Column::<V, C>::values(r@)),
+            gives(iter, |xs: Seq<I::Item>| Column::<V, C>::values(r@) == VGet::svs(xs)),
     {
         Self::encode_impl::<I>(iter)
     }
@@ -364,10 +364,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         ensures
             ({
                 let d = final(buf)@.skip(old(buf)@.len() as int);
-                let w = VerifiedColumn::<V, C>::values(d);
+                let w = Column::<V, C>::values(d);
                 &&& final(buf)@ == old(buf)@ + d
-                &&& VerifiedColumn::<V, C>::valid(d)
-                &&& d == VerifiedColumn::<V, C>::encoding(w)
+                &&& Column::<V, C>::valid(d)
+                &&& d == Column::<V, C>::encoding(w)
                 &&& d.len() <= V::size_bound(w)
                 &&& gives(iter, |xs: Seq<I::Item>| w == VGet::svs(xs))
             }),
@@ -389,10 +389,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         ensures
             ({
                 let d = final(buf)@.skip(old(buf)@.len() as int);
-                let w = VerifiedColumn::<V, C>::values(d);
+                let w = Column::<V, C>::values(d);
                 &&& final(buf)@ == old(buf)@ + d
-                &&& VerifiedColumn::<V, C>::valid(d)
-                &&& d == VerifiedColumn::<V, C>::encoding(w)
+                &&& Column::<V, C>::valid(d)
+                &&& d == Column::<V, C>::encoding(w)
                 &&& d.len() <= V::size_bound(w)
                 &&& gives(
                     iter,
@@ -424,7 +424,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
     /// and here an encoder of `bool` has it too. The values are read
     /// from what the encoder has written: no column is made of them,
     /// as [`into_column`](Self::into_column) and then a column's
-    /// [`remap`](VerifiedColumn::remap) would make two.
+    /// [`remap`](Column::remap) would make two.
     #[inline(always)]
     pub fn save_to_and_remap<F: Fn(V) -> V>(self, out: &mut Vec<u8>, f: F) -> (r: Range<usize>)
         requires
@@ -434,10 +434,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
             ({
                 // what was written, and the values it is the encoding of
                 let d = final(out)@.skip(old(out)@.len() as int);
-                let w = VerifiedColumn::<V, C>::values(d);
+                let w = Column::<V, C>::values(d);
                 &&& final(out)@ == old(out)@ + d
-                &&& VerifiedColumn::<V, C>::valid(d)
-                &&& d == VerifiedColumn::<V, C>::encoding(w)
+                &&& Column::<V, C>::valid(d)
+                &&& d == Column::<V, C>::encoding(w)
                 &&& d.len() <= V::size_bound(w)
                 &&& w.len() == self@.len()
                 &&& forall|i: int| 0 <= i < self@.len() ==> mapped(f, self@[i], #[trigger] w[i])
@@ -472,10 +472,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
                 ==> final(out)@ == old(out)@,
             final(out)@ != old(out)@ ==> {
                 let d = final(out)@.skip(old(out)@.len() as int);
-                let w = VerifiedColumn::<V, C>::values(d);
+                let w = Column::<V, C>::values(d);
                 &&& final(out)@ == old(out)@ + d
-                &&& VerifiedColumn::<V, C>::valid(d)
-                &&& d == VerifiedColumn::<V, C>::encoding(w)
+                &&& Column::<V, C>::valid(d)
+                &&& d == Column::<V, C>::encoding(w)
                 &&& d.len() <= V::size_bound(w)
                 &&& w.len() == self@.len()
                 &&& forall|i: int| 0 <= i < self@.len() ==> mapped(f, self@[i], #[trigger] w[i])
@@ -501,7 +501,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
     /// `0xffff_fff5` bytes and that are at most `usize::MAX - 3` become
     /// a column).
     #[inline(always)]
-    pub fn into_column(self) -> (r: VerifiedColumn<V, C>)
+    pub fn into_column(self) -> (r: Column<V, C>)
         requires
             self.wf(),
         ensures
@@ -518,11 +518,11 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
 /// The buffer must be the same one each time, with what this state wrote
 /// to it left as it is: that is `on`, which every method that takes the
 /// buffer requires and nothing checks as it runs.
-pub struct VerifiedEncoderState<'a, V: VValue<C>, C: VCodec = Leb128> {
+pub struct EncoderState<'a, V: ColumnValueRef<C>, C: Codec = Leb128> {
     s: <V::E as Flows<'a, V::X>>::Flow,
 }
 
-impl<'a, V: VValue<C>, C: VCodec> View for VerifiedEncoderState<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> View for EncoderState<'a, V, C> {
     type V = Seq<V::S>;
 
     /// The values given so far.
@@ -531,7 +531,7 @@ impl<'a, V: VValue<C>, C: VCodec> View for VerifiedEncoderState<'a, V, C> {
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> Default for VerifiedEncoderState<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> Default for EncoderState<'a, V, C> {
     fn default() -> (r: Self)
         ensures
             r@ == Seq::<V::S>::empty(),
@@ -542,7 +542,7 @@ impl<'a, V: VValue<C>, C: VCodec> Default for VerifiedEncoderState<'a, V, C> {
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoderState<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> EncoderState<'a, V, C> {
     /// `buf` is what the buffer this state writes into holds now.
     pub closed spec fn on(&self, buf: Seq<u8>) -> bool {
         <V::E as Flows<'a, V::X>>::f_on(self.s, buf)
@@ -689,10 +689,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoderState<'a, V, C> {
         requires
             self.on(old(buf)@),
         ensures
-            final(buf)@ == self.before(old(buf)@) + VerifiedColumn::<V, C>::encoding(self@),
-            VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(self@)),
-            VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(self@)) == self@,
-            VerifiedColumn::<V, C>::encoding(self@).len() <= V::size_bound(self@),
+            final(buf)@ == self.before(old(buf)@) + Column::<V, C>::encoding(self@),
+            Column::<V, C>::valid(Column::<V, C>::encoding(self@)),
+            Column::<V, C>::values(Column::<V, C>::encoding(self@)) == self@,
+            Column::<V, C>::encoding(self@).len() <= V::size_bound(self@),
     {
         self.finish_impl(buf)
     }

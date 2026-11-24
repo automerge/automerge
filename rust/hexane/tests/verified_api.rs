@@ -21,13 +21,11 @@
 mod golden;
 
 use hexane::verified::{
-    refused, AccIndex, Get, LenBitIndex, LenIndex, RawColumn, SumIndex, VAccum, VAccumulated,
-    VAdds, VAmount, VCodec, VDeltaValue, VGroup, VNewtype, VPack, VSummed, VValue,
-    VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue,
-    VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder,
-    VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedEncoder, VerifiedEncoderState,
-    VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
-    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
+    refused, AccColumn, AccIndex, AccIter, AccIterState, AccSeek, AccValue, Codec, Column,
+    ColumnValueRef, Decoder, DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaEncoderState,
+    DeltaValue, Encoder, EncoderState, Get, Iter, IterState, LenBitIndex, LenIndex, PrefixColumn,
+    PrefixIter, PrefixIterState, PrefixSeek, PrefixValue, PrefixedValue, RawColumn, RleValue, Runs,
+    SumIndex, VAccum, VAccumulated, VAdds, VAmount, VGroup, VNewtype,
 };
 use hexane::{Leb128, LoadOpts, MaybeFill, NoFill, PackError, Run};
 use std::cell::{Cell, RefCell};
@@ -101,7 +99,7 @@ impl Rng {
 /// A value type of the verified API. A test holds its values owned. The
 /// verified API takes and gives a value in the form `lend` makes: the value
 /// itself, or for a byte string or a string a borrow of it.
-trait Kind: VValue + Clone + PartialEq + Debug {
+trait Kind: ColumnValueRef + Clone + PartialEq + Debug {
     /// A value that is not likely the one before it.
     fn fresh(rng: &mut Rng) -> Self;
 
@@ -371,8 +369,8 @@ fn lent<T: Kind>(vs: &[T]) -> Vec<Get<'_, T>> {
     vs.iter().map(T::lend).collect()
 }
 
-/// What a `VerifiedColumn` holds.
-fn new_values<T: Kind>(v: &VerifiedColumn<T>) -> Vec<T> {
+/// What a `Column` holds.
+fn new_values<T: Kind>(v: &Column<T>) -> Vec<T> {
     v.to_vec().into_iter().map(T::keep).collect()
 }
 
@@ -380,7 +378,7 @@ fn new_values<T: Kind>(v: &VerifiedColumn<T>) -> Vec<T> {
 /// saves the bytes and lies in the slabs that are noted, and passes the
 /// checks of `check_invariants`. For columns that edits have made of
 /// values.
-fn check<T: Kind>(v: &VerifiedColumn<T>, model: &[T]) {
+fn check<T: Kind>(v: &Column<T>, model: &[T]) {
     check_with(v, model, true);
 }
 
@@ -389,11 +387,11 @@ fn check<T: Kind>(v: &VerifiedColumn<T>, model: &[T]) {
 /// two slabs should have been merged (see
 /// `check_invariants_takes_a_loaded_column_as_edited`): what it says is
 /// noted.
-fn check_loaded<T: Kind>(v: &VerifiedColumn<T>, model: &[T]) {
+fn check_loaded<T: Kind>(v: &Column<T>, model: &[T]) {
     check_with(v, model, false);
 }
 
-fn check_with<T: Kind>(v: &VerifiedColumn<T>, model: &[T], built: bool) {
+fn check_with<T: Kind>(v: &Column<T>, model: &[T], built: bool) {
     assert_eq!(v.len(), model.len());
     assert_eq!(v.is_empty(), model.is_empty());
     assert_eq!(new_values(v), model);
@@ -416,7 +414,7 @@ fn check_with<T: Kind>(v: &VerifiedColumn<T>, model: &[T], built: bool) {
         assert_eq!(
             format!("{v:?}"),
             format!(
-                "VerifiedColumn {{ len: {}, slabs: {} }}",
+                "Column {{ len: {}, slabs: {} }}",
                 model.len(),
                 v.slab_count()
             )
@@ -441,7 +439,7 @@ fn check_with<T: Kind>(v: &VerifiedColumn<T>, model: &[T], built: bool) {
 /// checks of `check_invariants` pass if the column is `built` of values,
 /// and what they say is noted if it was loaded; and the bytes the column
 /// saves are a column's.
-fn check_layout<T: Kind>(v: &VerifiedColumn<T>, model: &[T], built: bool) {
+fn check_layout<T: Kind>(v: &Column<T>, model: &[T], built: bool) {
     let (lens, segments) = (v.slab_lens(), v.slab_segments());
     assert_eq!(lens.len(), v.slab_count());
     assert_eq!(segments.len(), v.slab_count());
@@ -464,17 +462,17 @@ fn check_layout<T: Kind>(v: &VerifiedColumn<T>, model: &[T], built: bool) {
 /// What `check_invariants` says of the column, noted: nothing, or its
 /// words. (Where a panic can be caught: not on wasm32.)
 #[cfg(panic = "unwind")]
-fn check_invariants_noted<T: Kind>(v: &VerifiedColumn<T>) {
+fn check_invariants_noted<T: Kind>(v: &Column<T>) {
     golden::note(&panic_of(std::panic::AssertUnwindSafe(|| {
         v.check_invariants()
     })));
 }
 
 #[cfg(not(panic = "unwind"))]
-fn check_invariants_noted<T: Kind>(_v: &VerifiedColumn<T>) {}
+fn check_invariants_noted<T: Kind>(_v: &Column<T>) {}
 
 /// Whether the column holds `x` alone, and what is saved unless it does.
-fn check_only<T: Kind>(v: &VerifiedColumn<T>, model: &[T], x: &T) {
+fn check_only<T: Kind>(v: &Column<T>, model: &[T], x: &T) {
     let only = model.iter().all(|m| m == x);
     assert_eq!(v.is_only(x.lend()), only);
     let mut a = vec![9u8; 3];
@@ -490,10 +488,10 @@ fn check_only<T: Kind>(v: &VerifiedColumn<T>, model: &[T], x: &T) {
 
 /// The column loads the bytes it saved, which are noted, as the same
 /// values, and saves those to the same bytes again.
-fn check_loads<T: Kind>(v: &VerifiedColumn<T>, model: &[T]) {
+fn check_loads<T: Kind>(v: &Column<T>, model: &[T]) {
     let bytes = v.save();
     golden::note(&bytes);
-    let v2 = VerifiedColumn::<T>::load(&bytes).unwrap();
+    let v2 = Column::<T>::load(&bytes).unwrap();
     assert_eq!(new_values(&v2), model);
     assert_eq!(v2.save(), bytes);
 }
@@ -501,7 +499,7 @@ fn check_loads<T: Kind>(v: &VerifiedColumn<T>, model: &[T]) {
 /// A clone of the column holds what the column holds, in the same slabs,
 /// and is a column of its own: an edit of the clone (`salt` picks it)
 /// leaves the column as it was.
-fn check_clone<T: Kind>(v: &VerifiedColumn<T>, model: &[T], salt: u64) {
+fn check_clone<T: Kind>(v: &Column<T>, model: &[T], salt: u64) {
     let mut v2 = v.clone();
     check(&v2, model);
     assert_eq!(v2.slab_count(), v.slab_count());
@@ -529,8 +527,8 @@ fn check_clone<T: Kind>(v: &VerifiedColumn<T>, model: &[T], salt: u64) {
 }
 
 /// A column with the values `model`.
-fn column_of<T: Kind>(model: &[T]) -> VerifiedColumn<T> {
-    let mut v = VerifiedColumn::<T>::new();
+fn column_of<T: Kind>(model: &[T]) -> Column<T> {
+    let mut v = Column::<T>::new();
     v.splice(0, 0, &lent(model));
     v
 }
@@ -611,17 +609,17 @@ fn numbers_of_every_size() {
 }
 
 fn empty<T: Kind>() {
-    let v = VerifiedColumn::<T>::new();
-    let d = VerifiedColumn::<T>::default();
+    let v = Column::<T>::new();
+    let d = Column::<T>::default();
     assert!(v.is_empty() && d.is_empty());
     golden::note(&v.save());
     assert_eq!(v.save(), Vec::<u8>::new());
-    assert!(VerifiedColumn::<T>::load(&[]).unwrap().is_empty());
+    assert!(Column::<T>::load(&[]).unwrap().is_empty());
     // a new column has no slab; one made of no values has an empty one
     check(&v, &[]);
     check(&d, &[]);
     assert_eq!((v.slab_lens(), v.slab_segments()), (vec![], vec![]));
-    let v = VerifiedColumn::<T>::from_values(&[]);
+    let v = Column::<T>::from_values(&[]);
     check(&v, &[]);
     assert_eq!((v.slab_lens(), v.slab_segments()), (vec![0], vec![0]));
 }
@@ -640,7 +638,7 @@ fn clones<T: Kind>() {
     let more: Vec<T> = (0..300).map(|_| T::fresh(&mut rng)).collect();
     for budget in [2, 3, 16, 64] {
         // of an empty column, which has no slab yet
-        let v = VerifiedColumn::<T>::with_max_segments(budget);
+        let v = Column::<T>::with_max_segments(budget);
         check_clone(&v, &[], budget as u64);
         let mut v2 = v.clone();
         drop(v);
@@ -659,7 +657,7 @@ fn clones<T: Kind>() {
         check(&v4, &more);
         check(&v3, &[]);
     }
-    let d = VerifiedColumn::<T>::default().clone();
+    let d = Column::<T>::default().clone();
     assert!(d.is_empty() && d.save().is_empty());
 }
 
@@ -674,7 +672,7 @@ fn a_clone_is_a_column_of_its_own() {
 #[test]
 fn a_clone_owns_its_bytes() {
     let _golden = golden::test(concat!(module_path!(), "::a_clone_owns_its_bytes"));
-    let mut v = VerifiedColumn::<Vec<u8>>::new();
+    let mut v = Column::<Vec<u8>>::new();
     v.push(b"one");
     v.push(b"two");
     let w = v.clone();
@@ -758,7 +756,7 @@ fn the_bytes_of_a_column() {
 #[test]
 fn byte_strings_are_lent() {
     let _golden = golden::test(concat!(module_path!(), "::byte_strings_are_lent"));
-    let mut v = VerifiedColumn::<Vec<u8>>::new();
+    let mut v = Column::<Vec<u8>>::new();
     v.splice(0, 0, &[b"one", b"two", b"two"]);
     v.push(b"three");
     let first: &[u8] = v.get(0).unwrap();
@@ -770,7 +768,7 @@ fn byte_strings_are_lent() {
     assert_eq!(all, [&b"one"[..], b"two", b"two", b"three"]);
     assert_eq!((x, y), (&b"two"[..], &b"two"[..]));
 
-    let mut o = VerifiedColumn::<Option<Vec<u8>>>::new();
+    let mut o = Column::<Option<Vec<u8>>>::new();
     o.splice(0, 0, &[Some(b"one"), None]);
     o.insert(1, Some(&[]));
     o.push(None);
@@ -784,7 +782,7 @@ fn edits<T: Kind>() {
     for seed in 1..=12u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15));
         let budget = [2, 3, 4, 8, 64][rng.below(5)];
-        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut v = Column::<T>::with_max_segments(budget);
         let mut model: Vec<T> = vec![];
         for step in 0..120 {
             match rng.below(12) {
@@ -907,14 +905,14 @@ fn other_forms<T: Kind>() {
         let budget = [2, 3, 4, 8, 64][rng.below(5)];
         let mut model: Vec<T> = rng.values(200);
 
-        let v = VerifiedColumn::<T>::from_values(&lent(&model));
+        let v = Column::<T>::from_values(&lent(&model));
         check(&v, &model);
-        let v: VerifiedColumn<T> = model.iter().map(T::lend).collect();
+        let v: Column<T> = model.iter().map(T::lend).collect();
         check(&v, &model);
-        let v = VerifiedColumn::<T>::from_iter(lent(&model));
+        let v = Column::<T>::from_iter(lent(&model));
         check(&v, &model);
 
-        let mut v = VerifiedColumn::<T>::from_values_with_max_segments(&lent(&model), budget);
+        let mut v = Column::<T>::from_values_with_max_segments(&lent(&model), budget);
         check(&v, &model);
         check_loads(&v, &model);
         for step in 0..60 {
@@ -992,15 +990,12 @@ fn fills<T: Kind>() {
     let mut rng = Rng(0xf111);
     for n in [0, 1, 2, 3, 63, 64, 65, 1000] {
         let x = T::fresh(&mut rng);
-        let mut v = VerifiedColumn::<T>::fill(n, x.lend());
+        let mut v = Column::<T>::fill(n, x.lend());
         let mut model = vec![x.clone(); n];
         check(&v, &model);
         check_loads(&v, &model);
         assert!(v.is_only(x.lend()));
-        assert_eq!(
-            v.save(),
-            VerifiedColumn::<T>::from_values(&lent(&model)).save()
-        );
+        assert_eq!(v.save(), Column::<T>::from_values(&lent(&model)).save());
         check_clone(&v, &model, n as u64);
 
         let y = T::fresh(&mut rng);
@@ -1048,23 +1043,23 @@ fn panic_of<R>(f: impl FnOnce() -> R + std::panic::UnwindSafe) -> Option<String>
 fn the_longest_runs() {
     let _golden = golden::test(concat!(module_path!(), "::the_longest_runs"));
     let most = i64::MAX as usize;
-    let v = VerifiedColumn::<u64>::fill(most, 7);
+    let v = Column::<u64>::fill(most, 7);
     assert_eq!(
         (v.len(), v.get(most - 1), v.get(most)),
         (most, Some(7), None)
     );
     golden::note(&v.save());
     assert!(v.is_only(7) && !v.is_only(8));
-    let back = VerifiedColumn::<u64>::load(&v.save()).unwrap();
+    let back = Column::<u64>::load(&v.save()).unwrap();
     assert_eq!((back.len(), back.get(most - 1)), (most, Some(7)));
-    let nulls = VerifiedColumn::<Option<Vec<u8>>>::fill(most, None);
+    let nulls = Column::<Option<Vec<u8>>>::fill(most, None);
     golden::note(&nulls.save());
     assert_eq!((nulls.len(), nulls.get(most - 1)), (most, Some(None)));
 
     // by a run, and then one value more
     let by_run = |count: usize, then: Option<u64>| {
         let new = panic_of(move || {
-            let mut v = VerifiedColumn::<u64>::new();
+            let mut v = Column::<u64>::new();
             v.splice_runs(0, 0, [Run { count, value: 7 }]);
             if let Some(x) = then {
                 v.push(x);
@@ -1084,7 +1079,7 @@ fn the_longest_runs() {
     // counts with no sign
     let bools = |count: usize, then: Option<bool>| {
         let new = panic_of(move || {
-            let mut v = VerifiedColumn::<bool>::new();
+            let mut v = Column::<bool>::new();
             v.splice_runs(0, 0, [Run { count, value: true }]);
             if let Some(x) = then {
                 v.push(x);
@@ -1116,14 +1111,14 @@ fn an_iterator_is_run_to_its_end_once() {
         items.get(at).copied()
     };
     let mut asked = 0;
-    let mut v = VerifiedColumn::<u64>::new();
+    let mut v = Column::<u64>::new();
     v.splice_iter(0, 0, std::iter::from_fn(|| feed(&mut asked)));
     assert_eq!((v.to_vec(), asked), (items.to_vec(), 4));
     asked = 0;
     v.extend(std::iter::from_fn(|| feed(&mut asked)));
     assert_eq!((v.len(), asked), (6, 4));
     asked = 0;
-    let w: VerifiedColumn<u64> = std::iter::from_fn(|| feed(&mut asked)).collect();
+    let w: Column<u64> = std::iter::from_fn(|| feed(&mut asked)).collect();
     assert_eq!((w.to_vec(), asked), (items.to_vec(), 4));
     asked = 0;
     let runs = std::iter::from_fn(|| feed(&mut asked)).map(|x| Run { count: 2, value: x });
@@ -1153,7 +1148,7 @@ fn one_value<T: Kind>() {
             // one at a time and at both ends, so that a small budget
             // makes slabs
             let build = || {
-                let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+                let mut v = Column::<T>::with_max_segments(budget);
                 for (i, x) in model.iter().enumerate() {
                     let at = if i % 2 == 0 { 0 } else { v.len() };
                     v.insert(at, x.lend());
@@ -1204,7 +1199,7 @@ fn one_value_in_many_slabs<T: Kind>() {
     }
     for budget in [2, 3, 8] {
         let mut model: Vec<T> = (0..300).map(|i| [&a, &b][i % 2].clone()).collect();
-        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut v = Column::<T>::with_max_segments(budget);
         for x in &model {
             v.push(x.lend());
         }
@@ -1238,13 +1233,7 @@ fn a_column_of_one_value() {
 /// says, the range is that of the places of `x`, or the empty range where
 /// `x` would stand: by the model, in the order the standard library has
 /// for the type.
-fn check_scope<T: Kind>(
-    v: &VerifiedColumn<T>,
-    model: &[T],
-    x: &T,
-    start: usize,
-    end: usize,
-) -> bool {
+fn check_scope<T: Kind>(v: &Column<T>, model: &[T], x: &T, start: usize, end: usize) -> bool {
     let r = v.scope_to_value(x.lend(), start, end);
     assert!(
         start <= r.start && r.start <= r.end && r.end <= end,
@@ -1303,8 +1292,8 @@ fn targets<T: Kind>(rng: &mut Rng, model: &[T]) -> Vec<T> {
 }
 
 /// A column with the values `model`, of slabs of at most `budget` runs.
-fn column_with<T: Kind>(model: &[T], budget: usize) -> VerifiedColumn<T> {
-    let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+fn column_with<T: Kind>(model: &[T], budget: usize) -> Column<T> {
+    let mut v = Column::<T>::with_max_segments(budget);
     v.splice(0, 0, &lent(model));
     v
 }
@@ -1312,8 +1301,8 @@ fn column_with<T: Kind>(model: &[T], budget: usize) -> VerifiedColumn<T> {
 /// A column with the values `model`, of slabs of at most `budget` runs
 /// and in many of them even where `model` is one value many times over:
 /// made with another value after each, which is then taken out again.
-fn column_in_slabs<T: Kind>(rng: &mut Rng, model: &[T], budget: usize) -> VerifiedColumn<T> {
-    let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+fn column_in_slabs<T: Kind>(rng: &mut Rng, model: &[T], budget: usize) -> Column<T> {
+    let mut v = Column::<T>::with_max_segments(budget);
     for x in model {
         let mut other = T::fresh(rng);
         while other == *x {
@@ -1349,7 +1338,7 @@ fn scopes<T: Kind>() {
             check(&v, &model);
             assert!(n < 400 || budget > 3 || v.slab_count() > 30);
             let bytes = v.save();
-            let v2 = VerifiedColumn::<T>::load(&bytes).unwrap();
+            let v2 = Column::<T>::load(&bytes).unwrap();
             let ws = windows(&mut rng, &v.slab_lens(), n);
             for x in targets(&mut rng, &model) {
                 for &(start, end) in &ws {
@@ -1484,13 +1473,21 @@ fn the_order_of_byte_strings_is_the_order_of_slices() {
         "::the_order_of_byte_strings_is_the_order_of_slices"
     ));
     fn check(a: &[u8], b: &[u8]) {
-        assert_eq!(<Vec<u8> as VValue>::compare(a, b), a.cmp(b), "{a:?} {b:?}");
-        assert_eq!(<Vec<u8> as VValue>::compare(b, a), b.cmp(a), "{b:?} {a:?}");
         assert_eq!(
-            <Option<Vec<u8>> as VValue>::compare(Some(a), Some(b)),
+            <Vec<u8> as ColumnValueRef>::compare(a, b),
+            a.cmp(b),
+            "{a:?} {b:?}"
+        );
+        assert_eq!(
+            <Vec<u8> as ColumnValueRef>::compare(b, a),
+            b.cmp(a),
+            "{b:?} {a:?}"
+        );
+        assert_eq!(
+            <Option<Vec<u8>> as ColumnValueRef>::compare(Some(a), Some(b)),
             a.cmp(b)
         );
-        assert_eq!(<Vec<u8> as VValue>::same(a, b), a == b);
+        assert_eq!(<Vec<u8> as ColumnValueRef>::same(a, b), a == b);
     }
     let mut rng = Rng(0x0bde);
     let base: Vec<u8> = (0..300u32).map(|i| (i * 11 % 253) as u8).collect();
@@ -1527,15 +1524,15 @@ fn the_order_of_byte_strings_is_the_order_of_slices() {
         }
     }
     assert_eq!(
-        <Option<Vec<u8>> as VValue>::compare(None, Some(&[])),
+        <Option<Vec<u8>> as ColumnValueRef>::compare(None, Some(&[])),
         Ordering::Less
     );
     assert_eq!(
-        <Option<Vec<u8>> as VValue>::compare(Some(&[]), None),
+        <Option<Vec<u8>> as ColumnValueRef>::compare(Some(&[]), None),
         Ordering::Greater
     );
     assert_eq!(
-        <Option<Vec<u8>> as VValue>::compare(None, None),
+        <Option<Vec<u8>> as ColumnValueRef>::compare(None, None),
         Ordering::Equal
     );
 }
@@ -1578,7 +1575,7 @@ fn a_search_is_in_the_order_of_the_stored_numbers() {
 
     assert!(Rank::High < Rank::Mid && Rank::Mid < Rank::Low);
     let by_number = [Rank::Low, Rank::Low, Rank::Mid, Rank::High, Rank::High];
-    let v = VerifiedColumn::<Rank>::from_values(&by_number);
+    let v = Column::<Rank>::from_values(&by_number);
     assert_eq!(v.scope_to_value(Rank::Low, 0, 5), 0..2);
     assert_eq!(v.scope_to_value(Rank::Mid, 0, 5), 2..3);
     assert_eq!(v.scope_to_value(Rank::High, 0, 5), 3..5);
@@ -1587,7 +1584,7 @@ fn a_search_is_in_the_order_of_the_stored_numbers() {
 
     let mut nullable = vec![None, None];
     nullable.extend(by_number.map(Some));
-    let v = VerifiedColumn::<Option<Rank>>::from_values(&nullable);
+    let v = Column::<Option<Rank>>::from_values(&nullable);
     assert_eq!(v.scope_to_value(None, 0, 7), 0..2);
     assert_eq!(v.scope_to_value(Some(Rank::Low), 0, 7), 2..4);
     assert_eq!(v.scope_to_value(Some(Rank::High), 0, 7), 5..7);
@@ -1597,7 +1594,7 @@ fn a_search_is_in_the_order_of_the_stored_numbers() {
     // which is then taken out again
     let n = 3000;
     let ranks = [Rank::Low, Rank::Mid, Rank::High];
-    let mut v = VerifiedColumn::<Rank>::with_max_segments(3);
+    let mut v = Column::<Rank>::with_max_segments(3);
     for i in 0..n {
         v.push(ranks[i * 3 / n]);
         v.push(ranks[(i * 3 / n + 1) % 3]);
@@ -1637,11 +1634,7 @@ fn runs_of<T: Kind>(model: &[T]) -> Vec<(usize, T)> {
 /// gave: the column is then checked as a column of those values, which are
 /// returned. A remapped column's slabs are cut as a loaded one's are, so
 /// it is checked as one of those ([`check_loaded`]).
-fn check_remap<T: Kind>(
-    v: &mut VerifiedColumn<T>,
-    model: &[T],
-    f: impl Fn(usize, &T) -> T,
-) -> Vec<T> {
+fn check_remap<T: Kind>(v: &mut Column<T>, model: &[T], f: impl Fn(usize, &T) -> T) -> Vec<T> {
     let runs = runs_of(model);
     let seen_v = RefCell::new(vec![]);
     v.remap(|x: T| {
@@ -1699,7 +1692,7 @@ fn remaps<T: Kind>() {
                 if loaded {
                     let bytes = v.save();
                     let opts = LoadOpts::new().with_max_segments(budget);
-                    v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+                    v = Column::<T>::load_with(&bytes, opts).unwrap();
                 }
                 assert!(i != 5 || budget > 3 || loaded || v.slab_count() > 40);
                 let mut now = match kind {
@@ -1764,7 +1757,7 @@ fn a_remap_of_no_values() {
         v.clear();
         v.remap(|_| unreachable!());
         check(&v, &[]);
-        let mut v = VerifiedColumn::<T>::new();
+        let mut v = Column::<T>::new();
         v.remap(|_| unreachable!());
         check(&v, &[]);
         let x = T::fresh(&mut rng);
@@ -1856,10 +1849,10 @@ fn a_remap_whose_function_panics() {
 /// counts the number left at every step. What it prints of itself on the
 /// way is noted, for the test's digest to check against what the old
 /// API's iterator printed.
-fn check_iters<T: Kind>(v: &VerifiedColumn<T>, model: &[T], (a, b): (usize, usize), rng: &mut Rng) {
+fn check_iters<T: Kind>(v: &Column<T>, model: &[T], (a, b): (usize, usize), rng: &mut Rng) {
     let want = &model[a..b];
     let new = || v.iter_range(a, b);
-    let same = |x: &VerifiedIter<'_, T>, left: usize| {
+    let same = |x: &Iter<'_, T>, left: usize| {
         assert_eq!(x.len(), left);
         assert_eq!(x.size_hint(), (left, Some(left)));
         golden::note(&format!("{x:?}"));
@@ -2024,7 +2017,7 @@ fn iterators<T: Kind>() {
             if loaded {
                 let bytes = v.save();
                 let opts = LoadOpts::new().with_max_segments(budget);
-                v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+                v = Column::<T>::load_with(&bytes, opts).unwrap();
             }
             assert!(i != 6 || budget > 3 || loaded || v.slab_count() > 100);
             let mut ws = windows(&mut rng, &v.slab_lens(), n);
@@ -2099,8 +2092,8 @@ fn an_iterator_after_edits() {
 fn an_iterator_of_no_column() {
     let _golden = golden::test(concat!(module_path!(), "::an_iterator_of_no_column"));
     fn none<T: Kind>() {
-        let mut it = VerifiedIter::<T>::default();
-        assert_eq!(format!("{it:?}"), "VerifiedIter { pos: 0, items_left: 0 }");
+        let mut it = Iter::<T>::default();
+        assert_eq!(format!("{it:?}"), "Iter { pos: 0, items_left: 0 }");
         golden::note(&format!("{it:?}"));
         for _ in 0..2 {
             assert_eq!((it.len(), it.size_hint()), (0, (0, Some(0))));
@@ -2110,8 +2103,8 @@ fn an_iterator_of_no_column() {
             assert!(it.clone().next().is_none());
         }
         assert_eq!(it.fold(3, |n, _| n + 1), 3);
-        assert_eq!(VerifiedIter::<T>::default().count(), 0);
-        assert!(VerifiedIter::<T>::default().last().is_none());
+        assert_eq!(Iter::<T>::default().count(), 0);
+        assert!(Iter::<T>::default().last().is_none());
     }
     for_each_kind!(none);
 }
@@ -2121,7 +2114,7 @@ fn an_iterator_of_no_column() {
 /// (`slabs`); how many values it counts left; and what it prints of
 /// itself. Each is noted, for the test's digest to check against what the
 /// old API's iterator said.
-fn stand<T: Kind>(x: &VerifiedIter<'_, T>, slabs: bool) {
+fn stand<T: Kind>(x: &Iter<'_, T>, slabs: bool) {
     golden::note(&(x.pos(), x.end_pos()));
     if slabs {
         golden::note(&x.get_slab());
@@ -2136,8 +2129,8 @@ fn stand<T: Kind>(x: &VerifiedIter<'_, T>, slabs: bool) {
 /// an iterator of no column resumes on it) had no slab in the old API
 /// either; but one emptied by `clear` has none where the old API's kept
 /// an empty one.
-fn same_slabs<T: Kind>(v: &VerifiedColumn<T>) -> bool {
-    v.slab_count() > 0 || VerifiedIter::<T>::default().suspend().try_resume(v).is_ok()
+fn same_slabs<T: Kind>(v: &Column<T>) -> bool {
+    v.slab_count() > 0 || Iter::<T>::default().suspend().try_resume(v).is_ok()
 }
 
 /// The values of `model` in the window `a..b`, as the specifications
@@ -2154,10 +2147,7 @@ fn window<T>(model: &[T], a: usize, b: usize) -> &[T] {
 /// What a suspended iterator's state resumes to on a column: where the
 /// iterator stands, where its window ends and the values it has left. Or
 /// nothing, where the state does not fit the column.
-fn resumed<T: Kind>(
-    s: &VerifiedIterState,
-    v: &VerifiedColumn<T>,
-) -> Option<(usize, usize, Vec<T>)> {
+fn resumed<T: Kind>(s: &IterState, v: &Column<T>) -> Option<(usize, usize, Vec<T>)> {
     match s.try_resume(v) {
         Ok(it) => Some((it.pos(), it.end_pos(), rest_of(&it))),
         Err(e) => {
@@ -2172,11 +2162,7 @@ fn resumed<T: Kind>(
 /// left (and `stand` notes where it stands). The window ends where
 /// it did, or at the column's end where the iterator stood there. And a
 /// state resumes as often as it is asked.
-fn check_pause<'a, T: Kind>(
-    x: &VerifiedIter<'_, T>,
-    v: &'a VerifiedColumn<T>,
-    slabs: bool,
-) -> VerifiedIter<'a, T> {
+fn check_pause<'a, T: Kind>(x: &Iter<'_, T>, v: &'a Column<T>, slabs: bool) -> Iter<'a, T> {
     let s = x.suspend();
     let x2 = s.try_resume(v).unwrap();
     stand(&x2, slabs);
@@ -2207,7 +2193,7 @@ fn stays(p: usize, to: usize, n: usize) -> usize {
 /// window and the values, the verified operation's specification says,
 /// in every case. Its slabs, and what `stand` says of it before each
 /// move, are noted.
-fn check_moves<T: Kind>(v: &VerifiedColumn<T>, model: &[T], (a, b): (usize, usize), rng: &mut Rng) {
+fn check_moves<T: Kind>(v: &Column<T>, model: &[T], (a, b): (usize, usize), rng: &mut Rng) {
     let n = model.len();
     // the column lies in the slabs the old API's did, but that one emptied
     // by `clear` has no slab where the old API's had an empty one
@@ -2216,7 +2202,7 @@ fn check_moves<T: Kind>(v: &VerifiedColumn<T>, model: &[T], (a, b): (usize, usiz
     if v.slab_count() > 0 {
         golden::note(&v.slab_lens());
     }
-    let left = |x: &VerifiedIter<'_, T>| x.clone().map(T::keep).collect::<Vec<T>>();
+    let left = |x: &Iter<'_, T>| x.clone().map(T::keep).collect::<Vec<T>>();
     // a place: most often a little ahead of `from`
     let place = |rng: &mut Rng, from: usize| match rng.below(14) {
         0 => n,
@@ -2398,7 +2384,7 @@ fn an_iterator_moves_as_columns_does() {
                 if loaded {
                     let bytes = v.save();
                     let opts = LoadOpts::new().with_max_segments(budget);
-                    v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+                    v = Column::<T>::load_with(&bytes, opts).unwrap();
                 }
                 let mut ws = vec![(0, n), (0, 0), (n, n), (n / 3, n - n / 3)];
                 for _ in 0..6 {
@@ -2425,7 +2411,7 @@ fn an_iterator_of_no_column_moves_nowhere() {
         "::an_iterator_of_no_column_moves_nowhere"
     ));
     fn none<T: Kind>() {
-        let mut x = VerifiedIter::<T>::default();
+        let mut x = Iter::<T>::default();
         stand(&x, true);
         assert_eq!((x.pos(), x.end_pos(), x.get_slab()), (0, 0, 0));
         x.set_max(5);
@@ -2476,7 +2462,7 @@ fn model_runs<T: Kind>(vs: &[T]) -> Vec<(usize, T)> {
 }
 
 /// All the runs an iterator of runs gives.
-fn taken<T: Kind>(runs: VerifiedRuns<'_, T>) -> Vec<(usize, T)> {
+fn taken<T: Kind>(runs: Runs<'_, T>) -> Vec<(usize, T)> {
     runs.map(|r| (r.count, T::keep(r.value))).collect()
 }
 
@@ -2513,7 +2499,7 @@ fn runs_as_columns_does() {
                 if loaded {
                     let bytes = v.save();
                     let opts = LoadOpts::new().with_max_segments(budget);
-                    v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+                    v = Column::<T>::load_with(&bytes, opts).unwrap();
                 }
                 let slabs = same_slabs(&v);
                 let mut ws = vec![(0, n), (0, 0), (n, n), (n / 3, n - n / 3)];
@@ -2561,7 +2547,7 @@ fn runs_as_columns_does() {
                     assert_eq!(taken(x.runs()), model_runs(&model[a + k..b]));
 
                     // the runs make the values, in a column of their own
-                    let mut w = VerifiedColumn::<T>::new();
+                    let mut w = Column::<T>::new();
                     w.splice_runs(0, 0, v.iter_range(a, b).runs());
                     assert_eq!(new_values(&w), &model[a..b]);
                 }
@@ -2572,7 +2558,7 @@ fn runs_as_columns_does() {
 }
 
 /// What an iterator has left to give.
-fn rest_of<T: Kind>(x: &VerifiedIter<'_, T>) -> Vec<T> {
+fn rest_of<T: Kind>(x: &Iter<'_, T>) -> Vec<T> {
     x.clone().map(T::keep).collect()
 }
 
@@ -2610,7 +2596,7 @@ fn seek_ranges(rng: &mut Rng, p: usize, e: usize, n: usize, count: usize) -> Vec
 /// next if it is there. The range and what `stand` says after the search
 /// are noted.
 fn check_seek<T: Kind>(
-    v: &VerifiedColumn<T>,
+    v: &Column<T>,
     model: &[T],
     x: &T,
     (a, b, k): (usize, usize, usize),
@@ -2660,7 +2646,7 @@ fn check_seek<T: Kind>(
 /// nothing, its window ending where it stands. Each place and what
 /// `stand` says after it are noted. The number of places found is given.
 fn check_scan<T: Kind>(
-    v: &VerifiedColumn<T>,
+    v: &Column<T>,
     model: &[T],
     x: &T,
     (a, b, k): (usize, usize, usize),
@@ -2693,7 +2679,7 @@ fn check_scan<T: Kind>(
 /// Columns with the values `model`: built under the budgets 3 and 16, in
 /// many slabs, and under 64; and those of 3 and 64 loaded from their
 /// bytes too.
-fn columns_of<T: Kind>(rng: &mut Rng, model: &[T]) -> Vec<VerifiedColumn<T>> {
+fn columns_of<T: Kind>(rng: &mut Rng, model: &[T]) -> Vec<Column<T>> {
     let mut out = Vec::new();
     for (budget, loaded) in [(3, false), (3, true), (16, false), (64, true)] {
         let mut v = if budget < 64 {
@@ -2704,7 +2690,7 @@ fn columns_of<T: Kind>(rng: &mut Rng, model: &[T]) -> Vec<VerifiedColumn<T>> {
         if loaded {
             let bytes = v.save();
             let opts = LoadOpts::new().with_max_segments(budget);
-            v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+            v = Column::<T>::load_with(&bytes, opts).unwrap();
         }
         out.push(v);
     }
@@ -2835,7 +2821,7 @@ fn searches_as_columns_does() {
     fn none<T: Kind>() {
         let mut rng = Rng(0x4c0);
         let x = T::fresh(&mut rng);
-        let mut it = VerifiedIter::<T>::default();
+        let mut it = Iter::<T>::default();
         assert_eq!(it.scan_to_value(x.lend()), None);
         stand(&it, true);
         // one of them the wrong way round
@@ -2846,7 +2832,7 @@ fn searches_as_columns_does() {
             stand(&it, true);
             assert_eq!((it.pos(), it.end_pos()), (0, 0));
         }
-        let mut v = VerifiedColumn::<T>::new();
+        let mut v = Column::<T>::new();
         for emptied in [false, true] {
             if emptied {
                 v.push(x.lend());
@@ -2961,12 +2947,7 @@ fn a_column_read_in_pages() {
 
 /// One of the edits of a column, made of the column and of the model.
 /// Says whether it changed the values.
-fn an_edit<T: Kind>(
-    rng: &mut Rng,
-    which: usize,
-    v: &mut VerifiedColumn<T>,
-    model: &mut Vec<T>,
-) -> bool {
+fn an_edit<T: Kind>(rng: &mut Rng, which: usize, v: &mut Column<T>, model: &mut Vec<T>) -> bool {
     let n = model.len();
     let at = rng.below(n + 1);
     let del = rng.below((n - at).min(5) + 1);
@@ -3072,7 +3053,7 @@ fn an_edit_ends_what_was_suspended() {
             if round / 66 % 2 == 1 {
                 let bytes = v.save();
                 let opts = LoadOpts::new().with_max_segments(budget);
-                v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+                v = Column::<T>::load_with(&bytes, opts).unwrap();
             }
             let n = model.len();
             let (a, b, k) = windows_into(&mut rng, n, 1)[1];
@@ -3150,7 +3131,7 @@ fn a_cleared_column_refuses_what_was_suspended() {
             let mut v = column_with(&model, 64);
             if round / 24 == 1 {
                 let bytes = v.save();
-                v = VerifiedColumn::<T>::load(&bytes).unwrap();
+                v = Column::<T>::load(&bytes).unwrap();
             }
             let (a, b) = [(0, 0), (0, n), (0, 1), (n, n)][round / 3 % 4];
             let s = v.iter_range(a, b).suspend();
@@ -3210,7 +3191,7 @@ fn a_call_that_changes_no_value() {
             if round / 80 % 3 == 1 {
                 let bytes = v.save();
                 let opts = LoadOpts::new().with_max_segments(budget);
-                v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+                v = Column::<T>::load_with(&bytes, opts).unwrap();
             } else if round / 80 % 3 == 2 && n > 0 {
                 // a column that has counted edits
                 let x = T::fresh(&mut rng);
@@ -3320,11 +3301,11 @@ fn a_state_on_another_column() {
             for budget in [3, 64] {
                 let bytes = column_with(&model, 64).save();
                 let opts = LoadOpts::new().with_max_segments(budget);
-                cols.push(VerifiedColumn::<T>::load_with(&bytes, opts).unwrap());
+                cols.push(Column::<T>::load_with(&bytes, opts).unwrap());
             }
         }
         // a state, and the place where its iterator stood
-        let held = |x: &VerifiedIter<'_, T>| (x.suspend(), x.pos());
+        let held = |x: &Iter<'_, T>| (x.suspend(), x.pos());
         let (mut on_another, mut past) = (0, 0);
         for (i, va) in cols.iter().enumerate() {
             let n = va.len();
@@ -3385,11 +3366,11 @@ fn the_state_of_an_iterator_of_no_column() {
         "::the_state_of_an_iterator_of_no_column"
     ));
     fn plain<S: Send + Sync + 'static>() {}
-    plain::<VerifiedIterState>();
+    plain::<IterState>();
 
     fn none<T: Kind>() {
         let mut rng = Rng(0xd0);
-        let s = VerifiedIter::<T>::default().suspend();
+        let s = Iter::<T>::default().suspend();
         let model: Vec<T> = rng.values(30);
         // what each column gives, and whether it has no slab and no edit
         let mut seen = Vec::new();
@@ -3398,14 +3379,14 @@ fn the_state_of_an_iterator_of_no_column() {
             let mut v = column_of(model);
             seen.push((resumed(&s, &v), false));
             let bytes = v.save();
-            let v2 = VerifiedColumn::<T>::load(&bytes).unwrap();
+            let v2 = Column::<T>::load(&bytes).unwrap();
             assert_eq!(v2.slab_count() == 0, model.is_empty());
             seen.push((resumed(&s, &v2), model.is_empty()));
             // a cleared column has counted an edit
             v.clear();
             seen.push((resumed(&s, &v), false));
         }
-        let mut v = VerifiedColumn::<T>::new();
+        let mut v = Column::<T>::new();
         assert_eq!(v.slab_count(), 0);
         seen.push((resumed(&s, &v), true));
         v.clear();
@@ -3453,7 +3434,7 @@ fn a_fold_calls_its_function_for_each_value() {
 /// rest with the same error. The checked decoders (`check_same_decoder`)
 /// read what loads.
 fn check_same_load<T: Kind>(bytes: &[u8]) -> bool {
-    let v = VerifiedColumn::<T>::load(bytes);
+    let v = Column::<T>::load(bytes);
     let decodes = check_same_decoder::<T>(bytes);
     match v {
         Ok(v) => {
@@ -3481,7 +3462,7 @@ fn check_same_load<T: Kind>(bytes: &[u8]) -> bool {
 /// The error of a load that is refused.
 fn refusal<T: Kind>(bytes: &[u8]) -> String {
     assert!(!check_same_load::<T>(bytes), "loaded {bytes:?}");
-    VerifiedColumn::<T>::load(bytes).err().unwrap().to_string()
+    Column::<T>::load(bytes).err().unwrap().to_string()
 }
 
 #[test]
@@ -3787,7 +3768,7 @@ fn loads_of_another_types_bytes() {
 fn strings_are_lent() {
     let _golden = golden::test(concat!(module_path!(), "::strings_are_lent"));
     let last = "größer: 日本語 🦀";
-    let mut v = VerifiedColumn::<String>::new();
+    let mut v = Column::<String>::new();
     v.splice(0, 0, &["ant", "bee", "bee"]);
     v.push(last);
     let first: &str = v.get(0).unwrap();
@@ -3835,12 +3816,20 @@ fn the_order_of_strings_is_the_order_of_str() {
         "::the_order_of_strings_is_the_order_of_str"
     ));
     fn check(a: &str, b: &str) {
-        assert_eq!(<String as VValue>::compare(a, b), a.cmp(b), "{a:?} {b:?}");
-        assert_eq!(<String as VValue>::compare(b, a), b.cmp(a), "{b:?} {a:?}");
-        assert_eq!(<String as VValue>::same(a, b), a == b);
+        assert_eq!(
+            <String as ColumnValueRef>::compare(a, b),
+            a.cmp(b),
+            "{a:?} {b:?}"
+        );
+        assert_eq!(
+            <String as ColumnValueRef>::compare(b, a),
+            b.cmp(a),
+            "{b:?} {a:?}"
+        );
+        assert_eq!(<String as ColumnValueRef>::same(a, b), a == b);
         // as their bytes stand, for a column of byte strings
         assert_eq!(
-            <Vec<u8> as VValue>::compare(a.as_bytes(), b.as_bytes()),
+            <Vec<u8> as ColumnValueRef>::compare(a.as_bytes(), b.as_bytes()),
             a.cmp(b)
         );
     }
@@ -3896,7 +3885,11 @@ fn the_order_of_strings_is_the_order_of_str() {
     ];
     for (i, a) in ends.iter().enumerate() {
         for (j, b) in ends.iter().enumerate() {
-            assert_eq!(<String as VValue>::compare(a, b), i.cmp(&j), "{a:?} {b:?}");
+            assert_eq!(
+                <String as ColumnValueRef>::compare(a, b),
+                i.cmp(&j),
+                "{a:?} {b:?}"
+            );
         }
     }
 }
@@ -4084,14 +4077,14 @@ fn loads_refuse_bad_strings() {
         assert!(check_same_load::<String>(b), "refused {b:?}");
     }
     let two = [0x7e, 2, 0xc3, 0xa9, 4, 0xf0, 0x9f, 0xa6, 0x80];
-    let v = VerifiedColumn::<String>::load(&two).unwrap();
+    let v = Column::<String>::load(&two).unwrap();
     assert_eq!(v.to_vec(), ["é", "🦀"]);
     // strings save as their bytes do, and load as them
     let model: Vec<String> = Rng(0x57b17e).values(200);
     let as_bytes: Vec<Vec<u8>> = model.iter().map(|s| s.as_bytes().to_vec()).collect();
     let saved = column_of(&model).save();
     assert_eq!(saved, column_of(&as_bytes).save());
-    let v = VerifiedColumn::<Vec<u8>>::load(&saved).unwrap();
+    let v = Column::<Vec<u8>>::load(&saved).unwrap();
     assert_eq!(new_values(&v), as_bytes);
 }
 
@@ -4105,7 +4098,7 @@ fn load_with_options<T: Kind>(
     length: Option<usize>,
     fill: Option<&T>,
     max_segments: Option<usize>,
-) -> Result<VerifiedColumn<T>, PackError> {
+) -> Result<Column<T>, PackError> {
     let opts = || {
         let mut opts = LoadOpts::new();
         if let Some(n) = length {
@@ -4117,8 +4110,8 @@ fn load_with_options<T: Kind>(
         opts
     };
     let v = match fill {
-        Some(x) => VerifiedColumn::<T>::load_with(bytes, opts().with_fill(x.lend())),
-        None => VerifiedColumn::<T>::load_with(bytes, opts()),
+        Some(x) => Column::<T>::load_with(bytes, opts().with_fill(x.lend())),
+        None => Column::<T>::load_with(bytes, opts()),
     };
     match v {
         Ok(v) => {
@@ -4217,7 +4210,7 @@ fn load_fills<T: Kind>() {
             let model = vec![x.clone(); n];
             check(&v, &model);
             assert!(v.is_only(x.lend()));
-            assert_eq!(v.save(), VerifiedColumn::<T>::fill(n, x.lend()).save());
+            assert_eq!(v.save(), Column::<T>::fill(n, x.lend()).save());
             check_loads(&v, &model);
         }
         // a fill value and no length fills nothing
@@ -4344,7 +4337,7 @@ fn a_fill_state_of_a_clients_own() {
     assert_eq!(Seven.fill_value(), Some(7));
     assert_eq!(MaybeFill::<u64>::fill_value(NoFill), None);
     let opts = LoadOpts::default().with_length(2).with_fill(7u64);
-    let twice = [opts, opts].map(|o| VerifiedColumn::<u64>::load_with(&[], o).unwrap());
+    let twice = [opts, opts].map(|o| Column::<u64>::load_with(&[], o).unwrap());
     assert_eq!(twice[0].to_vec(), [7, 7]);
     assert_eq!(twice[1].to_vec(), [7, 7]);
 }
@@ -4445,7 +4438,7 @@ fn bytes_of_too_many_values_are_an_error() {
 /// built of values and not loaded: of one slab and of many, built at once,
 /// edited in small slabs, loaded in small slabs, and filled. None is
 /// empty.
-fn layouts<T: Kind>() -> Vec<(VerifiedColumn<T>, Vec<T>, bool)> {
+fn layouts<T: Kind>() -> Vec<(Column<T>, Vec<T>, bool)> {
     let mut rng = Rng(0x51ab);
     let x = T::fresh(&mut rng);
     let mut models: Vec<Vec<T>> = vec![
@@ -4463,7 +4456,7 @@ fn layouts<T: Kind>() -> Vec<(VerifiedColumn<T>, Vec<T>, bool)> {
         out.push((column_of(&model), model, true));
     }
     for budget in [2, 3, 4, 8] {
-        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut v = Column::<T>::with_max_segments(budget);
         let mut model = vec![T::fresh(&mut rng)];
         v.push(model[0].lend());
         for _ in 0..30 {
@@ -4478,7 +4471,7 @@ fn layouts<T: Kind>() -> Vec<(VerifiedColumn<T>, Vec<T>, bool)> {
         out.push((v, model.clone(), true));
         out.push((loaded, model, false));
     }
-    let mut v = VerifiedColumn::<T>::fill(500, x.lend());
+    let mut v = Column::<T>::fill(500, x.lend());
     let mut model = vec![x.clone(); 500];
     out.push((v.clone(), model.clone(), true));
     let y = T::fresh(&mut rng);
@@ -4493,7 +4486,7 @@ fn layouts<T: Kind>() -> Vec<(VerifiedColumn<T>, Vec<T>, bool)> {
 /// many values and how many runs it holds, and the first and the last of
 /// its runs, which are the equal values the slab starts with and those it
 /// ends with.
-fn slab_lines<T: Kind>(v: &VerifiedColumn<T>, model: &[T]) -> Vec<String>
+fn slab_lines<T: Kind>(v: &Column<T>, model: &[T]) -> Vec<String>
 where
     for<'a> Get<'a, T>: Debug,
 {
@@ -4721,7 +4714,7 @@ fn the_layout_after_a_panic_in_an_edit() {
         "::the_layout_after_a_panic_in_an_edit"
     ));
     let most = i64::MAX as usize;
-    let mut v = VerifiedColumn::<u64>::new();
+    let mut v = Column::<u64>::new();
     v.splice_runs(
         0,
         0,
@@ -4743,7 +4736,7 @@ fn the_layout_after_a_panic_in_an_edit() {
     v.check_invariants();
     assert!(v.validate_encoding().is_ok());
     // what the old API's empty column printed, but for the name
-    assert_eq!(format!("{v:?}"), "VerifiedColumn { len: 0, slabs: 0 }");
+    assert_eq!(format!("{v:?}"), "Column { len: 0, slabs: 0 }");
     // a search of no values asks for none of the column's parts
     assert_eq!(v.scope_to_value(7, 0, 0), 0..0);
     // and an iterator has nothing to give, however it is asked
@@ -4768,7 +4761,7 @@ fn the_layout_after_a_panic_in_an_edit() {
     golden::note(&new);
 }
 
-// ── `VerifiedEncoder` ───────────────────────────────────────────────────
+// ── `Encoder` ───────────────────────────────────────────────────
 //
 // The verified API's encoder: given values in steps, it counts them and
 // saves the bytes a column of the values saves. The digests check that it
@@ -4778,7 +4771,7 @@ fn the_layout_after_a_panic_in_an_edit() {
 /// An encoder, and how many values it was given. After each step it has
 /// counted the values given so far.
 struct CountedEncoder<'a, T: Kind> {
-    new: VerifiedEncoder<'a, T>,
+    new: Encoder<'a, T>,
     len: usize,
 }
 
@@ -4786,8 +4779,8 @@ impl<'a, T: Kind> CountedEncoder<'a, T> {
     /// An encoder with the segment budget `max`, or with none.
     fn with(max: Option<usize>) -> Self {
         let new = match max {
-            Some(max) => VerifiedEncoder::with_max_segments(max),
-            None => VerifiedEncoder::new(),
+            Some(max) => Encoder::with_max_segments(max),
+            None => Encoder::new(),
         };
         let mut e = CountedEncoder { new, len: 0 };
         e.counted(0);
@@ -4797,7 +4790,7 @@ impl<'a, T: Kind> CountedEncoder<'a, T> {
     /// An encoder with the default segment budget: what `with_segments`
     /// gives.
     fn with_segments() -> Self {
-        let new = VerifiedEncoder::with_segments();
+        let new = Encoder::with_segments();
         let mut e = CountedEncoder { new, len: 0 };
         e.counted(0);
         e
@@ -4903,7 +4896,7 @@ impl<'a, T: Kind> CountedEncoder<'a, T> {
     fn save(self) -> Vec<u8> {
         assert_eq!(
             format!("{:?}", self.new),
-            format!("VerifiedEncoder {{ len: {} }}", self.len)
+            format!("Encoder {{ len: {} }}", self.len)
         );
         let bytes = self.new.save();
         golden::note(&bytes);
@@ -4935,7 +4928,7 @@ impl<'a, T: Kind> CountedEncoder<'a, T> {
     }
 
     /// The column the encoder becomes.
-    fn into_column(self) -> VerifiedColumn<T> {
+    fn into_column(self) -> Column<T> {
         self.new.into_column()
     }
 }
@@ -4954,19 +4947,16 @@ fn check_encoders<T: Kind>(model: &[T], other: &T, rng: &mut Rng) {
         let saved = CountedEncoder::given(model, other, how, &mut Rng(salt)).save_to(&held);
         assert_eq!(saved, bytes, "how {how}");
     }
-    assert_eq!(
-        new_values(&VerifiedColumn::<T>::load(&bytes).unwrap()),
-        model
-    );
+    assert_eq!(new_values(&Column::<T>::load(&bytes).unwrap()), model);
 
     // from what a column's iterator gives: the column's bytes again
-    let mut e = VerifiedEncoder::<T>::new();
+    let mut e = Encoder::<T>::new();
     e.extend(v.iter());
     assert_eq!(e.len(), model.len());
     assert_eq!(e.save(), bytes);
     // and in two parts, with a value of the model's own between
     let cut = rng.below(model.len() + 1);
-    let mut e = VerifiedEncoder::<T>::default();
+    let mut e = Encoder::<T>::default();
     e.extend(v.iter_range(0, cut));
     if let Some(x) = model.get(cut) {
         e.append_owned(x.clone());
@@ -5046,17 +5036,17 @@ fn encoders_agree_on_literal_runs() {
 fn empty_encoders<T: Kind>() {
     let mut rng = Rng(0xe0);
     let x = T::fresh(&mut rng);
-    let none = VerifiedColumn::<T>::new().save();
+    let none = Column::<T>::new().save();
     golden::note(&none);
     golden::note(&none);
-    assert_eq!(VerifiedEncoder::<T>::new().save(), none);
-    assert_eq!(VerifiedEncoder::<T>::default().save(), none);
-    let mut e = VerifiedEncoder::<T>::new();
+    assert_eq!(Encoder::<T>::new().save(), none);
+    assert_eq!(Encoder::<T>::default().save(), none);
+    let mut e = Encoder::<T>::new();
     e.append_n(x.lend(), 0);
     e.append_n_owned(x.clone(), 0);
     e.extend(std::iter::empty());
     assert!(e.is_empty());
-    assert_eq!(format!("{e:?}"), "VerifiedEncoder { len: 0 }");
+    assert_eq!(format!("{e:?}"), "Encoder { len: 0 }");
     let mut out = vec![5u8];
     assert_eq!(e.save_to(&mut out), 1..1 + none.len());
     assert_eq!(out[1..], none[..]);
@@ -5083,7 +5073,7 @@ fn encoders_count_to_the_end() {
 
     let numbers = |first: usize, then: &'static [(u64, usize)]| {
         let new = panic_of(move || {
-            let mut e = VerifiedEncoder::<u64>::new();
+            let mut e = Encoder::<u64>::new();
             e.append_n(1, first);
             e.append_n(2, first);
             for &(x, n) in then {
@@ -5110,18 +5100,18 @@ fn encoders_count_to_the_end() {
         Some(said.clone())
     );
 
-    let mut e = VerifiedEncoder::<u64>::new();
+    let mut e = Encoder::<u64>::new();
     e.append_n(1, half - 1);
     e.append_n_owned(2, half - 1);
     assert_eq!(e.len(), usize::MAX - 3);
     assert_eq!(
         format!("{e:?}"),
-        format!("VerifiedEncoder {{ len: {} }}", usize::MAX - 3)
+        format!("Encoder {{ len: {} }}", usize::MAX - 3)
     );
 
     let bools = |first: usize, then: &'static [(bool, usize)]| {
         let new = panic_of(move || {
-            let mut e = VerifiedEncoder::<bool>::new();
+            let mut e = Encoder::<bool>::new();
             e.append_n(true, first);
             e.append_n(false, first);
             for &(x, n) in then {
@@ -5145,7 +5135,7 @@ fn encoders_count_to_the_end() {
     // nulls, whose count has no sign either
     let nulls = |n: usize, more: usize| {
         let new = panic_of(move || {
-            let mut e = VerifiedEncoder::<Option<u64>>::new();
+            let mut e = Encoder::<Option<u64>>::new();
             e.append_n(None, n);
             e.append_n(None, more);
             (e.len(), e.save())
@@ -5170,7 +5160,7 @@ fn encoders_of_the_longest_runs() {
     let most = i64::MAX as usize;
     let run = |count: usize, then: Option<u64>| {
         let new = panic_of(move || {
-            let mut e = VerifiedEncoder::<u64>::new();
+            let mut e = Encoder::<u64>::new();
             e.append_n(7, count);
             if let Some(x) = then {
                 e.append(x);
@@ -5186,12 +5176,12 @@ fn encoders_of_the_longest_runs() {
     assert!(said.contains("is not encodable"), "{said}");
     assert_eq!(run(most + 1, None), Some(said));
 
-    let mut e = VerifiedEncoder::<u64>::new();
+    let mut e = Encoder::<u64>::new();
     e.append_n(7, most);
-    assert_eq!(e.save(), VerifiedColumn::<u64>::fill(most, 7).save());
+    assert_eq!(e.save(), Column::<u64>::fill(most, 7).save());
 }
 
-// ── `VerifiedEncoder`: a segment budget ─────────────────────────────────
+// ── `Encoder`: a segment budget ─────────────────────────────────
 //
 // An encoder made with a segment budget: what it saves, what it writes
 // when asked to save unless every value is a given one, and the column it
@@ -5294,7 +5284,7 @@ fn budgeted_encoders_agree() {
 /// enough to be cut they are not those a budget of 32 gives.
 fn default_budget<T: Kind>() {
     let mut rng = Rng(0x5e6de7a);
-    let layout = |v: &VerifiedColumn<T>| (v.slab_lens(), v.slab_segments());
+    let layout = |v: &Column<T>| (v.slab_lens(), v.slab_segments());
     let models: Vec<Vec<T>> = vec![
         vec![],
         vec![T::fresh(&mut rng); 3],
@@ -5392,8 +5382,8 @@ fn encoders_become_columns_to_the_end() {
     {
         let new = panic_of(move || {
             let mut e = match max {
-                Some(max) => VerifiedEncoder::<T>::with_max_segments(max),
-                None => VerifiedEncoder::new(),
+                Some(max) => Encoder::<T>::with_max_segments(max),
+                None => Encoder::new(),
             };
             for (x, n) in &runs {
                 e.append_n_owned(x.clone(), *n);
@@ -5723,7 +5713,7 @@ fn remapping_encoders_leave_the_buffer_at_a_panic() {
     for_each_kind!(remapping_panics);
 }
 
-// ── `VerifiedEncoderState` and the static forms ─────────────────────────
+// ── `EncoderState` and the static forms ─────────────────────────
 //
 // The verified API's state that writes into a buffer of its caller's,
 // and the static forms `encode`, `encode_to` and `encode_to_unless`. The
@@ -5735,7 +5725,7 @@ fn remapping_encoders_leave_the_buffer_at_a_panic() {
 /// of a value whether every value given so far is that one, and says it
 /// rightly, and the buffer still begins with what it held.
 struct CountedState<'a, T: Kind> {
-    new: VerifiedEncoderState<'a, T>,
+    new: EncoderState<'a, T>,
     buf: Vec<u8>,
     held: &'a [u8],
     model: &'a [T],
@@ -5750,8 +5740,8 @@ impl<'a, T: Kind> CountedState<'a, T> {
     fn on(held: &'a [u8], model: &'a [T], other: &'a T, default: bool) -> Self {
         let mut s = CountedState {
             new: match default {
-                false => VerifiedEncoderState::new(),
-                true => VerifiedEncoderState::default(),
+                false => EncoderState::new(),
+                true => EncoderState::default(),
             },
             buf: held.to_vec(),
             held,
@@ -5856,21 +5846,21 @@ fn check_streams<T: Kind>(model: &[T], other: &T, rng: &mut Rng) {
         assert_eq!(s.give(how, rng).finish(), bytes, "how {how}");
     }
 
-    let new = VerifiedEncoder::<T>::encode(model.iter().map(T::lend));
+    let new = Encoder::<T>::encode(model.iter().map(T::lend));
     golden::note(&new);
     assert_eq!(new, bytes);
-    assert_eq!(VerifiedEncoder::<T>::encode(lent(model)), bytes);
-    assert_eq!(VerifiedEncoder::<T>::encode(v.iter()), bytes);
+    assert_eq!(Encoder::<T>::encode(lent(model)), bytes);
+    assert_eq!(Encoder::<T>::encode(v.iter()), bytes);
 
     let held = &holds[rng.below(3)];
     let mut a = held.clone();
-    let range = VerifiedEncoder::<T>::encode_to(&mut a, model.iter().map(T::lend));
+    let range = Encoder::<T>::encode_to(&mut a, model.iter().map(T::lend));
     golden::note(&range);
     assert_eq!(range, held.len()..a.len());
     assert_eq!(a[..held.len()], held[..]);
     assert_eq!(a[held.len()..], bytes[..]);
     // and a second after the first, from a column's iterator
-    let range = VerifiedEncoder::<T>::encode_to(&mut a, v.iter());
+    let range = Encoder::<T>::encode_to(&mut a, v.iter());
     assert_eq!(range, held.len() + bytes.len()..a.len());
     assert_eq!(a[range], bytes[..]);
 
@@ -5879,8 +5869,7 @@ fn check_streams<T: Kind>(model: &[T], other: &T, rng: &mut Rng) {
         .flatten()
     {
         let mut a = held.clone();
-        let range =
-            VerifiedEncoder::<T>::encode_to_unless(&mut a, model.iter().map(T::lend), x.lend());
+        let range = Encoder::<T>::encode_to_unless(&mut a, model.iter().map(T::lend), x.lend());
         golden::note(&range);
         assert_eq!(range, held.len()..a.len());
         if model.iter().all(|y| y == x) {
@@ -5965,11 +5954,11 @@ fn states_agree_on_literal_runs() {
 fn empty_streams<T: Kind>() {
     let mut rng = Rng(0x57a7e0);
     let (x, y) = (T::fresh(&mut rng), T::fresh(&mut rng));
-    assert!(VerifiedColumn::<T>::new().save().is_empty());
-    assert!(VerifiedEncoder::<T>::encode(std::iter::empty()).is_empty());
+    assert!(Column::<T>::new().save().is_empty());
+    assert!(Encoder::<T>::encode(std::iter::empty()).is_empty());
     for held in [vec![], vec![5u8], vec![0u8; 70]] {
         let mut buf = held.clone();
-        let mut s = VerifiedEncoderState::<T>::new();
+        let mut s = EncoderState::<T>::new();
         s.append_n(&mut buf, x.lend(), 0);
         s.append_n_owned(&mut buf, y.clone(), 0);
         s.extend(&mut buf, std::iter::empty());
@@ -5979,17 +5968,17 @@ fn empty_streams<T: Kind>() {
         assert_eq!(buf, held);
 
         assert_eq!(
-            VerifiedEncoder::<T>::encode_to(&mut buf, std::iter::empty()),
+            Encoder::<T>::encode_to(&mut buf, std::iter::empty()),
             held.len()..held.len()
         );
         assert_eq!(
-            VerifiedEncoder::<T>::encode_to_unless(&mut buf, std::iter::empty(), x.lend()),
+            Encoder::<T>::encode_to_unless(&mut buf, std::iter::empty(), x.lend()),
             held.len()..held.len()
         );
         assert_eq!(buf, held);
 
         // a state made before the buffer holds what it is to follow
-        let mut s = VerifiedEncoderState::<T>::default();
+        let mut s = EncoderState::<T>::default();
         let mut buf = held.clone();
         buf.push(1);
         s.append(&mut buf, x.lend());
@@ -6023,17 +6012,17 @@ fn states_follow_one_another() {
         let held = vec![7u8; round % 4];
 
         let mut a = held.clone();
-        let mut s = VerifiedEncoderState::<u64>::new();
+        let mut s = EncoderState::<u64>::new();
         s.extend(&mut a, ids.iter().copied());
         s.finish(&mut a);
         let first = a.len();
-        let mut s = VerifiedEncoderState::<bool>::default();
+        let mut s = EncoderState::<bool>::default();
         for x in &flags {
             s.append(&mut a, *x);
         }
         s.finish(&mut a);
         let second = a.len();
-        let mut s = VerifiedEncoderState::<Option<Vec<u8>>>::new();
+        let mut s = EncoderState::<Option<Vec<u8>>>::new();
         s.extend(&mut a, names.iter().map(|x| x.as_deref()));
         s.finish(&mut a);
 
@@ -6044,11 +6033,11 @@ fn states_follow_one_another() {
         assert_eq!(a, c);
 
         let h = held.len();
-        let load = VerifiedColumn::<u64>::load(&a[h..first]).unwrap();
+        let load = Column::<u64>::load(&a[h..first]).unwrap();
         assert_eq!(new_values(&load), ids);
-        let load = VerifiedColumn::<bool>::load(&a[first..second]).unwrap();
+        let load = Column::<bool>::load(&a[first..second]).unwrap();
         assert_eq!(new_values(&load), flags);
-        let load = VerifiedColumn::<Option<Vec<u8>>>::load(&a[second..]).unwrap();
+        let load = Column::<Option<Vec<u8>>>::load(&a[second..]).unwrap();
         assert_eq!(new_values(&load), names);
     }
 }
@@ -6068,7 +6057,7 @@ fn states_count_to_the_end() {
     let numbers = |first: usize, then: &'static [(u64, usize)]| {
         let new = panic_of(move || {
             let mut buf = vec![3u8];
-            let mut s = VerifiedEncoderState::<u64>::new();
+            let mut s = EncoderState::<u64>::new();
             s.append_n(&mut buf, 1, first);
             s.append_n(&mut buf, 2, first);
             for &(x, n) in then {
@@ -6100,14 +6089,14 @@ fn states_count_to_the_end() {
     // what the states that count to the end write is what the encoders
     // save
     let mut buf = vec![];
-    let mut s = VerifiedEncoderState::<u64>::new();
+    let mut s = EncoderState::<u64>::new();
     s.append_n(&mut buf, 1, half - 1);
     s.append_n_owned(&mut buf, 2, half - 1);
     s.append_owned(&mut buf, 3);
     assert_eq!(s.len(), usize::MAX - 2);
     assert!(!s.is_single_run_of(1));
     s.finish(&mut buf);
-    let mut e = VerifiedEncoder::<u64>::new();
+    let mut e = Encoder::<u64>::new();
     e.append_n(1, half - 1);
     e.append_n(2, half - 1);
     e.append(3);
@@ -6116,7 +6105,7 @@ fn states_count_to_the_end() {
     let bools = |first: usize, then: &'static [(bool, usize)]| {
         let new = panic_of(move || {
             let mut buf = vec![3u8];
-            let mut s = VerifiedEncoderState::<bool>::new();
+            let mut s = EncoderState::<bool>::new();
             s.append_n(&mut buf, true, first);
             s.append_n(&mut buf, false, first);
             for &(x, n) in then {
@@ -6143,7 +6132,7 @@ fn states_count_to_the_end() {
     let nulls = |n: usize, more: usize| {
         let new = panic_of(move || {
             let mut buf = vec![];
-            let mut s = VerifiedEncoderState::<Option<u64>>::new();
+            let mut s = EncoderState::<Option<u64>>::new();
             s.append_n(&mut buf, None, n);
             s.append_n(&mut buf, None, more);
             let (len, all) = (s.len(), s.is_single_run_of(None));
@@ -6180,22 +6169,22 @@ fn static_forms_read_an_iterator_once() {
                 *x
             })
         };
-        assert_eq!(VerifiedEncoder::<u64>::encode(counting()), bytes);
+        assert_eq!(Encoder::<u64>::encode(counting()), bytes);
         assert_eq!(given.get(), model.len());
         let mut out = vec![4u8];
-        VerifiedEncoder::<u64>::encode_to(&mut out, counting());
+        Encoder::<u64>::encode_to(&mut out, counting());
         assert_eq!(given.get(), model.len());
         assert_eq!(out[1..], bytes[..]);
         let unless = model.first().copied().unwrap_or(0);
         let mut out = vec![4u8];
-        let range = VerifiedEncoder::<u64>::encode_to_unless(&mut out, counting(), unless);
+        let range = Encoder::<u64>::encode_to_unless(&mut out, counting(), unless);
         assert_eq!(given.get(), model.len());
         assert_eq!(range.is_empty(), model.iter().all(|x| *x == unless));
         assert_eq!(out.len(), range.end);
     }
 }
 
-/// A run a `VerifiedDecoder` gave.
+/// A run a `Decoder` gave.
 fn new_run<T: Kind>(r: Option<Run<Get<'_, T>>>) -> Option<(usize, T)> {
     r.map(|r| (r.count, T::keep(r.value)))
 }
@@ -6222,7 +6211,7 @@ fn model_scan<T: Kind>(vs: &[T], x: &T, max: usize) -> ((usize, usize), usize) {
     ((skipped, 0), skipped)
 }
 
-/// A `VerifiedDecoder` of the bytes `model` saves to, stepped at random:
+/// A `Decoder` of the bytes `model` saves to, stepped at random:
 /// what it gives at each step is what `model` has there, and it has the
 /// values `model` has left. So do the copies taken of it on the way,
 /// when it has moved on. At the end each call gives nothing, and leaves
@@ -6230,9 +6219,9 @@ fn model_scan<T: Kind>(vs: &[T], x: &T, max: usize) -> ((usize, usize), usize) {
 fn check_decoders<T: Kind>(model: &[T], rng: &mut Rng) {
     let ts = targets(rng, model);
     let bytes = column_of(model).save();
-    let mut x = VerifiedDecoder::<T>::new(&bytes);
+    let mut x = Decoder::<T>::new(&bytes);
     assert_eq!(new_values_of(&x), model);
-    let tried = VerifiedDecoder::<T>::try_new(&bytes).unwrap();
+    let tried = Decoder::<T>::try_new(&bytes).unwrap();
     assert_eq!(new_values_of(&tried), model);
 
     let mut copies = Vec::new();
@@ -6306,8 +6295,8 @@ fn check_decoders<T: Kind>(model: &[T], rng: &mut Rng) {
     }
 }
 
-/// What a `VerifiedDecoder` has left.
-fn new_values_of<T: Kind>(x: &VerifiedDecoder<'_, T>) -> Vec<T> {
+/// What a `Decoder` has left.
+fn new_values_of<T: Kind>(x: &Decoder<'_, T>) -> Vec<T> {
     x.clone().map(T::keep).collect()
 }
 
@@ -6339,7 +6328,7 @@ fn decoders<T: Kind>() {
     }
 }
 
-/// A `VerifiedDecoder` reads saved bytes as their values are: value by
+/// A `Decoder` reads saved bytes as their values are: value by
 /// value, in steps, run by run, a run in parts, and in scans for a value,
 /// for every value type. Its digest checks that each read and each scan
 /// gives what the old API's decoder gave.
@@ -6355,7 +6344,7 @@ fn decoders_agree() {
 /// checked decoder took, reads them as that did, and refuses the rest
 /// with its error.
 fn check_same_decoder<T: Kind>(bytes: &[u8]) -> bool {
-    match VerifiedDecoder::<T>::try_new(bytes) {
+    match Decoder::<T>::try_new(bytes) {
         Ok(mut x) => {
             for k in [0, 7, usize::MAX] {
                 let a = x.clone().nth(k).map(T::keep);
@@ -6387,7 +6376,7 @@ fn a_decoder_lends_what_the_bytes_hold() {
     let words = ["pear".to_string(), String::new(), "größer".to_string()];
     let bytes = column_of(&words).save();
     let (first, run) = {
-        let mut d = VerifiedDecoder::<String>::new(&bytes);
+        let mut d = Decoder::<String>::new(&bytes);
         (d.next(), d.next_run())
     };
     assert_eq!(first, Some("pear"));
@@ -6395,7 +6384,7 @@ fn a_decoder_lends_what_the_bytes_hold() {
     let blobs = [Some(b"ab".to_vec()), None, None];
     let bytes = column_of(&blobs).save();
     let (first, second) = {
-        let mut d = VerifiedDecoder::<Option<Vec<u8>>>::new(&bytes);
+        let mut d = Decoder::<Option<Vec<u8>>>::new(&bytes);
         (d.next(), d.nth(1))
     };
     assert_eq!(first, Some(Some(&b"ab"[..])));
@@ -6420,7 +6409,7 @@ fn decoders_of_the_longest_runs() {
     assert!(check_same_decoder::<u64>(&bytes));
     assert!(check_same_decoder::<Option<u64>>(&bytes));
     let long = i64::MAX as usize;
-    let mut x = VerifiedDecoder::<u64>::try_new(&bytes).unwrap();
+    let mut x = Decoder::<u64>::try_new(&bytes).unwrap();
     assert_eq!(x.next_run_max(5), Some(Run { count: 5, value: 7 }));
     let rest = Some(Run {
         count: long - 5,
@@ -6441,7 +6430,7 @@ fn decoders_of_the_longest_runs() {
     nulls.push(1);
     assert!(check_same_decoder::<Option<u64>>(&nulls));
     assert!(check_same_decoder::<Option<Vec<u8>>>(&nulls));
-    let mut x = VerifiedDecoder::<Option<u64>>::try_new(&nulls).unwrap();
+    let mut x = Decoder::<Option<u64>>::try_new(&nulls).unwrap();
     let all = Some(Run {
         count: usize::MAX,
         value: None,
@@ -6454,7 +6443,7 @@ fn decoders_of_the_longest_runs() {
     flags.extend([0xff; 8]);
     flags.extend([1, 2]);
     assert!(check_same_decoder::<bool>(&flags));
-    let mut x = VerifiedDecoder::<bool>::try_new(&flags).unwrap();
+    let mut x = Decoder::<bool>::try_new(&flags).unwrap();
     assert_eq!(x.scan_for(true, usize::MAX - 1), (usize::MAX - 2, 1));
     assert_eq!((x.next(), x.next()), (Some(true), None));
 }
@@ -6468,19 +6457,19 @@ fn decoders_of_the_longest_runs() {
 fn the_kind_of_a_plain_column() {
     let _golden = golden::test(concat!(module_path!(), "::the_kind_of_a_plain_column"));
     let vs: Vec<u64> = (0..2000).map(|i| i / 7).collect();
-    let named = VerifiedColumn::<u64, Leb128, LenIndex>::from_values(&vs);
-    let short: VerifiedColumn<u64> = named.clone();
-    let collected: VerifiedColumn<u64, Leb128, LenIndex> = vs.iter().copied().collect();
-    let loaded = VerifiedColumn::<u64, Leb128, LenIndex>::load(&short.save()).unwrap();
-    let with: VerifiedColumn<u64> = VerifiedColumn::load_with(
+    let named = Column::<u64, Leb128, LenIndex>::from_values(&vs);
+    let short: Column<u64> = named.clone();
+    let collected: Column<u64, Leb128, LenIndex> = vs.iter().copied().collect();
+    let loaded = Column::<u64, Leb128, LenIndex>::load(&short.save()).unwrap();
+    let with: Column<u64> = Column::load_with(
         &short.save(),
         LoadOpts::new().with_length(vs.len()).with_max_segments(4),
     )
     .unwrap();
-    let none: VerifiedColumn<u64, Leb128, LenIndex> = Default::default();
-    let mut budget = VerifiedColumn::<u64, Leb128, LenIndex>::with_max_segments(4);
+    let none: Column<u64, Leb128, LenIndex> = Default::default();
+    let mut budget = Column::<u64, Leb128, LenIndex>::with_max_segments(4);
     budget.extend(vs.iter().copied());
-    let fill = VerifiedColumn::<u64, Leb128, LenIndex>::fill(5, 7);
+    let fill = Column::<u64, Leb128, LenIndex>::fill(5, 7);
 
     for c in [&named, &short, &collected, &loaded, &with, &budget] {
         assert_eq!(c.to_vec(), vs);
@@ -6488,16 +6477,16 @@ fn the_kind_of_a_plain_column() {
     }
     assert!(none.is_empty() && none.save().is_empty());
     assert_eq!(fill.to_vec(), vec![7; 5]);
-    let it: VerifiedIter<'_, u64, Leb128, LenIndex> = short.iter();
+    let it: Iter<'_, u64, Leb128, LenIndex> = short.iter();
     assert_eq!(it.count(), vs.len());
-    let it = VerifiedIter::<u64, Leb128, LenIndex>::default();
+    let it = Iter::<u64, Leb128, LenIndex>::default();
     assert_eq!(it.count(), 0);
 }
 
 /// A value type a prefix column holds.
-trait Summed: Kind + VSummed {}
+trait Summed: Kind + PrefixValue {}
 
-impl<T: Kind + VSummed> Summed for T {}
+impl<T: Kind + PrefixValue> Summed for T {}
 
 /// The same checks for each value type of a prefix column.
 macro_rules! for_each_sum {
@@ -6515,7 +6504,7 @@ macro_rules! for_each_sum {
 }
 
 /// What a prefix column of the verified API holds.
-fn sum_values<T: Summed>(p: &VerifiedPrefixColumn<T>) -> Vec<T> {
+fn sum_values<T: Summed>(p: &PrefixColumn<T>) -> Vec<T> {
     p.to_vec().into_iter().map(T::keep).collect()
 }
 
@@ -6523,14 +6512,14 @@ fn sum_values<T: Summed>(p: &VerifiedPrefixColumn<T>) -> Vec<T> {
 /// column of the same edits: nothing, or the same words. (Where a panic
 /// can be caught: not on wasm32.)
 #[cfg(panic = "unwind")]
-fn check_sum_invariants<T: Summed>(p: &VerifiedPrefixColumn<T>, v: &VerifiedColumn<T>) {
+fn check_sum_invariants<T: Summed>(p: &PrefixColumn<T>, v: &Column<T>) {
     let sums = panic_of(std::panic::AssertUnwindSafe(|| p.check_invariants()));
     let plain = panic_of(std::panic::AssertUnwindSafe(|| v.check_invariants()));
     assert_eq!(sums, plain);
 }
 
 #[cfg(not(panic = "unwind"))]
-fn check_sum_invariants<T: Summed>(_p: &VerifiedPrefixColumn<T>, _v: &VerifiedColumn<T>) {}
+fn check_sum_invariants<T: Summed>(_p: &PrefixColumn<T>, _v: &Column<T>) {}
 
 /// A prefix column of the verified API is a column: it holds `model` and
 /// reads as the plain column `v` of the same edits does, it lies in that
@@ -6538,12 +6527,7 @@ fn check_sum_invariants<T: Summed>(_p: &VerifiedPrefixColumn<T>, _v: &VerifiedCo
 /// digest checks are the bytes `PrefixColumn` of the old API saved).
 /// `built` says that edits made the columns of values, which the checks
 /// of `check_invariants` then pass.
-fn check_sums<T: Summed>(
-    p: &VerifiedPrefixColumn<T>,
-    v: &VerifiedColumn<T>,
-    model: &[T],
-    built: bool,
-) {
+fn check_sums<T: Summed>(p: &PrefixColumn<T>, v: &Column<T>, model: &[T], built: bool) {
     assert_eq!(p.len(), model.len());
     assert_eq!(p.is_empty(), model.is_empty());
     assert_eq!(sum_values(p), model);
@@ -6597,11 +6581,11 @@ fn check_sums<T: Summed>(
 
 /// A prefix column loads the bytes it saved, as the same values, into
 /// the slabs a plain column loads them into.
-fn check_sum_loads<T: Summed>(p: &VerifiedPrefixColumn<T>, model: &[T]) {
+fn check_sum_loads<T: Summed>(p: &PrefixColumn<T>, model: &[T]) {
     let bytes = p.save();
     golden::note(&bytes);
-    let p2 = VerifiedPrefixColumn::<T>::load(&bytes).unwrap();
-    let v2 = VerifiedColumn::<T>::load(&bytes).unwrap();
+    let p2 = PrefixColumn::<T>::load(&bytes).unwrap();
+    let v2 = Column::<T>::load(&bytes).unwrap();
     check_sums(&p2, &v2, model, false);
     assert_eq!(p2.save(), bytes);
 }
@@ -6609,12 +6593,7 @@ fn check_sum_loads<T: Summed>(p: &VerifiedPrefixColumn<T>, model: &[T]) {
 /// The reads of a plain column, of a prefix column: a value by its
 /// place, a range of values, a search for a value, and a clone, which is
 /// a column of its own.
-fn check_sum_reads<T: Summed>(
-    rng: &mut Rng,
-    p: &VerifiedPrefixColumn<T>,
-    v: &VerifiedColumn<T>,
-    model: &[T],
-) {
+fn check_sum_reads<T: Summed>(rng: &mut Rng, p: &PrefixColumn<T>, v: &Column<T>, model: &[T]) {
     for _ in 0..4 {
         if !model.is_empty() {
             let i = rng.below(model.len());
@@ -6656,8 +6635,8 @@ fn sum_edits<T: Totalled>() {
     for seed in 1..=8u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x50f5);
         let budget = [2, 3, 4, 8, 64][rng.below(5)];
-        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
-        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut p = PrefixColumn::<T>::with_max_segments(budget);
+        let mut v = Column::<T>::with_max_segments(budget);
         let mut model: Vec<T> = vec![];
         for step in 0..120 {
             match rng.below(14) {
@@ -6754,12 +6733,12 @@ fn sum_edits<T: Totalled>() {
         }
         check_sum_loads(&p, &model);
         // loaded: an index made at once of all the slabs
-        let p2 = VerifiedPrefixColumn::<T>::load(&p.save()).unwrap();
+        let p2 = PrefixColumn::<T>::load(&p.save()).unwrap();
         check_prefix_reads(&mut rng, &p2, &model);
     }
 }
 
-/// A prefix column of the verified API ([`VerifiedPrefixColumn`]) is a
+/// A prefix column of the verified API ([`PrefixColumn`]) is a
 /// column kept with another index. Under the same edits it holds what a
 /// plain column holds, in the same slabs, reads the same, and saves the
 /// same bytes, and it loads what it saved. Its digest checks that the
@@ -6775,37 +6754,37 @@ fn sum_forms<T: Summed>() {
         let mut rng = Rng(seed.wrapping_mul(0x2545_f491_4f6c_dd1d) ^ 0x50f6);
         let budget = [2, 3, 4, 8, 64][rng.below(5)];
         let model: Vec<T> = rng.values(300);
-        let plain = VerifiedColumn::<T>::from_values(&lent(&model));
+        let plain = Column::<T>::from_values(&lent(&model));
 
-        let p = VerifiedPrefixColumn::<T>::from_values(&lent(&model));
+        let p = PrefixColumn::<T>::from_values(&lent(&model));
         check_sums(&p, &plain, &model, true);
-        let p: VerifiedPrefixColumn<T> = model.iter().map(T::lend).collect();
+        let p: PrefixColumn<T> = model.iter().map(T::lend).collect();
         check_sums(&p, &plain, &model, true);
-        let p = VerifiedColumn::<T, Leb128, SumIndex>::from_iter(lent(&model));
+        let p = Column::<T, Leb128, SumIndex>::from_iter(lent(&model));
         check_sums(&p, &plain, &model, true);
-        let mut p = VerifiedPrefixColumn::<T>::new();
+        let mut p = PrefixColumn::<T>::new();
         p.extend(lent(&model));
         check_sums(&p, &plain, &model, true);
-        let none = VerifiedPrefixColumn::<T>::default();
+        let none = PrefixColumn::<T>::default();
         assert!(none.is_empty() && none.save().is_empty());
         assert_eq!(none.slab_count(), 0);
 
         // in slabs of a budget, and loaded with one
-        let mut p = VerifiedPrefixColumn::<T>::from_values_with_max_segments(&lent(&model), budget);
-        let mut v = VerifiedColumn::<T>::from_values_with_max_segments(&lent(&model), budget);
+        let mut p = PrefixColumn::<T>::from_values_with_max_segments(&lent(&model), budget);
+        let mut v = Column::<T>::from_values_with_max_segments(&lent(&model), budget);
         check_sums(&p, &v, &model, true);
         check_sum_loads(&p, &model);
         let opts = LoadOpts::new()
             .with_length(model.len())
             .with_max_segments(budget);
-        let p2 = VerifiedPrefixColumn::<T>::load_with(&p.save(), opts).unwrap();
-        let v2 = VerifiedColumn::<T>::load_with(&p.save(), opts).unwrap();
+        let p2 = PrefixColumn::<T>::load_with(&p.save(), opts).unwrap();
+        let v2 = Column::<T>::load_with(&p.save(), opts).unwrap();
         check_sums(&p2, &v2, &model, false);
         // of a length the bytes do not have: an error (the digest checks
         // it is the old API's)
         let long = LoadOpts::new().with_length(model.len() + 1);
         golden::note(
-            &VerifiedPrefixColumn::<T>::load_with(&p.save(), long)
+            &PrefixColumn::<T>::load_with(&p.save(), long)
                 .map(|p| p.len())
                 .map_err(|e| e.to_string()),
         );
@@ -6821,8 +6800,8 @@ fn sum_forms<T: Summed>() {
 
         // a column of one value
         let n = rng.below(500);
-        let p = VerifiedPrefixColumn::<T>::fill(n, a.lend());
-        let v = VerifiedColumn::<T>::fill(n, a.lend());
+        let p = PrefixColumn::<T>::fill(n, a.lend());
+        let v = Column::<T>::fill(n, a.lend());
         check_sums(&p, &v, &vec![a.clone(); n], true);
     }
 }
@@ -6847,26 +6826,26 @@ fn the_other_forms_of_a_prefix_column() {
 }
 
 /// The kind of a prefix column is the third parameter of the column's
-/// type: `VerifiedPrefixColumn<V, C>` is `VerifiedColumn<V, C, SumIndex>`
+/// type: `PrefixColumn<V, C>` is `Column<V, C, SumIndex>`
 /// written short, and its iterators are the column's.
 #[test]
 fn the_kind_of_a_prefix_column() {
     let _golden = golden::test(concat!(module_path!(), "::the_kind_of_a_prefix_column"));
     let vs: Vec<u32> = (0..2000).map(|i| i / 7).collect();
-    let short = VerifiedPrefixColumn::<u32>::from_values(&vs);
-    let named: VerifiedColumn<u32, Leb128, SumIndex> = short.clone();
-    let coded: VerifiedPrefixColumn<u32, Leb128> = named.clone();
+    let short = PrefixColumn::<u32>::from_values(&vs);
+    let named: Column<u32, Leb128, SumIndex> = short.clone();
+    let coded: PrefixColumn<u32, Leb128> = named.clone();
     assert_eq!(coded.to_vec(), vs);
-    let it: VerifiedIter<'_, u32, Leb128, SumIndex> = short.iter();
+    let it: Iter<'_, u32, Leb128, SumIndex> = short.iter();
     assert_eq!(it.count(), vs.len());
-    let it = VerifiedIter::<u32, Leb128, SumIndex>::default();
+    let it = Iter::<u32, Leb128, SumIndex>::default();
     assert_eq!(it.count(), 0);
-    let state: VerifiedIterState = short.iter_range(5, 900).suspend();
+    let state: IterState = short.iter_range(5, 900).suspend();
     let mut it = state.try_resume(&named).unwrap();
     assert_eq!((it.pos(), it.next()), (5, Some(0)));
     // a plain column of the same values is another type, with the same
     // bytes
-    let plain = VerifiedColumn::<u32>::from_values(&vs);
+    let plain = Column::<u32>::from_values(&vs);
     assert_eq!(plain.save(), short.save());
 }
 
@@ -6886,19 +6865,18 @@ fn a_load_refuses_sums_that_do_not_fit() {
         "::a_load_refuses_sums_that_do_not_fit"
     ));
     fn loads<T: Summed>(bytes: &[u8]) -> Result<usize, String> {
-        let new = VerifiedPrefixColumn::<T>::load(bytes)
+        let new = PrefixColumn::<T>::load(bytes)
             .map(|p| (p.len(), p.save()))
             .map_err(|e| e.to_string());
         golden::note(&new);
         // with options: the same
-        let with =
-            VerifiedPrefixColumn::<T>::load_with(bytes, LoadOpts::new().with_max_segments(4));
+        let with = PrefixColumn::<T>::load_with(bytes, LoadOpts::new().with_max_segments(4));
         assert_eq!(
             with.map(|p| p.len()).map_err(|e| e.to_string()),
             new.clone().map(|x| x.0)
         );
         // a plain column loads them either way
-        let plain = VerifiedColumn::<T>::load(bytes).unwrap();
+        let plain = Column::<T>::load(bytes).unwrap();
         assert_eq!(plain.save(), bytes);
         new.map(|(len, saved)| {
             assert_eq!(saved, bytes);
@@ -6910,7 +6888,7 @@ fn a_load_refuses_sums_that_do_not_fit() {
 
     // `u32::MAX` 2^32 + 1 times adds up to `u64::MAX`
     let most = (1usize << 32) + 1;
-    let mut v = VerifiedColumn::<u32>::fill(most, u32::MAX);
+    let mut v = Column::<u32>::fill(most, u32::MAX);
     assert_eq!(loads::<u32>(&v.save()), Ok(most));
     v.push(0);
     assert_eq!(loads::<u32>(&v.save()), Ok(most + 1));
@@ -6918,14 +6896,14 @@ fn a_load_refuses_sums_that_do_not_fit() {
     assert_eq!(loads::<u32>(&v.save()), refused);
     v.remove(0);
     assert_eq!(loads::<u32>(&v.save()), Ok(most + 1));
-    let v = VerifiedColumn::<u32>::fill(most + 1, u32::MAX);
+    let v = Column::<u32>::fill(most + 1, u32::MAX);
     assert_eq!(loads::<u32>(&v.save()), refused);
-    let v = VerifiedColumn::<u32>::fill(1 << 33, u32::MAX);
+    let v = Column::<u32>::fill(1 << 33, u32::MAX);
     assert_eq!(loads::<u32>(&v.save()), refused);
 
     // in slabs whose sums each fit, while their total does not
     let run = |value: u32, count: usize| Run { count, value };
-    let mut v = VerifiedColumn::<u32>::new();
+    let mut v = Column::<u32>::new();
     let runs = [
         run(u32::MAX, 1 << 32),
         run(0, 1),
@@ -6935,17 +6913,15 @@ fn a_load_refuses_sums_that_do_not_fit() {
     let bytes = v.save();
     assert_eq!(loads::<u32>(&bytes), refused);
     let opts = LoadOpts::new().with_max_segments(2);
-    let new = VerifiedPrefixColumn::<u32>::load_with(&bytes, opts);
+    let new = PrefixColumn::<u32>::load_with(&bytes, opts);
     golden::note(&new.err().unwrap().to_string());
     assert_eq!(
-        VerifiedColumn::<u32>::load_with(&bytes, opts)
-            .unwrap()
-            .slab_count(),
+        Column::<u32>::load_with(&bytes, opts).unwrap().slab_count(),
         3
     );
 
     // with nulls, which add nothing, and of numbers that are not zero
-    let mut v = VerifiedColumn::<Option<u32>>::fill(most, Some(u32::MAX));
+    let mut v = Column::<Option<u32>>::fill(most, Some(u32::MAX));
     v.splice_runs(
         7,
         0,
@@ -6957,22 +6933,22 @@ fn a_load_refuses_sums_that_do_not_fit() {
     assert_eq!(loads::<Option<u32>>(&v.save()), Ok(most + (1 << 40)));
     v.push(Some(1));
     assert_eq!(loads::<Option<u32>>(&v.save()), refused);
-    let v = VerifiedColumn::<NonZeroU32>::fill(most, NonZeroU32::MAX);
+    let v = Column::<NonZeroU32>::fill(most, NonZeroU32::MAX);
     assert_eq!(loads::<NonZeroU32>(&v.save()), Ok(most));
-    let v = VerifiedColumn::<NonZeroU32>::fill(most + 1, NonZeroU32::MAX);
+    let v = Column::<NonZeroU32>::fill(most + 1, NonZeroU32::MAX);
     assert_eq!(loads::<NonZeroU32>(&v.save()), refused);
-    let v = VerifiedColumn::<Option<NonZeroU32>>::fill(1 << 33, Some(NonZeroU32::MAX));
+    let v = Column::<Option<NonZeroU32>>::fill(1 << 33, Some(NonZeroU32::MAX));
     assert_eq!(loads::<Option<NonZeroU32>>(&v.save()), refused);
 
     // the longest columns of the wider types
     let long = i64::MAX as usize;
-    let v = VerifiedColumn::<u64>::fill(long, u64::MAX);
+    let v = Column::<u64>::fill(long, u64::MAX);
     assert_eq!(loads::<u64>(&v.save()), Ok(long));
-    let v = VerifiedColumn::<i64>::fill(long, i64::MIN);
+    let v = Column::<i64>::fill(long, i64::MIN);
     assert_eq!(loads::<i64>(&v.save()), Ok(long));
-    let v = VerifiedColumn::<Option<i64>>::fill(long, Some(i64::MAX));
+    let v = Column::<Option<i64>>::fill(long, Some(i64::MAX));
     assert_eq!(loads::<Option<i64>>(&v.save()), Ok(long));
-    let v = VerifiedColumn::<bool>::fill(long, true);
+    let v = Column::<bool>::fill(long, true);
     assert_eq!(loads::<bool>(&v.save()), Ok(long));
 }
 
@@ -6986,7 +6962,7 @@ fn a_load_refuses_sums_that_do_not_fit() {
 #[test]
 fn an_edit_past_the_sums_panics() {
     let _golden = golden::test(concat!(module_path!(), "::an_edit_past_the_sums_panics"));
-    type P<T> = VerifiedPrefixColumn<T>;
+    type P<T> = PrefixColumn<T>;
     let run = |value: u32, count: usize| Run { count, value };
     let words = Some("prefix sum overflows its type".to_string());
     let most = (1usize << 32) + 1;
@@ -7108,7 +7084,7 @@ fn an_edit_past_the_sums_panics() {
     assert_eq!(new, words);
 
     // a plain column of the same edits takes them all
-    let mut v = VerifiedColumn::<u32>::fill(1 << 33, u32::MAX);
+    let mut v = Column::<u32>::fill(1 << 33, u32::MAX);
     v.push(1);
     v.remap(|_| u32::MAX);
     assert_eq!(v.len(), (1 << 33) + 1);
@@ -7189,14 +7165,14 @@ impl<T: Adds> Adds for Option<T> {
 /// A value type a prefix column holds whose sums these tests read as
 /// integers.
 trait Totalled: Summed + Adds {
-    fn new_sum(s: <Self as VSummed>::Sum) -> i128;
+    fn new_sum(s: <Self as PrefixValue>::Sum) -> i128;
 }
 
 impl<T: Summed + Adds> Totalled for T
 where
-    <T as VSummed>::Sum: Wide,
+    <T as PrefixValue>::Sum: Wide,
 {
-    fn new_sum(s: <T as VSummed>::Sum) -> i128 {
+    fn new_sum(s: <T as PrefixValue>::Sum) -> i128 {
         s.wide()
     }
 }
@@ -7233,7 +7209,7 @@ fn some_places(rng: &mut Rng, len: usize) -> Vec<usize> {
 /// What a prefix column answers from its sums is what its values add
 /// up to: the sum before a position and through one, at any position,
 /// and the sum of a range, whatever its ends.
-fn check_prefix_reads<T: Totalled>(rng: &mut Rng, p: &VerifiedPrefixColumn<T>, model: &[T]) {
+fn check_prefix_reads<T: Totalled>(rng: &mut Rng, p: &PrefixColumn<T>, model: &[T]) {
     let before = sums_before(model);
     let at = |i: usize| before[i.min(model.len())];
     let places = some_places(rng, model.len());
@@ -7278,14 +7254,14 @@ impl Target for usize {
 /// searched by sum. The searches give the place for a sum before it, and
 /// the place for a sum through it.
 trait Counted: Totalled {
-    fn new_search(p: &VerifiedPrefixColumn<Self>, target: u128) -> (usize, usize);
+    fn new_search(p: &PrefixColumn<Self>, target: u128) -> (usize, usize);
 }
 
 macro_rules! counted {
     ($($t:ty => $s:ty),*) => {
         $(
             impl Counted for $t {
-                fn new_search(p: &VerifiedPrefixColumn<$t>, target: u128) -> (usize, usize) {
+                fn new_search(p: &PrefixColumn<$t>, target: u128) -> (usize, usize) {
                     let t = <$s as Target>::target(target);
                     (p.get_index_for_prefix(t), p.get_index_for_total(t))
                 }
@@ -7308,7 +7284,7 @@ counted!(
 /// finds: the first position that the values before it add up to a
 /// target, which is one past the end where none does, and the position
 /// ahead of it.
-fn check_sum_searches<T: Counted>(rng: &mut Rng, p: &VerifiedPrefixColumn<T>, model: &[T]) {
+fn check_sum_searches<T: Counted>(rng: &mut Rng, p: &PrefixColumn<T>, model: &[T]) {
     let before: Vec<u128> = sums_before(model)
         .into_iter()
         .map(|b| u128::try_from(b).unwrap())
@@ -7343,7 +7319,7 @@ fn sum_searches<T: Counted>() {
     for seed in 1..=8u64 {
         let mut rng = Rng(seed.wrapping_mul(0xd6e8_feb8_6659_fd93) ^ 0x50f7);
         let budget = [2, 3, 4, 8, 64][rng.below(5)];
-        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+        let mut p = PrefixColumn::<T>::with_max_segments(budget);
         let mut model: Vec<T> = vec![];
         check_sum_searches(&mut rng, &p, &model);
         for _ in 0..60 {
@@ -7366,15 +7342,15 @@ fn sum_searches<T: Counted>() {
             check_prefix_reads(&mut rng, &p, &model);
         }
         // loaded: an index made at once of all the slabs
-        let p2 = VerifiedPrefixColumn::<T>::load(&p.save()).unwrap();
+        let p2 = PrefixColumn::<T>::load(&p.save()).unwrap();
         check_sum_searches(&mut rng, &p2, &model);
         check_prefix_reads(&mut rng, &p2, &model);
     }
 }
 
 /// A prefix column whose sums are never negative is searched by sum
-/// ([`VerifiedColumn::get_index_for_prefix`],
-/// [`VerifiedColumn::get_index_for_total`]): under edits the searches
+/// ([`Column::get_index_for_prefix`],
+/// [`Column::get_index_for_total`]): under edits the searches
 /// find the places a walk of the sums finds.
 #[test]
 fn a_prefix_column_is_searched_by_sum() {
@@ -7396,7 +7372,7 @@ fn a_prefix_column_is_searched_by_sum() {
 #[test]
 fn the_sums_of_a_prefix_column() {
     let _golden = golden::test(concat!(module_path!(), "::the_sums_of_a_prefix_column"));
-    let p = VerifiedPrefixColumn::<u64>::from_values(&[3, 0, 4, 4, 10]);
+    let p = PrefixColumn::<u64>::from_values(&[3, 0, 4, 4, 10]);
     let sums: Vec<u128> = (0..7).map(|i| p.get_prefix(i)).collect();
     assert_eq!(sums, [0, 3, 3, 7, 11, 21, 21]);
     let sums: Vec<u128> = (0..6).map(|i| p.get_total(i)).collect();
@@ -7422,12 +7398,7 @@ fn the_sums_of_a_prefix_column() {
     assert_eq!(places, [0, 0, 0, 2, 2, 3, 3, 4, 4, 5]);
 
     // signed values: the sums go down too
-    let p = VerifiedPrefixColumn::<Option<i64>>::from_values(&[
-        Some(5),
-        None,
-        Some(-9),
-        Some(i64::MIN),
-    ]);
+    let p = PrefixColumn::<Option<i64>>::from_values(&[Some(5), None, Some(-9), Some(i64::MIN)]);
     assert_eq!(p.get_prefix(3), -4);
     assert_eq!(p.get_total(3), -4 + i128::from(i64::MIN));
     assert_eq!(p.sum_range(1, 3), -9);
@@ -7435,7 +7406,7 @@ fn the_sums_of_a_prefix_column() {
 
     // flags: the sums count those that are set
     let flags = [false, true, true, false, false, true];
-    let p = VerifiedPrefixColumn::<bool>::from_values(&flags);
+    let p = PrefixColumn::<bool>::from_values(&flags);
     assert_eq!(p.get_prefix(6), 3);
     assert_eq!(p.sum_range(2, 5), 1);
     // the place of the `k`th that is set
@@ -7443,7 +7414,7 @@ fn the_sums_of_a_prefix_column() {
     assert_eq!(set, [1, 2, 5, 6]);
 
     // no values: no sums, and a place for no sum but zero
-    let none = VerifiedPrefixColumn::<u32>::new();
+    let none = PrefixColumn::<u32>::new();
     assert_eq!((none.get_prefix(0), none.get_prefix(9)), (0, 0));
     assert_eq!((none.get_total(0), none.sum_range(0, 9)), (0, 0));
     assert_eq!(none.get_index_for_prefix(0), 0);
@@ -7464,7 +7435,7 @@ fn the_sums_of_long_runs() {
     let _golden = golden::test(concat!(module_path!(), "::the_sums_of_long_runs"));
     // `u32::MAX` 2^32 + 1 times adds up to `u64::MAX`
     let most = (1usize << 32) + 1;
-    let p = VerifiedPrefixColumn::<u32>::fill(most, u32::MAX);
+    let p = PrefixColumn::<u32>::fill(most, u32::MAX);
     let each = u64::from(u32::MAX);
     assert_eq!(p.get_prefix(most), u64::MAX);
     assert_eq!(p.get_prefix(usize::MAX), u64::MAX);
@@ -7489,7 +7460,7 @@ fn the_sums_of_long_runs() {
 
     // in slabs of two runs
     let run = |value: u32, count: usize| Run { count, value };
-    let mut p = VerifiedPrefixColumn::<u32>::with_max_segments(2);
+    let mut p = PrefixColumn::<u32>::with_max_segments(2);
     for (at, runs) in [
         (0, [run(u32::MAX, 1 << 30), run(7, 1 << 40)]),
         (1 << 20, [run(0, 1 << 50), run(u32::MAX - 1, 1 << 30)]),
@@ -7526,7 +7497,7 @@ fn the_sums_of_long_runs() {
 
     // the longest columns: of the widest values, of signed ones, of flags
     let long = i64::MAX as usize;
-    let p = VerifiedPrefixColumn::<u64>::fill(long, u64::MAX);
+    let p = PrefixColumn::<u64>::fill(long, u64::MAX);
     let all = u128::from(u64::MAX) * (long as u128);
     assert_eq!(p.get_prefix(long), all);
     assert_eq!(p.sum_range(1, long - 1), all - 2 * u128::from(u64::MAX));
@@ -7534,12 +7505,12 @@ fn the_sums_of_long_runs() {
     assert_eq!(p.get_index_for_prefix(all + 1), long + 1);
     assert_eq!(p.get_index_for_total(all + 1), long);
     assert_eq!(p.get_index_for_prefix(u128::MAX), long + 1);
-    let p = VerifiedPrefixColumn::<i64>::fill(long, i64::MIN);
+    let p = PrefixColumn::<i64>::fill(long, i64::MIN);
     let all = i128::from(i64::MIN) * (long as i128);
     assert_eq!(p.get_prefix(long), all);
     assert_eq!(p.get_total(usize::MAX), all);
     assert_eq!(p.sum_range(long - 3, usize::MAX), 3 * i128::from(i64::MIN));
-    let p = VerifiedPrefixColumn::<bool>::fill(long, true);
+    let p = PrefixColumn::<bool>::fill(long, true);
     assert_eq!(p.get_prefix(long), long);
     assert_eq!(p.sum_range(12, long), long - 12);
     assert_eq!(p.get_index_for_prefix(long), long);
@@ -7552,7 +7523,7 @@ fn the_sums_of_long_runs() {
 /// values it has left, and its running sum (under both its names).
 type Place = (usize, usize, usize, usize, i128, i128);
 
-fn new_place<T: Totalled>(it: &VerifiedPrefixIter<'_, T>) -> Place {
+fn new_place<T: Totalled>(it: &PrefixIter<'_, T>) -> Place {
     (
         it.pos(),
         it.end_pos(),
@@ -7566,7 +7537,7 @@ fn new_place<T: Totalled>(it: &VerifiedPrefixIter<'_, T>) -> Place {
 /// A value with the sums before it and through it.
 type Item<T> = Option<(T, i128, i128)>;
 
-fn new_item<T: Totalled>(pv: Option<VerifiedPrefixedValue<'_, T>>) -> Item<T> {
+fn new_item<T: Totalled>(pv: Option<PrefixedValue<'_, T>>) -> Item<T> {
     pv.map(|pv| {
         (
             T::keep(pv.value),
@@ -7653,7 +7624,7 @@ fn a_place(rng: &mut Rng, len: usize) -> usize {
 /// and through it, and keeps its running sum under every move, as its
 /// specification says: what it gives at each step, and the place it
 /// stands in after it.
-fn check_prefix_iters<T: Totalled>(rng: &mut Rng, p: &VerifiedPrefixColumn<T>, model: &[T]) {
+fn check_prefix_iters<T: Totalled>(rng: &mut Rng, p: &PrefixColumn<T>, model: &[T]) {
     let len = model.len();
     let before = sums_before(model);
     let item = |i: usize| (i < len).then(|| (model[i].clone(), before[i], before[i + 1]));
@@ -7750,7 +7721,7 @@ fn sum_iters<T: Totalled>() {
     for seed in 1..=8u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x50f8);
         let budget = [2, 3, 4, 8, 64][rng.below(5)];
-        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+        let mut p = PrefixColumn::<T>::with_max_segments(budget);
         let mut model: Vec<T> = vec![];
         check_prefix_iters(&mut rng, &p, &model);
         for _ in 0..40 {
@@ -7762,13 +7733,13 @@ fn sum_iters<T: Totalled>() {
             check_prefix_iters(&mut rng, &p, &model);
         }
         // loaded: an index made at once of all the slabs
-        let p2 = VerifiedPrefixColumn::<T>::load(&p.save()).unwrap();
+        let p2 = PrefixColumn::<T>::load(&p.save()).unwrap();
         check_prefix_iters(&mut rng, &p2, &model);
     }
 }
 
 /// A prefix column of the verified API is read with its sums
-/// ([`VerifiedPrefixIter`]) as its specification says: each value comes
+/// ([`PrefixIter`]) as its specification says: each value comes
 /// with what the values before it and through it add up to, and the
 /// iterator's running sum is of the values it has passed since its sum
 /// was last started, whether it read them or stepped over them, in a
@@ -7789,7 +7760,7 @@ fn a_prefix_column_is_read_with_its_sums() {
 #[test]
 fn the_iterator_of_a_prefix_column() {
     let _golden = golden::test(concat!(module_path!(), "::the_iterator_of_a_prefix_column"));
-    let p = VerifiedPrefixColumn::<u64>::from_values(&[3, 0, 4, 4, 10]);
+    let p = PrefixColumn::<u64>::from_values(&[3, 0, 4, 4, 10]);
     let got: Vec<(u128, u64, u128)> = p
         .prefix_iter()
         .map(|pv| (pv.prefix(), pv.value, pv.total()))
@@ -7802,11 +7773,8 @@ fn the_iterator_of_a_prefix_column() {
     let mut it = p.prefix_iter_range(1, 4);
     assert_eq!((it.pos(), it.end_pos(), it.len(), it.total()), (1, 4, 3, 3));
     let pv = it.next().unwrap();
-    assert_eq!(pv, VerifiedPrefixedValue { value: 0, total: 3 });
-    assert_eq!(
-        format!("{pv:?}"),
-        "VerifiedPrefixedValue { value: 0, total: 3 }"
-    );
+    assert_eq!(pv, PrefixedValue { value: 0, total: 3 });
+    assert_eq!(format!("{pv:?}"), "PrefixedValue { value: 0, total: 3 }");
     let copy = pv;
     assert_eq!((copy.prefix(), copy.total(), pv.clone().total()), (3, 3, 3));
     // started again, it counts from where the iterator stands
@@ -7838,18 +7806,18 @@ fn the_iterator_of_a_prefix_column() {
     assert_eq!((pv.prefix(), pv.value, pv.total()), (11, 10, 21));
     assert!(p.get_prefixed(5).is_none());
     // signed sums, and nulls, which add nothing
-    let p = VerifiedPrefixColumn::<Option<i64>>::from_values(&[Some(4), None, Some(-9)]);
+    let p = PrefixColumn::<Option<i64>>::from_values(&[Some(4), None, Some(-9)]);
     let got: Vec<(i128, Option<i64>, i128)> = p
         .prefix_iter()
         .map(|pv| (pv.prefix(), pv.value, pv.total()))
         .collect();
     assert_eq!(got, [(0, Some(4), 4), (4, None, 4), (4, Some(-9), -5)]);
     // flags: how many are set
-    let p = VerifiedPrefixColumn::<bool>::from_values(&[true, false, true]);
+    let p = PrefixColumn::<bool>::from_values(&[true, false, true]);
     let got: Vec<(bool, usize)> = p.prefix_iter().map(|pv| (pv.value, pv.total())).collect();
     assert_eq!(got, [(true, 1), (false, 1), (true, 2)]);
     // a column of nothing
-    let none = VerifiedPrefixColumn::<u32>::new();
+    let none = PrefixColumn::<u32>::new();
     let mut it = none.prefix_iter();
     assert!(it.next().is_none() && it.nth(3).is_none());
     assert_eq!((it.pos(), it.end_pos(), it.total()), (0, 0, 0));
@@ -7866,7 +7834,7 @@ fn the_iterator_over_long_runs() {
     let _golden = golden::test(concat!(module_path!(), "::the_iterator_over_long_runs"));
     let long = i64::MAX as usize;
     let each = u128::from(u64::MAX);
-    let p = VerifiedPrefixColumn::<u64>::fill(long, u64::MAX);
+    let p = PrefixColumn::<u64>::fill(long, u64::MAX);
     let mut it = p.prefix_iter();
     let pv = it.nth(long - 2).unwrap();
     assert_eq!(pv.prefix(), (long as u128 - 2) * each);
@@ -7876,7 +7844,7 @@ fn the_iterator_over_long_runs() {
     assert!(it.next().is_none());
     assert_eq!((it.pos(), it.total()), (long, long as u128 * each));
     // the widest sums of the signed type, from the middle on
-    let p = VerifiedPrefixColumn::<i64>::fill(long, i64::MIN);
+    let p = PrefixColumn::<i64>::fill(long, i64::MIN);
     let half = long / 2;
     let mut it = p.prefix_iter_range(half, long);
     assert_eq!(it.total(), half as i128 * i128::from(i64::MIN));
@@ -7888,7 +7856,7 @@ fn the_iterator_over_long_runs() {
     // read there, against what `PrefixColumn`'s iterator of the old API
     // did)
     let run = |value: u32, count: usize| Run { count, value };
-    let mut p = VerifiedPrefixColumn::<u32>::with_max_segments(2);
+    let mut p = PrefixColumn::<u32>::with_max_segments(2);
     for (at, runs) in [
         (0, [run(u32::MAX, 1 << 30), run(7, 1 << 40)]),
         (1 << 20, [run(0, 1 << 50), run(u32::MAX - 1, 1 << 30)]),
@@ -7915,7 +7883,7 @@ fn the_iterator_over_long_runs() {
 /// through it.
 type RunOf<T> = Option<(usize, T, i128, i128)>;
 
-fn new_sum_run<T: Totalled>(run: Option<Run<VerifiedPrefixedValue<'_, T>>>) -> RunOf<T> {
+fn new_sum_run<T: Totalled>(run: Option<Run<PrefixedValue<'_, T>>>) -> RunOf<T> {
     run.map(|run| {
         (
             run.count,
@@ -7930,7 +7898,7 @@ fn new_sum_run<T: Totalled>(run: Option<Run<VerifiedPrefixedValue<'_, T>>>) -> R
 /// up to, and the value with its sums.
 type Found<T> = Option<(usize, i128, (T, i128, i128))>;
 
-fn new_found<T: Totalled>(seek: Option<VerifiedPrefixSeek<'_, T>>) -> Found<T> {
+fn new_found<T: Totalled>(seek: Option<PrefixSeek<'_, T>>) -> Found<T> {
     seek.map(|seek| {
         (
             seek.pos,
@@ -7978,7 +7946,7 @@ impl<T: Totalled> SumIter<'_, T> {
 /// again, and the column asked for the sum of a range before a value
 /// (`delta`), as the specifications say: what each step gives, and the
 /// place the iterator stands in after it.
-fn check_prefix_runs<T: Totalled>(rng: &mut Rng, p: &VerifiedPrefixColumn<T>, model: &[T]) {
+fn check_prefix_runs<T: Totalled>(rng: &mut Rng, p: &PrefixColumn<T>, model: &[T]) {
     let len = model.len();
     let before = sums_before(model);
     // all of it by runs, each with the sums of its last value
@@ -8011,7 +7979,7 @@ fn check_prefix_runs<T: Totalled>(rng: &mut Rng, p: &VerifiedPrefixColumn<T>, mo
         assert_eq!(run_model(&runs), model[start..end]);
         golden::note(&runs);
         assert!(runs.windows(2).all(|w| w[0].1 != w[1].1));
-        let mut copy = VerifiedColumn::<T>::new();
+        let mut copy = Column::<T>::new();
         copy.splice_runs(0, 0, p.prefix_iter_range(start, end).runs());
         assert_eq!(new_values(&copy), model[start..end]);
     }
@@ -8098,11 +8066,11 @@ fn item_at<T: Totalled>(model: &[T], before: &[i128], i: usize) -> (T, i128, i12
 /// A prefix column under edits that put in single values and runs:
 /// `check` is asked of it after each edit, and of it loaded from its
 /// bytes.
-fn under_sum_edits<T: Totalled>(salt: u64, check: fn(&mut Rng, &VerifiedPrefixColumn<T>, &[T])) {
+fn under_sum_edits<T: Totalled>(salt: u64, check: fn(&mut Rng, &PrefixColumn<T>, &[T])) {
     for seed in 1..=8u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ salt);
         let budget = [2, 3, 4, 8, 64][rng.below(5)];
-        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+        let mut p = PrefixColumn::<T>::with_max_segments(budget);
         let mut model: Vec<T> = vec![];
         check(&mut rng, &p, &model);
         for _ in 0..40 {
@@ -8124,7 +8092,7 @@ fn under_sum_edits<T: Totalled>(salt: u64, check: fn(&mut Rng, &VerifiedPrefixCo
             check(&mut rng, &p, &model);
         }
         // loaded: an index made at once of all the slabs
-        let p2 = VerifiedPrefixColumn::<T>::load(&p.save()).unwrap();
+        let p2 = PrefixColumn::<T>::load(&p.save()).unwrap();
         check(&mut rng, &p2, &model);
     }
 }
@@ -8134,11 +8102,11 @@ fn sum_runs<T: Totalled>() {
 }
 
 /// A prefix column of the verified API is read by runs with their sums
-/// ([`VerifiedPrefixIter::next_run`]), moved by a count with what is
-/// passed over summed ([`VerifiedPrefixIter::delta_nth`],
-/// [`VerifiedColumn::delta`]), copied, and stopped and started again
-/// ([`VerifiedPrefixIter::suspend`],
-/// [`VerifiedPrefixIterState::try_resume`]) as its specification says.
+/// ([`PrefixIter::next_run`]), moved by a count with what is
+/// passed over summed ([`PrefixIter::delta_nth`],
+/// [`Column::delta`]), copied, and stopped and started again
+/// ([`PrefixIter::suspend`],
+/// [`PrefixIterState::try_resume`]) as its specification says.
 /// Of every summed type, after edits and after a load. The digest checks
 /// that the runs of a range, and what a copy reads, are what
 /// `PrefixColumn` of the old API gave.
@@ -8154,14 +8122,14 @@ fn a_prefix_column_is_read_by_runs_with_its_sums() {
 /// A value type whose prefix iterators read on until their sum is past
 /// a limit.
 trait Sought: Counted {
-    fn new_sought(it: &mut VerifiedPrefixIter<'_, Self>, n: u128) -> Found<Self>;
+    fn new_sought(it: &mut PrefixIter<'_, Self>, n: u128) -> Found<Self>;
 }
 
 macro_rules! sought {
     ($($t:ty => $s:ty),*) => {
         $(
             impl Sought for $t {
-                fn new_sought(it: &mut VerifiedPrefixIter<'_, $t>, n: u128) -> Found<$t> {
+                fn new_sought(it: &mut PrefixIter<'_, $t>, n: u128) -> Found<$t> {
                     new_found(it.advance_prefix(<$s as Target>::target(n)))
                 }
             }
@@ -8183,7 +8151,7 @@ sought!(
 /// from where it stood add up to more than a limit
 /// (`advance_prefix`), among its other moves: it finds what a walk of
 /// the sums finds, and stands where the walk does after each step.
-fn check_prefix_seeks<T: Sought>(rng: &mut Rng, p: &VerifiedPrefixColumn<T>, model: &[T]) {
+fn check_prefix_seeks<T: Sought>(rng: &mut Rng, p: &PrefixColumn<T>, model: &[T]) {
     let len = model.len();
     let before = sums_before(model);
     for _ in 0..4 {
@@ -8237,7 +8205,7 @@ fn sum_seeks<T: Sought>() {
 }
 
 /// A prefix column of the verified API whose sums are counts is read on
-/// to a sum ([`VerifiedPrefixIter::advance_prefix`]) as its
+/// to a sum ([`PrefixIter::advance_prefix`]) as its
 /// specification says: the value found is the first with which the
 /// values from where the iterator stood add up to more than the limit,
 /// and with none found the iterator has given all it had.
@@ -8263,7 +8231,7 @@ fn a_prefix_iterator_reads_on_to_a_sum() {
 #[test]
 fn the_seeks_of_a_prefix_iterator() {
     let _golden = golden::test(concat!(module_path!(), "::the_seeks_of_a_prefix_iterator"));
-    let mut p = VerifiedPrefixColumn::<u64>::from_values(&[3, 0, 4, 4, 10]);
+    let mut p = PrefixColumn::<u64>::from_values(&[3, 0, 4, 4, 10]);
     // by runs: the sums are those of each run's last value
     let mut it = p.prefix_iter();
     let mut runs = vec![];
@@ -8279,10 +8247,7 @@ fn the_seeks_of_a_prefix_iterator() {
         runs,
         [(1, 3, 0, 3), (1, 0, 3, 3), (2, 4, 7, 11), (1, 10, 11, 21)]
     );
-    assert_eq!(
-        format!("{it:?}"),
-        "VerifiedPrefixIter { total: 21, pos: 5 }"
-    );
+    assert_eq!(format!("{it:?}"), "PrefixIter { total: 21, pos: 5 }");
     // the runs of a window, without sums
     let runs: Vec<(usize, u64)> = p
         .prefix_iter_range(1, 4)
@@ -8293,10 +8258,10 @@ fn the_seeks_of_a_prefix_iterator() {
     // a value by its count from the iterator, with what is passed over
     let mut it = p.prefix_iter_range(1, 5);
     let seek = it.delta_nth(2).unwrap();
-    let found = VerifiedPrefixSeek {
+    let found = PrefixSeek {
         pos: 3,
         delta: 4,
-        pv: VerifiedPrefixedValue {
+        pv: PrefixedValue {
             value: 4,
             total: 11,
         },
@@ -8304,7 +8269,7 @@ fn the_seeks_of_a_prefix_iterator() {
     assert_eq!(seek, found);
     assert_eq!(
         format!("{seek:?}"),
-        "VerifiedPrefixSeek { pos: 3, delta: 4, pv: VerifiedPrefixedValue { value: 4, total: 11 } }"
+        "PrefixSeek { pos: 3, delta: 4, pv: PrefixedValue { value: 4, total: 11 } }"
     );
     let copy = seek;
     assert_eq!((copy.clone(), seek.pv.prefix()), (found, 7));
@@ -8333,7 +8298,7 @@ fn the_seeks_of_a_prefix_iterator() {
     assert_eq!((it.pos(), it.end_pos(), it.total()), (5, 5, 21));
     // values of one unit each: a limit of `n` units finds the value
     // that holds unit `n + 1`
-    let units = VerifiedPrefixColumn::<u64>::from_values(&[1, 1, 1]);
+    let units = PrefixColumn::<u64>::from_values(&[1, 1, 1]);
     for n in 0..3 {
         let seek = units.prefix_iter().advance_prefix(n as u128).unwrap();
         assert_eq!((seek.pos, seek.delta), (n, n as u128));
@@ -8344,7 +8309,7 @@ fn the_seeks_of_a_prefix_iterator() {
     assert!(it.advance_prefix(7).is_none());
     assert_eq!((it.pos(), it.end_pos(), it.total()), (3, 3, 7));
     // flags: on to the second that is set
-    let flags = VerifiedPrefixColumn::<bool>::from_values(&[false, true, false, true, true]);
+    let flags = PrefixColumn::<bool>::from_values(&[false, true, false, true, true]);
     let seek = flags.prefix_iter().advance_prefix(1).unwrap();
     assert_eq!((seek.pos, seek.delta, seek.pv.total()), (3, 1, 2));
 
@@ -8358,13 +8323,13 @@ fn the_seeks_of_a_prefix_iterator() {
     // stopped and started again: its place, its window, and where its
     // sum counts from
     it.next();
-    let state: VerifiedPrefixIterState<u64> = it.suspend();
+    let state: PrefixIterState<u64> = it.suspend();
     let mut on = state.try_resume(&p).unwrap();
     assert_eq!((on.pos(), on.end_pos(), on.total()), (3, 4, 4));
     let pv = on.next().unwrap();
     assert_eq!((pv.prefix(), pv.value, pv.total()), (4, 4, 8));
     // on another column of that many edits, with that column's sums
-    let other = VerifiedPrefixColumn::<u64>::from_values(&[1, 2, 3, 4, 5, 6]);
+    let other = PrefixColumn::<u64>::from_values(&[1, 2, 3, 4, 5, 6]);
     let on = state.try_resume(&other).unwrap();
     assert_eq!((on.pos(), on.end_pos(), on.total()), (3, 4, 3));
     // and not on a column edited since
@@ -8375,22 +8340,22 @@ fn the_seeks_of_a_prefix_iterator() {
     ));
     // a state is plain data, with no borrow in it
     fn plain<S: Send + Sync + 'static>() {}
-    plain::<VerifiedPrefixIterState<Option<i64>>>();
+    plain::<PrefixIterState<Option<i64>>>();
 
     // an iterator of no column
-    let mut it = VerifiedPrefixIter::<u64>::default();
+    let mut it = PrefixIter::<u64>::default();
     assert_eq!((it.pos(), it.end_pos(), it.len(), it.total()), (0, 0, 0, 0));
     assert!(it.next_run().is_none() && it.delta_nth(0).is_none() && it.next().is_none());
     assert_eq!(it.clone().runs().count(), 0);
-    assert_eq!(format!("{it:?}"), "VerifiedPrefixIter { total: 0, pos: 0 }");
+    assert_eq!(format!("{it:?}"), "PrefixIter { total: 0, pos: 0 }");
     // it has no index to ask: it finds nothing, and its window is
     // closed
     it.set_max(5);
     assert!(it.advance_prefix(0).is_none());
     assert_eq!((it.pos(), it.end_pos()), (0, 0));
     // its state starts on a new column
-    let state = VerifiedPrefixIter::<u64>::default().suspend();
-    let none = VerifiedPrefixColumn::<u64>::new();
+    let state = PrefixIter::<u64>::default().suspend();
+    let none = PrefixColumn::<u64>::new();
     let on = state.try_resume(&none).unwrap();
     assert_eq!((on.pos(), on.end_pos(), on.total()), (0, 0, 0));
     assert!(state.try_resume(&p).is_err());
@@ -8504,7 +8469,7 @@ fn a_clients_values_add_what_it_says() {
         Meta::of(15, 7),
         Meta::of(1, 1 << 40),
     ];
-    let p = VerifiedPrefixColumn::<Meta>::from_values(&model);
+    let p = PrefixColumn::<Meta>::from_values(&model);
     golden::note(&p.save());
     assert_eq!(p.to_vec(), model);
     let sums = [0, 5, 5, 12, 19, 19 + (1 << 40)];
@@ -8531,7 +8496,7 @@ fn a_clients_values_add_what_it_says() {
 
     // nulls add nothing
     let nulls = [Some(model[0]), None, Some(model[2]), None, None];
-    let p = VerifiedPrefixColumn::<Option<Meta>>::from_values(&nulls);
+    let p = PrefixColumn::<Option<Meta>>::from_values(&nulls);
     golden::note(&p.save());
     for (i, sum) in [0, 5, 5, 12, 12, 12].into_iter().enumerate() {
         assert_eq!(p.get_prefix(i), sum);
@@ -8551,12 +8516,12 @@ fn a_clients_sums_that_do_not_fit_are_refused() {
         "::a_clients_sums_that_do_not_fit_are_refused"
     ));
     fn loads<T: Summed>(bytes: &[u8]) -> Result<usize, String> {
-        let new = VerifiedPrefixColumn::<T>::load(bytes)
+        let new = PrefixColumn::<T>::load(bytes)
             .map(|p| (p.len(), p.save()))
             .map_err(|e| e.to_string());
         golden::note(&new);
         // a plain column loads them either way
-        let plain = VerifiedColumn::<T>::load(bytes).unwrap();
+        let plain = Column::<T>::load(bytes).unwrap();
         assert_eq!(plain.save(), bytes);
         new.map(|(len, saved)| {
             assert_eq!(saved, bytes);
@@ -8567,7 +8532,7 @@ fn a_clients_sums_that_do_not_fit_are_refused() {
     let refused = Err("invalid value: prefix sum overflows its type".to_string());
     let longest = Meta::of(9, Meta::LONGEST);
 
-    let mut v = VerifiedColumn::<Meta>::fill(16, longest);
+    let mut v = Column::<Meta>::fill(16, longest);
     assert_eq!(loads::<Meta>(&v.save()), Ok(16));
     v.push(Meta::of(0, 15));
     assert_eq!(loads::<Meta>(&v.save()), Ok(17));
@@ -8577,14 +8542,14 @@ fn a_clients_sums_that_do_not_fit_are_refused() {
     assert_eq!(loads::<Meta>(&v.save()), refused);
     v.remove(0);
     assert_eq!(loads::<Meta>(&v.save()), Ok(18));
-    let v = VerifiedColumn::<Meta>::fill(17, longest);
+    let v = Column::<Meta>::fill(17, longest);
     assert_eq!(loads::<Meta>(&v.save()), refused);
-    let v = VerifiedColumn::<Meta>::fill(1 << 20, longest);
+    let v = Column::<Meta>::fill(1 << 20, longest);
     assert_eq!(loads::<Meta>(&v.save()), refused);
 
     // in slabs whose sums each fit, while their total does not
     let run = |value: Meta, count: usize| Run { count, value };
-    let mut v = VerifiedColumn::<Meta>::new();
+    let mut v = Column::<Meta>::new();
     let runs = [
         run(longest, 9),
         run(Meta::of(0, 0), 1),
@@ -8594,17 +8559,17 @@ fn a_clients_sums_that_do_not_fit_are_refused() {
     let bytes = v.save();
     assert_eq!(loads::<Meta>(&bytes), refused);
     let opts = LoadOpts::new().with_max_segments(2);
-    let new = VerifiedPrefixColumn::<Meta>::load_with(&bytes, opts);
+    let new = PrefixColumn::<Meta>::load_with(&bytes, opts);
     golden::note(&new.err().unwrap().to_string());
     assert_eq!(
-        VerifiedColumn::<Meta>::load_with(&bytes, opts)
+        Column::<Meta>::load_with(&bytes, opts)
             .unwrap()
             .slab_count(),
         3
     );
 
     // with nulls, which add nothing
-    let mut v = VerifiedColumn::<Option<Meta>>::fill(16, Some(longest));
+    let mut v = Column::<Option<Meta>>::fill(16, Some(longest));
     v.splice_runs(
         7,
         0,
@@ -8630,7 +8595,7 @@ fn an_edit_past_a_clients_sums_panics() {
         module_path!(),
         "::an_edit_past_a_clients_sums_panics"
     ));
-    type P<T> = VerifiedPrefixColumn<T>;
+    type P<T> = PrefixColumn<T>;
     let words = Some("prefix sum overflows its type".to_string());
     let panics = |f: &dyn Fn()| panic_of(std::panic::AssertUnwindSafe(f));
     let longest = Meta::of(9, Meta::LONGEST);
@@ -8672,7 +8637,7 @@ fn an_edit_past_a_clients_sums_panics() {
     assert_eq!(panics(&|| loaded.clone().push(one)), words);
 
     // a plain column of the same edits takes them all
-    let mut v = VerifiedColumn::<Meta>::fill(17, longest);
+    let mut v = Column::<Meta>::fill(17, longest);
     v.push(one);
     assert_eq!(v.len(), 18);
 }
@@ -8849,7 +8814,7 @@ trait Accd: Kind + VAccumulated<Acc: PartialEq> {
     /// For a type the old API had a `PrefixColumn` of: what the column
     /// answers from its index, noted for the test's digest (see
     /// [`check_acc_noted`]).
-    fn check_noted(_rng: &mut Rng, _p: &VerifiedAccColumn<Self>, _model: &[Self]) {}
+    fn check_noted(_rng: &mut Rng, _p: &AccColumn<Self>, _model: &[Self]) {}
 }
 
 impl Accd for Mark {
@@ -8862,7 +8827,7 @@ impl Accd for Mark {
         Some(Flags(odd.fold(0, |open, (_, m)| open ^ m.flag())))
     }
 
-    fn check_noted(rng: &mut Rng, p: &VerifiedAccColumn<Mark>, model: &[Mark]) {
+    fn check_noted(rng: &mut Rng, p: &AccColumn<Mark>, model: &[Mark]) {
         check_acc_noted(rng, p, model);
     }
 }
@@ -8878,7 +8843,7 @@ impl Accd for Option<Mark> {
         Some(Flags(marks.fold(0, |open, m| open ^ m.flag())))
     }
 
-    fn check_noted(rng: &mut Rng, p: &VerifiedAccColumn<Option<Mark>>, model: &[Option<Mark>]) {
+    fn check_noted(rng: &mut Rng, p: &AccColumn<Option<Mark>>, model: &[Option<Mark>]) {
         check_acc_noted(rng, p, model);
     }
 }
@@ -8917,7 +8882,7 @@ macro_rules! for_each_acc {
 }
 
 /// What an accumulator column holds.
-fn acc_values<T: Accd>(p: &VerifiedAccColumn<T>) -> Vec<T> {
+fn acc_values<T: Accd>(p: &AccColumn<T>) -> Vec<T> {
     p.to_vec().into_iter().map(T::keep).collect()
 }
 
@@ -8925,21 +8890,21 @@ fn acc_values<T: Accd>(p: &VerifiedAccColumn<T>) -> Vec<T> {
 /// plain column of the same edits: nothing, or the same words. (Where a
 /// panic can be caught: not on wasm32.)
 #[cfg(panic = "unwind")]
-fn check_acc_invariants<T: Accd>(p: &VerifiedAccColumn<T>, v: &VerifiedColumn<T>) {
+fn check_acc_invariants<T: Accd>(p: &AccColumn<T>, v: &Column<T>) {
     let acc = panic_of(std::panic::AssertUnwindSafe(|| p.check_invariants()));
     let plain = panic_of(std::panic::AssertUnwindSafe(|| v.check_invariants()));
     assert_eq!(acc, plain);
 }
 
 #[cfg(not(panic = "unwind"))]
-fn check_acc_invariants<T: Accd>(_p: &VerifiedAccColumn<T>, _v: &VerifiedColumn<T>) {}
+fn check_acc_invariants<T: Accd>(_p: &AccColumn<T>, _v: &Column<T>) {}
 
 /// An accumulator column is a column: it holds `model` and reads as the
 /// plain column `v` of the same edits does, it lies in that column's
 /// slabs, and it saves that column's bytes. `built` says that edits made
 /// the columns of values, which the checks of `check_invariants` then
 /// pass.
-fn check_acc<T: Accd>(p: &VerifiedAccColumn<T>, v: &VerifiedColumn<T>, model: &[T], built: bool) {
+fn check_acc<T: Accd>(p: &AccColumn<T>, v: &Column<T>, model: &[T], built: bool) {
     assert_eq!(p.len(), model.len());
     assert_eq!(p.is_empty(), model.is_empty());
     assert_eq!(acc_values(p), model);
@@ -8985,7 +8950,7 @@ fn check_acc<T: Accd>(p: &VerifiedAccColumn<T>, v: &VerifiedColumn<T>, model: &[
 /// add up to in the order it holds them: those before a position and
 /// those through one, at any position, and those of a range, whatever
 /// its ends.
-fn check_acc_reads<T: Accd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T]) {
+fn check_acc_reads<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, model: &[T]) {
     let len = model.len();
     let places = some_places(rng, len);
     for &i in &places {
@@ -9010,7 +8975,7 @@ fn check_acc_reads<T: Accd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T]
 /// What an accumulator column saves and answers from its index: the
 /// test's digest checks that these are what the old API's `PrefixColumn`
 /// of the same values saved and answered.
-fn check_acc_noted<T: Accd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T]) {
+fn check_acc_noted<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, model: &[T]) {
     golden::note(&p.save());
     let places = some_places(rng, model.len());
     for (n, &i) in places.iter().enumerate() {
@@ -9025,12 +8990,7 @@ fn check_acc_noted<T: Accd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T]
 /// The reads of a plain column, of an accumulator column: a value by
 /// its place, a range of values, a search for a value, and a clone,
 /// which is a column of its own with an index of its own.
-fn check_acc_plain_reads<T: Accd>(
-    rng: &mut Rng,
-    p: &VerifiedAccColumn<T>,
-    v: &VerifiedColumn<T>,
-    model: &[T],
-) {
+fn check_acc_plain_reads<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, v: &Column<T>, model: &[T]) {
     for _ in 0..4 {
         if !model.is_empty() {
             let i = rng.below(model.len());
@@ -9075,10 +9035,10 @@ fn check_acc_plain_reads<T: Accd>(
 /// An accumulator column loads the bytes it saved, which are a plain
 /// column's, as the same values and into the slabs a plain column loads
 /// them into, and answers of them what it answered.
-fn check_acc_loads<T: Accd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T]) {
+fn check_acc_loads<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, model: &[T]) {
     let bytes = p.save();
-    let p2 = VerifiedAccColumn::<T>::load(&bytes).unwrap();
-    let v2 = VerifiedColumn::<T>::load(&bytes).unwrap();
+    let p2 = AccColumn::<T>::load(&bytes).unwrap();
+    let v2 = Column::<T>::load(&bytes).unwrap();
     check_acc(&p2, &v2, model, false);
     assert_eq!(p2.save(), bytes);
     // of an index made at once of all the slabs
@@ -9089,8 +9049,8 @@ fn acc_edits<T: Accd>() {
     for seed in 1..=8u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xacc5);
         let budget = [2, 3, 4, 8, 64][rng.below(5)];
-        let mut p = VerifiedAccColumn::<T>::with_max_segments(budget);
-        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut p = AccColumn::<T>::with_max_segments(budget);
+        let mut v = Column::<T>::with_max_segments(budget);
         let mut model: Vec<T> = vec![];
         // one edit, of the accumulator column and of the plain one
         macro_rules! each {
@@ -9190,7 +9150,7 @@ fn acc_edits<T: Accd>() {
     }
 }
 
-/// An accumulator column of the verified API ([`VerifiedAccColumn`]) is
+/// An accumulator column of the verified API ([`AccColumn`]) is
 /// a column kept with another index. Under the same edits it holds what
 /// a plain column holds, in the same slabs, reads the same, and saves
 /// the same bytes; and what it answers from its index after each edit
@@ -9213,48 +9173,48 @@ fn acc_forms<T: Accd>() {
         let mut rng = Rng(seed.wrapping_mul(0x2545_f491_4f6c_dd1d) ^ 0xacc6);
         let budget = [2, 3, 4, 8, 64][rng.below(5)];
         let model: Vec<T> = rng.values(300);
-        let plain = VerifiedColumn::<T>::from_values(&lent(&model));
+        let plain = Column::<T>::from_values(&lent(&model));
 
-        let p = VerifiedAccColumn::<T>::from_values(&lent(&model));
+        let p = AccColumn::<T>::from_values(&lent(&model));
         check_acc(&p, &plain, &model, true);
         check_acc_reads(&mut rng, &p, &model);
         T::check_noted(&mut rng, &p, &model);
-        let p: VerifiedAccColumn<T> = model.iter().map(T::lend).collect();
+        let p: AccColumn<T> = model.iter().map(T::lend).collect();
         check_acc(&p, &plain, &model, true);
         check_acc_reads(&mut rng, &p, &model);
-        let p = VerifiedColumn::<T, Leb128, AccIndex>::from_iter(lent(&model));
+        let p = Column::<T, Leb128, AccIndex>::from_iter(lent(&model));
         check_acc(&p, &plain, &model, true);
         check_acc_reads(&mut rng, &p, &model);
-        let mut p = VerifiedAccColumn::<T>::new();
+        let mut p = AccColumn::<T>::new();
         p.extend(lent(&model));
         check_acc(&p, &plain, &model, true);
         check_acc_reads(&mut rng, &p, &model);
-        let none = VerifiedAccColumn::<T>::default();
+        let none = AccColumn::<T>::default();
         assert!(none.is_empty() && none.save().is_empty());
         assert_eq!(none.slab_count(), 0);
         assert_eq!(none.get_prefix(3), T::added(&[]));
         assert_eq!(none.get_total(0), T::added(&[]));
 
         // in slabs of a budget, and loaded with one
-        let mut p = VerifiedAccColumn::<T>::from_values_with_max_segments(&lent(&model), budget);
-        let mut v = VerifiedColumn::<T>::from_values_with_max_segments(&lent(&model), budget);
+        let mut p = AccColumn::<T>::from_values_with_max_segments(&lent(&model), budget);
+        let mut v = Column::<T>::from_values_with_max_segments(&lent(&model), budget);
         check_acc(&p, &v, &model, true);
         check_acc_reads(&mut rng, &p, &model);
         check_acc_loads(&mut rng, &p, &model);
         let opts = LoadOpts::new()
             .with_length(model.len())
             .with_max_segments(budget);
-        let p2 = VerifiedAccColumn::<T>::load_with(&p.save(), opts).unwrap();
-        let v2 = VerifiedColumn::<T>::load_with(&p.save(), opts).unwrap();
+        let p2 = AccColumn::<T>::load_with(&p.save(), opts).unwrap();
+        let v2 = Column::<T>::load_with(&p.save(), opts).unwrap();
         check_acc(&p2, &v2, &model, false);
         check_acc_reads(&mut rng, &p2, &model);
         // of a length the bytes do not have: the same error
         let long = LoadOpts::new().with_length(model.len() + 1);
         assert_eq!(
-            VerifiedAccColumn::<T>::load_with(&p.save(), long)
+            AccColumn::<T>::load_with(&p.save(), long)
                 .map(|p| p.len())
                 .map_err(|e| e.to_string()),
-            VerifiedColumn::<T>::load_with(&p.save(), long)
+            Column::<T>::load_with(&p.save(), long)
                 .map(|v| v.len())
                 .map_err(|e| e.to_string()),
         );
@@ -9272,8 +9232,8 @@ fn acc_forms<T: Accd>() {
 
         // a column of one value
         let n = rng.below(500);
-        let p = VerifiedAccColumn::<T>::fill(n, a.lend());
-        let v = VerifiedColumn::<T>::fill(n, a.lend());
+        let p = AccColumn::<T>::fill(n, a.lend());
+        let v = Column::<T>::fill(n, a.lend());
         check_acc(&p, &v, &vec![a.clone(); n], true);
         check_acc_reads(&mut rng, &p, &vec![a.clone(); n]);
         T::check_noted(&mut rng, &p, &vec![a.clone(); n]);
@@ -9297,16 +9257,16 @@ fn the_other_forms_of_an_accumulator_column() {
 /// plain column does, as the same values in the same slabs, and is
 /// refused them where that is, with the same error.
 fn same_acc_load<T: Accd>(bytes: &[u8]) -> bool {
-    let v = match VerifiedColumn::<T>::load(bytes) {
+    let v = match Column::<T>::load(bytes) {
         Ok(v) => v,
         Err(e) => {
-            let as_one = VerifiedAccColumn::<T>::load(bytes).map(|p| p.len());
+            let as_one = AccColumn::<T>::load(bytes).map(|p| p.len());
             assert_eq!(as_one.map_err(|f| f.to_string()), Err(e.to_string()));
             return false;
         }
     };
     if v.len() <= 100_000 {
-        let p = VerifiedAccColumn::<T>::load(bytes).unwrap();
+        let p = AccColumn::<T>::load(bytes).unwrap();
         let model = new_values(&v);
         check_acc(&p, &v, &model, false);
         assert_eq!(p.get_prefix(usize::MAX), T::added(&model));
@@ -9317,7 +9277,7 @@ fn same_acc_load<T: Accd>(bytes: &[u8]) -> bool {
     // another, which would be as long about it as the run is
     let runs = v.iter().runs().map(|r| (r.count, T::keep(r.value)));
     if let Some(all) = T::added_runs(&runs.collect::<Vec<_>>()) {
-        let p = VerifiedAccColumn::<T>::load(bytes).unwrap();
+        let p = AccColumn::<T>::load(bytes).unwrap();
         assert_eq!(p.len(), v.len());
         assert_eq!(p.save(), bytes);
         assert_eq!(p.get_prefix(usize::MAX), all);
@@ -9348,7 +9308,7 @@ fn acc_loads<T: Accd>() {
     // a column's bytes with one changed, taken out or put in
     for _ in 0..1_000 {
         let model: Vec<T> = rng.values(30);
-        let mut bytes = VerifiedColumn::<T>::from_values(&lent(&model)).save();
+        let mut bytes = Column::<T>::from_values(&lent(&model)).save();
         assert!(same_acc_load::<T>(&bytes));
         if bytes.is_empty() {
             continue;
@@ -9366,7 +9326,7 @@ fn acc_loads<T: Accd>() {
     assert!(seen[0] > 100 && seen[1] > 100, "{seen:?}");
     // a run of billions, in a few bytes
     let x = T::fresh(&mut rng);
-    let long = VerifiedColumn::<T>::fill(1 << 31, x.lend()).save();
+    let long = Column::<T>::fill(1 << 31, x.lend()).save();
     assert!(long.len() < 20 && same_acc_load::<T>(&long));
 }
 
@@ -9385,8 +9345,8 @@ fn an_accumulator_column_loads_what_a_plain_column_loads() {
 }
 
 /// The kind of an accumulator column is the third parameter of the
-/// column's type: `VerifiedAccColumn<V, C>` is
-/// `VerifiedColumn<V, C, AccIndex>`, and each constructor and each load
+/// column's type: `AccColumn<V, C>` is
+/// `Column<V, C, AccIndex>`, and each constructor and each load
 /// makes a column of the kind its type says. Its iterator, and what
 /// `IntoIterator` gives of it, are a column's.
 #[test]
@@ -9396,17 +9356,17 @@ fn the_kind_of_an_accumulator_column() {
         "::the_kind_of_an_accumulator_column"
     ));
     let vs: Vec<Mark> = (0..2000).map(|i| Mark(i / 7)).collect();
-    let named = VerifiedColumn::<Mark, Leb128, AccIndex>::from_values(&vs);
-    let short: VerifiedAccColumn<Mark> = named.clone();
-    let collected: VerifiedAccColumn<Mark, Leb128> = vs.iter().copied().collect();
-    let loaded = VerifiedAccColumn::<Mark>::load(&short.save()).unwrap();
-    let plain: VerifiedColumn<Mark> = vs.iter().copied().collect();
+    let named = Column::<Mark, Leb128, AccIndex>::from_values(&vs);
+    let short: AccColumn<Mark> = named.clone();
+    let collected: AccColumn<Mark, Leb128> = vs.iter().copied().collect();
+    let loaded = AccColumn::<Mark>::load(&short.save()).unwrap();
+    let plain: Column<Mark> = vs.iter().copied().collect();
     for c in [&named, &short, &collected, &loaded] {
         assert_eq!(c.to_vec(), vs);
         assert_eq!(c.save(), plain.save());
         assert_eq!(c.get_prefix(2000), Mark::added(&vs));
     }
-    let it: VerifiedIter<'_, Mark, Leb128, AccIndex> = short.iter();
+    let it: Iter<'_, Mark, Leb128, AccIndex> = short.iter();
     assert_eq!(it.count(), vs.len());
     assert!((&short).into_iter().eq(vs.iter().copied()));
 }
@@ -9423,7 +9383,7 @@ fn an_accumulator_adds_what_its_client_says() {
     ));
     // of the kinds 3, 5, 3, 5 and 0
     let model = [Mark(3), Mark(5), Mark(67), Mark(5), Mark(64)];
-    let p = VerifiedAccColumn::<Mark>::from_values(&model);
+    let p = AccColumn::<Mark>::from_values(&model);
     golden::note(&p.save());
     assert_eq!(p.to_vec(), model);
     for (i, open) in [0, 8, 0x28, 0x20, 0, 1].into_iter().enumerate() {
@@ -9435,22 +9395,22 @@ fn an_accumulator_adds_what_its_client_says() {
     assert_eq!(p.sum_range(4, 1), Flags(0));
 
     let nulls = [Some(model[0]), None, Some(model[1]), None, None];
-    let p = VerifiedAccColumn::<Option<Mark>>::from_values(&nulls);
+    let p = AccColumn::<Option<Mark>>::from_values(&nulls);
     golden::note(&p.save());
     for (i, open) in [0, 8, 8, 0x28, 0x28, 0x28].into_iter().enumerate() {
         assert_eq!(p.get_prefix(i), Flags(open));
     }
 
     // any values at all: nothing overflows
-    let p = VerifiedAccColumn::<Mark>::fill(1 << 20, Mark(u64::MAX));
+    let p = AccColumn::<Mark>::fill(1 << 20, Mark(u64::MAX));
     assert_eq!(p.get_prefix(1 << 20), Flags(0));
     assert_eq!(p.get_prefix((1 << 20) - 1), Flags(1 << 63));
-    let loaded = VerifiedAccColumn::<Mark>::load(&p.save()).unwrap();
+    let loaded = AccColumn::<Mark>::load(&p.save()).unwrap();
     assert_eq!(loaded.get_total(0), Flags(1 << 63));
 
     let board = |lit, turned| Board { lit, turned };
-    let one_way = VerifiedAccColumn::<Step>::from_values(&[Step(3), Step(4)]);
-    let the_other = VerifiedAccColumn::<Step>::from_values(&[Step(4), Step(3)]);
+    let one_way = AccColumn::<Step>::from_values(&[Step(3), Step(4)]);
+    let the_other = AccColumn::<Step>::from_values(&[Step(4), Step(3)]);
     assert_eq!(one_way.get_prefix(2), board(0x2_0000_0001, true));
     assert_eq!(the_other.get_prefix(2), board(3, true));
     assert_eq!(one_way.get_total(0), board(1, true));
@@ -9489,11 +9449,11 @@ fn a_run_adds_its_value_times_over() {
         assert_eq!(one_by_one, Board::new_zero());
 
         // in a column: one run, and runs put in
-        let p = VerifiedAccColumn::<Step>::fill(n, step);
+        let p = AccColumn::<Step>::fill(n, step);
         for i in [0, 1, n / 2, n, n + 1] {
             assert_eq!(p.get_prefix(i), Step::added(&steps[1..][..i.min(n)]));
         }
-        let mut p = VerifiedAccColumn::<Option<Mark>>::new();
+        let mut p = AccColumn::<Option<Mark>>::new();
         let run = |count, value| Run { count, value };
         let runs = [run(n, Some(Mark(9))), run(3, None), run(n, Some(Mark(70)))];
         p.splice_runs(0, 0, runs);
@@ -9508,7 +9468,7 @@ fn a_run_adds_its_value_times_over() {
 /// its names).
 type AccPlace<T> = (usize, usize, usize, usize, Added<T>, Added<T>);
 
-fn acc_place<T: Accd>(it: &VerifiedAccIter<'_, T>) -> AccPlace<T> {
+fn acc_place<T: Accd>(it: &AccIter<'_, T>) -> AccPlace<T> {
     (
         it.pos(),
         it.end_pos(),
@@ -9522,7 +9482,7 @@ fn acc_place<T: Accd>(it: &VerifiedAccIter<'_, T>) -> AccPlace<T> {
 /// A value with what the values before it and through it add up to.
 type AccItem<T> = Option<(T, Added<T>, Added<T>)>;
 
-fn acc_item<T: Accd>(pv: Option<VerifiedAccValue<'_, T>>) -> AccItem<T> {
+fn acc_item<T: Accd>(pv: Option<AccValue<'_, T>>) -> AccItem<T> {
     pv.map(|pv| (T::keep(pv.value), pv.prefix(), pv.total()))
 }
 
@@ -9530,7 +9490,7 @@ fn acc_item<T: Accd>(pv: Option<VerifiedAccValue<'_, T>>) -> AccItem<T> {
 /// through it.
 type AccRun<T> = Option<(usize, T, Added<T>, Added<T>)>;
 
-fn acc_run<T: Accd>(run: Option<Run<VerifiedAccValue<'_, T>>>) -> AccRun<T> {
+fn acc_run<T: Accd>(run: Option<Run<AccValue<'_, T>>>) -> AccRun<T> {
     run.map(|run| {
         (
             run.count,
@@ -9545,7 +9505,7 @@ fn acc_run<T: Accd>(run: Option<Run<VerifiedAccValue<'_, T>>>) -> AccRun<T> {
 /// up to, and the value with its sums.
 type AccFound<T> = Option<(usize, Added<T>, (T, Added<T>, Added<T>))>;
 
-fn acc_found<T: Accd>(seek: Option<VerifiedAccSeek<'_, T>>) -> AccFound<T> {
+fn acc_found<T: Accd>(seek: Option<AccSeek<'_, T>>) -> AccFound<T> {
     seek.map(|seek| (seek.pos, seek.delta, acc_item(Some(seek.pv)).unwrap()))
 }
 
@@ -9720,11 +9680,7 @@ impl<T: Accd> AccWalk<'_, T> {
 
 /// The move made of an accumulator column's iterator, which is one of
 /// `p`.
-fn new_does<'a, T: Accd>(
-    x: &mut VerifiedAccIter<'a, T>,
-    p: &'a VerifiedAccColumn<T>,
-    mv: &Move,
-) -> Gave<T> {
+fn new_does<'a, T: Accd>(x: &mut AccIter<'a, T>, p: &'a AccColumn<T>, mv: &Move) -> Gave<T> {
     match mv.clone() {
         Move::Next => return Gave::Item(acc_item(x.next())),
         Move::Nth(n) => return Gave::Item(acc_item(x.nth(n))),
@@ -9785,7 +9741,7 @@ fn a_move<T: Accd>(rng: &mut Rng, m: &AccWalk<'_, T>) -> Move {
 /// window, with its sum started again, stopped and started again, and
 /// copied. As its specification says, which a walk of the values
 /// follows.
-fn check_acc_iters<T: Accd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T]) {
+fn check_acc_iters<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, model: &[T]) {
     let len = model.len();
     let before = accs_before(model);
     let item =
@@ -9829,7 +9785,7 @@ fn check_acc_iters<T: Accd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T]
             .map(|run| (run.count, T::keep(run.value)))
             .collect();
         assert_eq!(runs, runs_of(&model[start..end]));
-        let mut copy = VerifiedAccColumn::<T>::new();
+        let mut copy = AccColumn::<T>::new();
         copy.splice_runs(0, 0, p.prefix_iter_range(start, end).runs());
         assert_eq!(acc_values(&copy), model[start..end]);
         assert_eq!(copy.get_prefix(usize::MAX), T::added(&model[start..end]));
@@ -9875,11 +9831,11 @@ fn check_acc_iters<T: Accd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T]
 /// An accumulator column under edits that put in single values and
 /// runs: `check` is asked of it after each edit, and of the column
 /// loaded from its bytes.
-fn under_acc_edits<T: Accd>(salt: u64, check: fn(&mut Rng, &VerifiedAccColumn<T>, &[T])) {
+fn under_acc_edits<T: Accd>(salt: u64, check: fn(&mut Rng, &AccColumn<T>, &[T])) {
     for seed in 1..=8u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ salt);
         let budget = [2, 3, 4, 8, 64][rng.below(5)];
-        let mut p = VerifiedAccColumn::<T>::with_max_segments(budget);
+        let mut p = AccColumn::<T>::with_max_segments(budget);
         let mut model: Vec<T> = vec![];
         check(&mut rng, &p, &model);
         for _ in 0..40 {
@@ -9901,7 +9857,7 @@ fn under_acc_edits<T: Accd>(salt: u64, check: fn(&mut Rng, &VerifiedAccColumn<T>
             check(&mut rng, &p, &model);
         }
         // loaded: an index made at once of all the slabs
-        let p2 = VerifiedAccColumn::<T>::load(&p.save()).unwrap();
+        let p2 = AccColumn::<T>::load(&p.save()).unwrap();
         check(&mut rng, &p2, &model);
     }
 }
@@ -9911,16 +9867,16 @@ fn acc_iters<T: Accd>() {
 }
 
 /// An accumulator column of the verified API is read with its sums
-/// ([`VerifiedAccIter`]) as its specification says: each value comes
+/// ([`AccIter`]) as its specification says: each value comes
 /// with what the values before it and through it add up to, and the
 /// iterator's running sum is of the values it has passed since its sum
 /// was last started, in their order, whether it read them or stepped
 /// over them, one at a time or a run at a time, in a window that is
 /// moved, widened past the column, or closed. It finds a value further
 /// on with what it passes over on the way
-/// ([`VerifiedAccIter::delta_nth`], [`VerifiedColumn::delta`]), and is
-/// copied, and stopped and started again ([`VerifiedAccIter::suspend`],
-/// [`VerifiedAccIterState::try_resume`]). For an accumulator in which
+/// ([`AccIter::delta_nth`], [`Column::delta`]), and is
+/// copied, and stopped and started again ([`AccIter::suspend`],
+/// [`AccIterState::try_resume`]). For an accumulator in which
 /// the order does not matter and for one in which it does, after edits
 /// and after a load.
 #[test]
@@ -9937,7 +9893,7 @@ fn an_accumulator_column_is_read_with_its_sums() {
 /// std's operators) was asked: what it gives and where it stands are
 /// those of a walk of the values, and the test's digest checks that what
 /// it gives is what `PrefixColumn`'s iterator gave.
-fn check_acc_iters_noted<T: Accd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T]) {
+fn check_acc_iters_noted<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, model: &[T]) {
     let len = model.len();
     let before = accs_before(model);
     // all of it, and one value by its place
@@ -10018,7 +9974,7 @@ fn the_iterator_of_an_accumulator_column() {
     // of the kinds 3, 5, 3, 5 and 0
     let model = [Mark(3), Mark(5), Mark(67), Mark(5), Mark(64)];
     let open = [0, 8, 0x28, 0x20, 0, 1].map(Flags);
-    let p = VerifiedAccColumn::<Mark>::from_values(&model);
+    let p = AccColumn::<Mark>::from_values(&model);
     let got: Vec<(Flags, Mark, Flags)> = p
         .prefix_iter()
         .map(|pv| (pv.prefix(), pv.value, pv.total()))
@@ -10033,14 +9989,14 @@ fn the_iterator_of_an_accumulator_column() {
         (1, 4, 3, Flags(8))
     );
     let pv = it.next().unwrap();
-    let given = VerifiedAccValue {
+    let given = AccValue {
         value: Mark(5),
         total: Flags(0x28),
     };
     assert_eq!(pv, given);
     assert_eq!(
         format!("{pv:?}"),
-        "VerifiedAccValue { value: Mark(5), total: Flags(40) }"
+        "AccValue { value: Mark(5), total: Flags(40) }"
     );
     let copy = pv.clone();
     assert_eq!(
@@ -10086,7 +10042,7 @@ fn the_iterator_of_an_accumulator_column() {
     assert!(p.get_prefixed(5).is_none());
     // nulls, which add nothing
     let nulls = [Some(Mark(3)), None, Some(Mark(5))];
-    let p = VerifiedAccColumn::<Option<Mark>>::from_values(&nulls);
+    let p = AccColumn::<Option<Mark>>::from_values(&nulls);
     let got: Vec<(Flags, Option<Mark>, Flags)> = p
         .prefix_iter()
         .map(|pv| (pv.prefix(), pv.value, pv.total()))
@@ -10097,7 +10053,7 @@ fn the_iterator_of_an_accumulator_column() {
     // steps, whose order matters: the sum before a value is the sum
     // through it with the value's own taken off its end
     let board = |lit, turned| Board { lit, turned };
-    let p = VerifiedAccColumn::<Step>::from_values(&[Step(3), Step(4), Step(3)]);
+    let p = AccColumn::<Step>::from_values(&[Step(3), Step(4), Step(3)]);
     let got: Vec<(Board, Step, Board)> = p
         .prefix_iter()
         .map(|pv| (pv.prefix(), pv.value, pv.total()))
@@ -10128,7 +10084,7 @@ fn the_iterator_of_an_accumulator_column() {
         (board(3, true), board(3, true))
     );
     // a column of nothing
-    let none = VerifiedAccColumn::<Step>::new();
+    let none = AccColumn::<Step>::new();
     let mut it = none.prefix_iter();
     assert!(it.next().is_none() && it.nth(3).is_none());
     assert_eq!(
@@ -10148,7 +10104,7 @@ fn the_seeks_of_an_accumulator_iterator() {
     ));
     // three marks of the kind 3, one of the kind 5, two of the kind 0
     let model = [Mark(3), Mark(3), Mark(3), Mark(5), Mark(64), Mark(64)];
-    let mut p = VerifiedAccColumn::<Mark>::from_values(&model);
+    let mut p = AccColumn::<Mark>::from_values(&model);
     // by runs: the sums are those of each run's last value
     let mut it = p.prefix_iter();
     let mut runs = vec![];
@@ -10165,10 +10121,7 @@ fn the_seeks_of_an_accumulator_iterator() {
         runs,
         want.map(|(n, v, b, t)| (n, Mark(v), Flags(b), Flags(t)))
     );
-    assert_eq!(
-        format!("{it:?}"),
-        "VerifiedAccIter { total: Flags(40), pos: 6 }"
-    );
+    assert_eq!(format!("{it:?}"), "AccIter { total: Flags(40), pos: 6 }");
     // the runs of a window, without sums
     let runs: Vec<(usize, Mark)> = p
         .prefix_iter_range(1, 5)
@@ -10179,10 +10132,10 @@ fn the_seeks_of_an_accumulator_iterator() {
     // a value by its count from the iterator, with what is passed over
     let mut it = p.prefix_iter_range(1, 6);
     let seek = it.delta_nth(3).unwrap();
-    let found = VerifiedAccSeek {
+    let found = AccSeek {
         pos: 4,
         delta: Flags(0x20),
-        pv: VerifiedAccValue {
+        pv: AccValue {
             value: Mark(64),
             total: Flags(0x29),
         },
@@ -10190,7 +10143,7 @@ fn the_seeks_of_an_accumulator_iterator() {
     assert_eq!(seek, found);
     assert_eq!(
         format!("{seek:?}"),
-        "VerifiedAccSeek { pos: 4, delta: Flags(32), pv: VerifiedAccValue { value: Mark(64), total: Flags(41) } }"
+        "AccSeek { pos: 4, delta: Flags(32), pv: AccValue { value: Mark(64), total: Flags(41) } }"
     );
     assert_eq!(
         (seek.clone(), seek.pv.prefix()),
@@ -10218,7 +10171,7 @@ fn the_seeks_of_an_accumulator_iterator() {
     // stopped and started again: its place, its window, and where its
     // sum counts from
     it.next();
-    let state: VerifiedAccIterState<Mark> = it.suspend();
+    let state: AccIterState<Mark> = it.suspend();
     let mut on = state.try_resume(&p).unwrap();
     assert_eq!((on.pos(), on.end_pos(), on.total()), (3, 5, Flags(8)));
     let pv = on.next().unwrap();
@@ -10227,7 +10180,7 @@ fn the_seeks_of_an_accumulator_iterator() {
         (Flags(8), Mark(5), Flags(0x28))
     );
     // on another column of that many edits, with that column's sums
-    let other = VerifiedAccColumn::<Mark>::from_values(&[1, 2, 4, 7, 9, 9].map(Mark));
+    let other = AccColumn::<Mark>::from_values(&[1, 2, 4, 7, 9, 9].map(Mark));
     let on = state.try_resume(&other).unwrap();
     assert_eq!((on.pos(), on.end_pos(), on.total()), (3, 5, Flags(0x10)));
     // and not on a column edited since
@@ -10238,23 +10191,20 @@ fn the_seeks_of_an_accumulator_iterator() {
     ));
     // a state is plain data, with no borrow in it
     fn plain<S: Send + Sync + 'static>() {}
-    plain::<VerifiedAccIterState<Option<Step>>>();
+    plain::<AccIterState<Option<Step>>>();
 
     // an iterator of no column
-    let mut it = VerifiedAccIter::<Mark>::default();
+    let mut it = AccIter::<Mark>::default();
     assert_eq!(
         (it.pos(), it.end_pos(), it.len(), it.total()),
         (0, 0, 0, Flags(0))
     );
     assert!(it.next_run().is_none() && it.delta_nth(0).is_none() && it.next().is_none());
     assert_eq!(it.clone().runs().count(), 0);
-    assert_eq!(
-        format!("{it:?}"),
-        "VerifiedAccIter { total: Flags(0), pos: 0 }"
-    );
+    assert_eq!(format!("{it:?}"), "AccIter { total: Flags(0), pos: 0 }");
     // its state starts on a new column
-    let state = VerifiedAccIter::<Mark>::default().suspend();
-    let none = VerifiedAccColumn::<Mark>::new();
+    let state = AccIter::<Mark>::default().suspend();
+    let none = AccColumn::<Mark>::new();
     let on = state.try_resume(&none).unwrap();
     assert_eq!((on.pos(), on.end_pos(), on.total()), (0, 0, Flags(0)));
     assert!(state.try_resume(&p).is_err());
@@ -10274,7 +10224,7 @@ fn the_accumulator_iterator_over_long_runs() {
     ));
     // an odd count of marks of one kind
     let long = i64::MAX as usize;
-    let p = VerifiedAccColumn::<Mark>::fill(long, Mark(5));
+    let p = AccColumn::<Mark>::fill(long, Mark(5));
     let mut it = p.prefix_iter();
     let pv = it.nth(long - 2).unwrap();
     assert_eq!((pv.prefix(), pv.total()), (Flags(0x20), Flags(0)));
@@ -10303,7 +10253,7 @@ fn the_accumulator_iterator_over_long_runs() {
         count,
         value: Mark(mark),
     };
-    let mut p = VerifiedAccColumn::<Mark>::with_max_segments(2);
+    let mut p = AccColumn::<Mark>::with_max_segments(2);
     for (at, runs) in [
         (0, [run(3, 1 << 30), run(7, (1 << 40) + 1)]),
         (1 << 20, [run(0, (1 << 50) + 1), run(70, 1 << 30)]),
@@ -10400,8 +10350,8 @@ fn an_accumulator_that_panics_under_an_iterator() {
     }
 
     let model = [1, 2, 2, 3, 4].map(Tick);
-    let p = VerifiedAccColumn::<Tick>::from_values(&model);
-    let moves: [fn(&mut VerifiedAccIter<'_, Tick>); 7] = [
+    let p = AccColumn::<Tick>::from_values(&model);
+    let moves: [fn(&mut AccIter<'_, Tick>); 7] = [
         |it| {
             let _ = it.next();
         },
@@ -10454,7 +10404,7 @@ fn an_accumulator_that_panics_under_an_iterator() {
 }
 
 /// A value type of a delta column.
-trait Deltad: VDeltaValue + Copy + PartialEq + Debug {
+trait Deltad: DeltaValue + Copy + PartialEq + Debug {
     /// Whether the type has a null.
     const NULLABLE: bool;
 
@@ -10530,7 +10480,7 @@ deltad!(
 
 /// What a delta column holds: its length, whether it is empty, and what
 /// it gives at each place, and at two past its end.
-fn delta_noted<T: Deltad>(col: &VerifiedDeltaColumn<T>) {
+fn delta_noted<T: Deltad>(col: &DeltaColumn<T>) {
     golden::note(&col.len());
     golden::note(&col.is_empty());
     for i in 0..col.len() + 2 {
@@ -10552,7 +10502,7 @@ fn delta_edits<T: Deltad>(seed: u64) {
     };
     let n = rng.below(300);
     let start = some(&mut rng, n);
-    let mut new = VerifiedDeltaColumn::<T>::from_values(&start);
+    let mut new = DeltaColumn::<T>::from_values(&start);
     delta_noted(&new);
     for _ in 0..60 {
         let at = rng.below(new.len() + 1);
@@ -10562,7 +10512,7 @@ fn delta_edits<T: Deltad>(seed: u64) {
         new.splice(at, del, &values);
         delta_noted(&new);
     }
-    let empty = VerifiedDeltaColumn::<T>::new();
+    let empty = DeltaColumn::<T>::new();
     delta_noted(&empty);
 }
 
@@ -10592,8 +10542,8 @@ fn delta_simple_edits<T: Deltad>(seed: u64, max_segments: Option<usize>) {
     let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9).wrapping_add(7) | 1);
     let mut last = 0;
     let mut new = match max_segments {
-        Some(m) => VerifiedDeltaColumn::<T>::with_max_segments(m),
-        None => VerifiedDeltaColumn::<T>::default(),
+        Some(m) => DeltaColumn::<T>::with_max_segments(m),
+        None => DeltaColumn::<T>::default(),
     };
     for _ in 0..300 {
         let len = new.len();
@@ -10681,7 +10631,7 @@ fn delta_simple_edits_agree() {
 #[test]
 fn delta_column_ends() {
     let _golden = golden::test(concat!(module_path!(), "::delta_column_ends"));
-    let mut col = VerifiedDeltaColumn::<Option<i64>>::new();
+    let mut col = DeltaColumn::<Option<i64>>::new();
     assert_eq!(col.first(), None);
     assert_eq!(col.last(), None);
     assert_eq!(col.pop(), None);
@@ -10710,17 +10660,14 @@ fn delta_column_ends() {
     col.clear();
     assert!(col.is_empty());
     assert_eq!(other.to_vec(), vec![Some(i64::MIN / 4)]);
-    assert_eq!(
-        format!("{other:?}"),
-        "VerifiedDeltaColumn { len: 1, slabs: 1 }"
-    );
+    assert_eq!(format!("{other:?}"), "DeltaColumn { len: 1, slabs: 1 }");
 }
 
 /// Bytes loaded as a delta column: the values they load as, or the error
 /// they are refused with (the digest checks these are the old API's).
 /// Whether they load.
 fn delta_same_load<T: Deltad>(bytes: &[u8]) -> bool {
-    match VerifiedDeltaColumn::<T>::load(bytes) {
+    match DeltaColumn::<T>::load(bytes) {
         Ok(v) => {
             golden::note(&v.len());
             // a few bytes can be a run of billions: read those in places
@@ -10753,7 +10700,7 @@ fn delta_same_load<T: Deltad>(bytes: &[u8]) -> bool {
 /// What a delta column saves to, whole and unless it holds one value
 /// only, and whether it does: bytes that load as its values, written
 /// after what the buffer held.
-fn check_delta_saves<T: Deltad>(new: &VerifiedDeltaColumn<T>, others: &[T]) {
+fn check_delta_saves<T: Deltad>(new: &DeltaColumn<T>, others: &[T]) {
     let values = new.to_vec();
     let bytes = new.save();
     assert!(delta_same_load::<T>(&bytes));
@@ -10792,8 +10739,8 @@ fn delta_saves<T: Deltad>(seed: u64, max_segments: Option<usize>) {
     };
     let others = some(&mut rng, 3);
     let mut new = match max_segments {
-        Some(m) => VerifiedDeltaColumn::<T>::with_max_segments(m),
-        None => VerifiedDeltaColumn::<T>::default(),
+        Some(m) => DeltaColumn::<T>::with_max_segments(m),
+        None => DeltaColumn::<T>::default(),
     };
     check_delta_saves(&new, &others);
     for _ in 0..12 {
@@ -10830,14 +10777,14 @@ fn delta_columns_save_the_same() {
 
 fn delta_uniform<T: Deltad>(values: &[T], others: &[T]) {
     for m in [2, 4, 64] {
-        let mut new = VerifiedDeltaColumn::<T>::with_max_segments(m);
+        let mut new = DeltaColumn::<T>::with_max_segments(m);
         // one by one, so that small slabs are split
         for v in values {
             new.push(*v);
         }
         check_delta_saves(&new, others);
     }
-    let new = VerifiedDeltaColumn::<T>::from_values(values);
+    let new = DeltaColumn::<T>::from_values(values);
     check_delta_saves(&new, others);
 }
 
@@ -10877,7 +10824,7 @@ fn delta_columns_of_one_value() {
 
 /// The saved bytes of a delta column of `values`.
 fn delta_bytes<T: Deltad>(values: &[T]) -> Vec<u8> {
-    VerifiedDeltaColumn::<T>::from_values(values).save()
+    DeltaColumn::<T>::from_values(values).save()
 }
 
 /// Whether `bytes` load as a delta column of each type.
@@ -11041,7 +10988,7 @@ fn delta_run_leaves<T: Deltad>(r: &hexane::DeltaRun) -> bool {
 fn delta_run_refused<T: Deltad>(run: hexane::DeltaRun) {
     if run.count <= 9 && delta_run_leaves::<T>(&run) {
         let new = panic_of(move || {
-            let mut new = VerifiedDeltaColumn::<T>::new();
+            let mut new = DeltaColumn::<T>::new();
             new.splice_runs(0, 0, &[run]);
         });
         assert!(new.is_some(), "the verified API takes {run:?}");
@@ -11072,7 +11019,7 @@ fn delta_run_spans(r: &hexane::DeltaRun) -> bool {
 #[cfg(any(target_pointer_width = "64", panic = "unwind"))]
 fn delta_run_too_wide<T: Deltad>(run: hexane::DeltaRun) {
     let new = panic_of(move || {
-        let mut new = VerifiedDeltaColumn::<T>::new();
+        let mut new = DeltaColumn::<T>::new();
         new.splice_runs(0, 0, &[run]);
     });
     assert!(new.is_some(), "the verified API takes {run:?}");
@@ -11122,7 +11069,7 @@ fn delta_run_checks<T: Deltad>() {
                     delta,
                     count,
                 };
-                let fits = VerifiedDeltaColumn::<T>::run_fits(&run);
+                let fits = DeltaColumn::<T>::run_fits(&run);
                 assert_eq!(fits, delta_run_passes::<T>(&run), "{run:?}");
                 if !fits {
                     refused += 1;
@@ -11132,7 +11079,7 @@ fn delta_run_checks<T: Deltad>() {
                     delta_run_too_wide::<T>(run);
                 } else if count <= 9 {
                     passed += 1;
-                    let mut new = VerifiedDeltaColumn::<T>::new();
+                    let mut new = DeltaColumn::<T>::new();
                     new.splice_runs(0, 0, &[run]);
                     delta_noted(&new);
                     assert_eq!(new.len(), count);
@@ -11185,8 +11132,8 @@ fn delta_run_splices<T: Deltad>(seed: u64, max_segments: Option<usize>) {
             .collect()
     };
     let mut new = match max_segments {
-        Some(m) => VerifiedDeltaColumn::<T>::with_max_segments(m),
-        None => VerifiedDeltaColumn::<T>::default(),
+        Some(m) => DeltaColumn::<T>::with_max_segments(m),
+        None => DeltaColumn::<T>::default(),
     };
     let n = rng.below(40);
     let start = some(&mut rng, n);
@@ -11197,7 +11144,7 @@ fn delta_run_splices<T: Deltad>(seed: u64, max_segments: Option<usize>) {
         let del = rng.below((new.len() - at).min(6) + 1);
         let runs: Vec<hexane::DeltaRun> = if rng.below(2) == 0 {
             let n = rng.below(30);
-            let src = VerifiedDeltaColumn::<T>::from_values(&some(&mut rng, n));
+            let src = DeltaColumn::<T>::from_values(&some(&mut rng, n));
             let runs = src.iter().runs().collect();
             runs
         } else {
@@ -11215,11 +11162,11 @@ fn delta_run_splices<T: Deltad>(seed: u64, max_segments: Option<usize>) {
                         count,
                     }
                 })
-                .filter(VerifiedDeltaColumn::<T>::run_fits)
+                .filter(DeltaColumn::<T>::run_fits)
                 .collect()
         };
         for run in &runs {
-            assert!(VerifiedDeltaColumn::<T>::run_fits(run), "{run:?}");
+            assert!(DeltaColumn::<T>::run_fits(run), "{run:?}");
             assert!(delta_run_passes::<T>(run), "{run:?}");
         }
         let len = new.len();
@@ -11272,7 +11219,7 @@ fn delta_columns_take_runs() {
 macro_rules! delta_same_load_with {
     ($t:ty, $bytes:expr, $opts:expr) => {{
         let bytes: &[u8] = $bytes;
-        match VerifiedDeltaColumn::<$t>::load_with(bytes, $opts) {
+        match DeltaColumn::<$t>::load_with(bytes, $opts) {
             Ok(v) => {
                 golden::note(&v.len());
                 // a fill can be a run of billions: read those in places
@@ -11384,27 +11331,20 @@ fn delta_fills_agree() {
     assert!(loads > 500);
 
     // the fill is the difference between neighbours
-    let col =
-        VerifiedDeltaColumn::<u64>::load_with(&[], LoadOpts::new().with_length(3).with_fill(2));
+    let col = DeltaColumn::<u64>::load_with(&[], LoadOpts::new().with_length(3).with_fill(2));
     assert_eq!(col.unwrap().to_vec(), vec![2, 4, 6]);
-    let col = VerifiedDeltaColumn::<Option<i32>>::load_with(
+    let col = DeltaColumn::<Option<i32>>::load_with(
         &[],
         LoadOpts::new().with_length(3).with_fill(Some(-5)),
     );
     assert_eq!(col.unwrap().to_vec(), vec![Some(-5), Some(-10), Some(-15)]);
-    let col = VerifiedDeltaColumn::<Option<u32>>::load_with(
-        &[],
-        LoadOpts::new().with_length(2).with_fill(None),
-    );
+    let col =
+        DeltaColumn::<Option<u32>>::load_with(&[], LoadOpts::new().with_length(2).with_fill(None));
     assert_eq!(col.unwrap().to_vec(), vec![None, None]);
     // and a fill that leaves the type is refused
-    let col =
-        VerifiedDeltaColumn::<u32>::load_with(&[], LoadOpts::new().with_length(3).with_fill(-1));
+    let col = DeltaColumn::<u32>::load_with(&[], LoadOpts::new().with_length(3).with_fill(-1));
     assert!(col.is_err());
-    let col = VerifiedDeltaColumn::<u32>::load_with(
-        &[],
-        LoadOpts::new().with_length(3).with_fill(1 << 31),
-    );
+    let col = DeltaColumn::<u32>::load_with(&[], LoadOpts::new().with_length(3).with_fill(1 << 31));
     assert!(col.is_err());
 }
 
@@ -11487,7 +11427,7 @@ enum DeltaMove {
     Copy(usize),
 }
 
-/// What the specification of `VerifiedDeltaIter` says of an iterator
+/// What the specification of `DeltaIter` says of an iterator
 /// over `model`: where it stands and where its window ends, with the
 /// values of `model` between the two left to give.
 struct DeltaWalk<'a, T> {
@@ -11579,7 +11519,7 @@ impl<T: Deltad> DeltaWalk<'_, T> {
 
 /// The move made of a verified delta column's iterator.
 fn new_delta_does<T: Deltad>(
-    x: &mut hexane::verified::VerifiedDeltaIter<'_, T>,
+    x: &mut hexane::verified::DeltaIter<'_, T>,
     mv: &DeltaMove,
 ) -> Option<T> {
     match mv.clone() {
@@ -11628,7 +11568,7 @@ fn a_delta_move<T: Deltad>(rng: &mut Rng, m: &DeltaWalk<'_, T>) -> DeltaMove {
 
 /// Where a verified delta column's iterator stands, where its window
 /// ends and how many values it has left: asked each way there is.
-fn delta_place<T: Deltad>(x: &hexane::verified::VerifiedDeltaIter<'_, T>) -> (usize, usize, usize) {
+fn delta_place<T: Deltad>(x: &hexane::verified::DeltaIter<'_, T>) -> (usize, usize, usize) {
     assert_eq!(x.size_hint(), (x.len(), Some(x.len())));
     (x.pos(), x.end_pos(), x.len())
 }
@@ -11639,10 +11579,10 @@ fn delta_pair<T: Deltad>(
     rng: &mut Rng,
     n: usize,
     max_segments: Option<usize>,
-) -> (VerifiedDeltaColumn<T>, Vec<T>) {
+) -> (DeltaColumn<T>, Vec<T>) {
     let mut new = match max_segments {
-        Some(m) => VerifiedDeltaColumn::<T>::with_max_segments(m),
-        None => VerifiedDeltaColumn::<T>::default(),
+        Some(m) => DeltaColumn::<T>::with_max_segments(m),
+        None => DeltaColumn::<T>::default(),
     };
     let mut last = 0;
     let mut model = Vec::new();
@@ -11740,7 +11680,7 @@ fn delta_iters_agree() {
 #[test]
 fn delta_iter_ends() {
     let _golden = golden::test(concat!(module_path!(), "::delta_iter_ends"));
-    let mut x = hexane::verified::VerifiedDeltaIter::<Option<i64>>::default();
+    let mut x = hexane::verified::DeltaIter::<Option<i64>>::default();
     // (a range that ends before it starts, which is no slip here)
     let (from, to) = (5, 1);
     let moves = [
@@ -11768,7 +11708,7 @@ fn delta_iter_ends() {
         assert_eq!(new_delta_does(&mut x, mv), None, "{mv:?}");
         assert_eq!(delta_place(&x), m.place(), "{mv:?}");
     }
-    let new = VerifiedDeltaColumn::<Option<i64>>::new();
+    let new = DeltaColumn::<Option<i64>>::new();
     let mut x = new.iter();
     m.end = 0;
     for mv in &moves {
@@ -11777,7 +11717,7 @@ fn delta_iter_ends() {
         assert_eq!(delta_place(&x), m.place(), "{mv:?}");
     }
 
-    let new = VerifiedDeltaColumn::<u64>::from_values(&[3, 5, 5, 9, 2]);
+    let new = DeltaColumn::<u64>::from_values(&[3, 5, 5, 9, 2]);
     let mut it = new.iter_range(1, 4);
     assert_eq!(it.by_ref().collect::<Vec<u64>>(), vec![5, 5, 9]);
     assert_eq!((it.pos(), it.end_pos(), it.len()), (4, 4, 0));
@@ -11790,7 +11730,7 @@ fn delta_iter_ends() {
     assert_eq!((it.pos(), it.end_pos(), it.len()), (5, 5, 0));
     assert_eq!(
         format!("{it:?}"),
-        "VerifiedDeltaIter { pos: 5, running: 2, items_left: 0 }"
+        "DeltaIter { pos: 5, running: 2, items_left: 0 }"
     );
 }
 
@@ -11855,10 +11795,10 @@ fn delta_run_pair<T: DeltaStepped>(
     rng: &mut Rng,
     n: usize,
     max_segments: Option<usize>,
-) -> (VerifiedDeltaColumn<T>, Vec<T>) {
+) -> (DeltaColumn<T>, Vec<T>) {
     let mut new = match max_segments {
-        Some(m) => VerifiedDeltaColumn::<T>::with_max_segments(m),
-        None => VerifiedDeltaColumn::<T>::default(),
+        Some(m) => DeltaColumn::<T>::with_max_segments(m),
+        None => DeltaColumn::<T>::default(),
     };
     let (lo, hi) = T::bounds();
     let mut last = 0;
@@ -11970,7 +11910,7 @@ fn delta_run_reads<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
         let want = delta_runs_model(&model, start, end);
         let runs = new.iter_range(start, end).runs().collect::<Vec<_>>();
         assert_eq!(runs, want);
-        let mut copy = VerifiedDeltaColumn::<T>::new();
+        let mut copy = DeltaColumn::<T>::new();
         copy.splice_runs(0, 0, &runs);
         assert_eq!(copy.to_vec(), model[start..end]);
     }
@@ -12036,8 +11976,8 @@ fn delta_runs_agree() {
 /// column has edits of its own (not `noted`) the two need not take the
 /// same states, and nothing is noted.
 fn delta_resumed<T: DeltaStepped>(
-    s: &hexane::verified::VerifiedDeltaIterState,
-    new: &VerifiedDeltaColumn<T>,
+    s: &hexane::verified::DeltaIterState,
+    new: &DeltaColumn<T>,
     model: &[T],
     noted: bool,
 ) -> bool {
@@ -12110,7 +12050,7 @@ fn delta_suspends<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
         assert!(delta_resumed(&s, &new_copy, &model, true));
         // on another column, and the state of an iterator of no column
         delta_resumed(&s, &other_new, &other_model, false);
-        let s0 = hexane::verified::VerifiedDeltaIter::<T>::default().suspend();
+        let s0 = hexane::verified::DeltaIter::<T>::default().suspend();
         delta_resumed(&s0, &new, &model, true);
         // an edit, and the column refuses the state; the copy still
         // takes it
@@ -12133,8 +12073,8 @@ fn delta_suspends<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
     // counts one edit a push), and the iterator resumed there gives the
     // other's values, with the sum of the other's differences
     let count = 1 + rng.below(12);
-    let mut a_new = VerifiedDeltaColumn::<T>::new();
-    let mut b_new = VerifiedDeltaColumn::<T>::new();
+    let mut a_new = DeltaColumn::<T>::new();
+    let mut b_new = DeltaColumn::<T>::new();
     let mut b_model = Vec::new();
     let (mut a_last, mut b_last) = (0, 0);
     for _ in 0..count {
@@ -12191,7 +12131,7 @@ fn delta_runs_and_states_told() {
         delta,
         count,
     };
-    let col = VerifiedDeltaColumn::<u64>::from_values(&[5, 7, 9, 9]);
+    let col = DeltaColumn::<u64>::from_values(&[5, 7, 9, 9]);
     assert_eq!(
         col.iter().runs().collect::<Vec<_>>(),
         vec![run(0, Some(5), 1), run(5, Some(2), 2), run(9, Some(0), 1)]
@@ -12204,7 +12144,7 @@ fn delta_runs_and_states_told() {
     );
     assert_eq!(
         format!("{:?}", col.iter_range(1, 3).runs()),
-        "VerifiedDeltaRuns(VerifiedDeltaIter { pos: 1, running: 5, items_left: 2 })"
+        "DeltaRuns(DeltaIter { pos: 1, running: 5, items_left: 2 })"
     );
     let mut it = col.iter();
     assert_eq!(it.next(), Some(5));
@@ -12215,8 +12155,7 @@ fn delta_runs_and_states_told() {
     assert_eq!((it.pos(), it.end_pos(), it.len()), (4, 4, 0));
     // nulls make a run of no difference, and the number before the next
     // value is the last that was not null
-    let nulls =
-        VerifiedDeltaColumn::<Option<u32>>::from_values(&[None, None, Some(3), None, Some(1)]);
+    let nulls = DeltaColumn::<Option<u32>>::from_values(&[None, None, Some(3), None, Some(1)]);
     assert_eq!(
         nulls.iter().runs().collect::<Vec<_>>(),
         vec![
@@ -12228,8 +12167,8 @@ fn delta_runs_and_states_told() {
     );
     // a state is of no type of value: one of a column of `u32`s is a
     // place in a column of as many `Option<i64>`s laid out alike
-    let mut a = VerifiedDeltaColumn::<u32>::new();
-    let mut b = VerifiedDeltaColumn::<Option<i64>>::new();
+    let mut a = DeltaColumn::<u32>::new();
+    let mut b = DeltaColumn::<Option<i64>>::new();
     for (v, w) in [(4, Some(-5)), (6, None), (7, Some(9))] {
         a.push(v);
         b.push(w);
@@ -12240,7 +12179,7 @@ fn delta_runs_and_states_told() {
     let x = s.try_resume(&b).unwrap();
     assert_eq!(
         format!("{x:?}"),
-        "VerifiedDeltaIter { pos: 1, running: -5, items_left: 2 }"
+        "DeltaIter { pos: 1, running: -5, items_left: 2 }"
     );
     assert_eq!(x.collect::<Vec<_>>(), vec![None, Some(9)]);
     // and an edit of either column ends it
@@ -12252,8 +12191,8 @@ fn delta_runs_and_states_told() {
     // the state of an iterator of no column is a place in a new column,
     // which has no slab and has counted no edit; and in no column that has
     // counted one
-    let s0 = hexane::verified::VerifiedDeltaIter::<u32>::default().suspend();
-    let mut none = VerifiedDeltaColumn::<u32>::new();
+    let s0 = hexane::verified::DeltaIter::<u32>::default().suspend();
+    let mut none = DeltaColumn::<u32>::new();
     {
         let x = s0.try_resume(&none).unwrap();
         assert_eq!((x.pos(), x.end_pos(), x.len()), (0, 0, 0));
@@ -12496,10 +12435,10 @@ fn delta_sorted_pair<T: DeltaSought>(
     rng: &mut Rng,
     n: usize,
     max_segments: Option<usize>,
-) -> (VerifiedDeltaColumn<T>, Vec<T>) {
+) -> (DeltaColumn<T>, Vec<T>) {
     let mut new = match max_segments {
-        Some(m) => VerifiedDeltaColumn::<T>::with_max_segments(m),
-        None => VerifiedDeltaColumn::<T>::default(),
+        Some(m) => DeltaColumn::<T>::with_max_segments(m),
+        None => DeltaColumn::<T>::default(),
     };
     let mut last = 0;
     let mut model = Vec::new();
@@ -12686,7 +12625,7 @@ fn delta_seeks_agree() {
 fn delta_searches_told() {
     let _golden = golden::test(concat!(module_path!(), "::delta_searches_told"));
     let values: [u64; 6] = [1, 3, 3, 3, 7, 9];
-    let mut new = VerifiedDeltaColumn::<u64>::default();
+    let mut new = DeltaColumn::<u64>::default();
     for (i, v) in values.iter().enumerate() {
         new.insert(i, *v);
     }
@@ -12758,7 +12697,7 @@ fn delta_searches_told() {
     // null, and are within no bounds; a null as a lower bound is below
     // every number, and as an upper one above none
     let values = [None, None, Some(-5i64), Some(2), Some(2)];
-    let mut new = VerifiedDeltaColumn::<Option<i64>>::default();
+    let mut new = DeltaColumn::<Option<i64>>::default();
     for (i, v) in values.iter().enumerate() {
         new.insert(i, *v);
     }
@@ -12782,7 +12721,7 @@ fn delta_searches_told() {
 
     // values in no order: some range of the places searched
     let values: [u32; 6] = [5, 1, 5, 1, 9, 0];
-    let mut new = VerifiedDeltaColumn::<u32>::default();
+    let mut new = DeltaColumn::<u32>::default();
     for (i, v) in values.iter().enumerate() {
         new.insert(i, *v);
     }
@@ -12793,7 +12732,7 @@ fn delta_searches_told() {
     }
 
     // an iterator of no column finds nothing
-    let mut x = hexane::verified::VerifiedDeltaIter::<Option<i64>>::default();
+    let mut x = hexane::verified::DeltaIter::<Option<i64>>::default();
     assert_eq!(x.scan_to_value(Some(1)), None);
     assert_eq!(x.scan_to_value(None), None);
     assert_eq!(x.scan_to_range(..), None);
@@ -12883,13 +12822,13 @@ fn delta_finds_agree() {
 fn delta_finds_told() {
     let _golden = golden::test(concat!(module_path!(), "::delta_finds_told"));
     // a finder of no column
-    let mut none = hexane::verified::VerifiedFindByRange::<u64>::default();
+    let mut none = hexane::verified::FindByRange::<u64>::default();
     assert_eq!((none.next(), none.next()), (None, None));
 
     // numbers up to the greatest a column holds, and bounds above it
     let top = i64::MAX as u64;
     let values = [1, 5, 9, top];
-    let col = VerifiedDeltaColumn::<u64>::from_values(&values);
+    let col = DeltaColumn::<u64>::from_values(&values);
     assert_eq!(
         col.find_by_range(5..u64::MAX).collect::<Vec<_>>(),
         [1, 2, 3]
@@ -12906,7 +12845,7 @@ fn delta_finds_told() {
 
     // the least numbers
     let values = [i64::MIN, i64::MIN + 1, -7, -1, -7];
-    let col = VerifiedDeltaColumn::<i64>::from_values(&values);
+    let col = DeltaColumn::<i64>::from_values(&values);
     assert_eq!(col.find_by_range(i64::MIN..-7).collect::<Vec<_>>(), [0, 1]);
     assert_eq!(
         col.find_by_range(i64::MIN + 1..=i64::MAX)
@@ -12922,7 +12861,7 @@ fn delta_finds_told() {
     // nulls: found nowhere and within no bounds, though a bound may be
     // one
     let values = [None, Some(3), None, Some(-2), Some(3)];
-    let col = VerifiedDeltaColumn::<Option<i64>>::from_values(&values);
+    let col = DeltaColumn::<Option<i64>>::from_values(&values);
     assert_eq!(col.find_first(None), None);
     assert_eq!(col.find_by_value(None).count(), 0);
     assert_eq!(col.find_by_range(..).collect::<Vec<_>>(), [1, 3, 4]);
@@ -12942,7 +12881,7 @@ fn delta_finds_told() {
     assert_eq!((finder.next(), finder.next()), (None, None));
 
     // an empty column
-    let col = VerifiedDeltaColumn::<u32>::new();
+    let col = DeltaColumn::<u32>::new();
     assert_eq!(col.find_by_range(..).next(), None);
     assert_eq!(col.find_first(0), None);
 }
@@ -12981,8 +12920,8 @@ fn delta_feed<T: Deltad>(rng: &mut Rng) -> Vec<(T, usize)> {
 }
 
 /// An encoder given a feed.
-fn delta_fed<'a, T: Deltad>(feed: &[(T, usize)]) -> VerifiedDeltaEncoder<'a, T> {
-    let mut new = VerifiedDeltaEncoder::<T>::new();
+fn delta_fed<'a, T: Deltad>(feed: &[(T, usize)]) -> DeltaEncoder<'a, T> {
+    let mut new = DeltaEncoder::<T>::new();
     for &(v, n) in feed {
         new.append_n(v, n);
     }
@@ -13016,7 +12955,7 @@ fn delta_encodes<T: Deltad>(seed: u64) {
     let prefix: Vec<u8> = (0..rng.below(4)).map(|_| rng.next() as u8).collect();
 
     // the encoders that own their bytes, given the values in every way
-    let mut new = VerifiedDeltaEncoder::<T>::new();
+    let mut new = DeltaEncoder::<T>::new();
     assert_eq!((new.len(), new.is_empty()), (0, true));
     golden::note(&format!("{new:?}"));
     for &(v, n) in &feed {
@@ -13042,7 +12981,7 @@ fn delta_encodes<T: Deltad>(seed: u64) {
     golden::note(&saved);
     assert_eq!(saved, bytes);
     assert!(delta_same_load::<T>(&saved));
-    let loaded = VerifiedDeltaColumn::<T>::load(&saved).unwrap();
+    let loaded = DeltaColumn::<T>::load(&saved).unwrap();
     assert_eq!(loaded.to_vec(), values);
 
     // saved after what a buffer holds, or not at all
@@ -13063,21 +13002,21 @@ fn delta_encodes<T: Deltad>(seed: u64) {
     }
 
     // encoded in one call
-    assert_eq!(VerifiedDeltaEncoder::<T>::encode(values.clone()), bytes);
+    assert_eq!(DeltaEncoder::<T>::encode(values.clone()), bytes);
     let mut out = prefix.clone();
-    let r = VerifiedDeltaEncoder::<T>::encode_to(&mut out, values.iter().copied());
+    let r = DeltaEncoder::<T>::encode_to(&mut out, values.iter().copied());
     assert_eq!(r, prefix.len()..prefix.len() + bytes.len());
     assert_eq!(out, after(&prefix, &bytes));
     for &other in &others {
         let kept = if only(other) { &[][..] } else { &bytes[..] };
         let mut out = prefix.clone();
-        let r = VerifiedDeltaEncoder::<T>::encode_to_unless(&mut out, values.clone(), other);
+        let r = DeltaEncoder::<T>::encode_to_unless(&mut out, values.clone(), other);
         assert_eq!(r, prefix.len()..prefix.len() + kept.len());
         assert_eq!(out, after(&prefix, kept), "{other:?}");
     }
 
     // the state that writes into the caller's buffer
-    let mut new = VerifiedDeltaEncoderState::<T>::new();
+    let mut new = DeltaEncoderState::<T>::new();
     let mut buf = prefix.clone();
     let mut given: Vec<T> = Vec::new();
     for &(v, n) in &feed {
@@ -13136,27 +13075,25 @@ fn delta_encoders_agree() {
 fn delta_encoders_told() {
     let _golden = golden::test(concat!(module_path!(), "::delta_encoders_told"));
     // no values: no bytes
-    assert!(VerifiedDeltaEncoder::<u32>::new().save().is_empty());
-    assert!(VerifiedDeltaEncoder::<Option<i64>>::default()
-        .save()
-        .is_empty());
-    assert!(VerifiedDeltaEncoder::<u64>::encode([]).is_empty());
+    assert!(DeltaEncoder::<u32>::new().save().is_empty());
+    assert!(DeltaEncoder::<Option<i64>>::default().save().is_empty());
+    assert!(DeltaEncoder::<u64>::encode([]).is_empty());
     let mut out = vec![9];
-    let none = VerifiedDeltaEncoder::<i32>::new();
+    let none = DeltaEncoder::<i32>::new();
     assert_eq!(none.save_to_unless(&mut out, 5), 1..1);
-    assert_eq!(VerifiedDeltaEncoder::<i32>::new().save_to(&mut out), 1..1);
+    assert_eq!(DeltaEncoder::<i32>::new().save_to(&mut out), 1..1);
     assert_eq!(out, [9]);
-    let state = VerifiedDeltaEncoderState::<Option<u32>>::default();
+    let state = DeltaEncoderState::<Option<u32>>::default();
     assert_eq!((state.len(), state.is_empty()), (0, true));
     assert!(state.is_uniform(None) && state.is_uniform(Some(4)));
     state.finish(&mut out);
     assert_eq!(out, [9]);
 
     // a run of three steps of one: a count and the difference
-    assert_eq!(VerifiedDeltaEncoder::<u32>::encode([1, 2, 3]), [3, 1]);
+    assert_eq!(DeltaEncoder::<u32>::encode([1, 2, 3]), [3, 1]);
     // nulls alone: a nought and their count
     let nulls = [None::<i64>; 2];
-    assert_eq!(VerifiedDeltaEncoder::<Option<i64>>::encode(nulls), [0, 2]);
+    assert_eq!(DeltaEncoder::<Option<i64>>::encode(nulls), [0, 2]);
 
     // numbers as far apart as a column holds: 2^63 - 1
     for values in [
@@ -13167,23 +13104,23 @@ fn delta_encoders_told() {
         [i64::MIN + 1, 0],
         [-2, i64::MAX - 2],
     ] {
-        let bytes = VerifiedDeltaEncoder::<i64>::encode(values);
+        let bytes = DeltaEncoder::<i64>::encode(values);
         golden::note(&bytes);
         assert_eq!(bytes, delta_bytes(&values), "{values:?}");
         assert!(delta_same_load::<i64>(&bytes), "{values:?}");
-        let loaded = VerifiedDeltaColumn::<i64>::load(&bytes).unwrap();
+        let loaded = DeltaColumn::<i64>::load(&bytes).unwrap();
         assert_eq!(loaded.to_vec(), values);
     }
     let top = i64::MAX as u64;
     let values = [Some(top), None, Some(0), Some(top)];
-    let bytes = VerifiedDeltaEncoder::<Option<u64>>::encode(values);
+    let bytes = DeltaEncoder::<Option<u64>>::encode(values);
     golden::note(&bytes);
     assert_eq!(bytes, delta_bytes(&values));
     assert!(delta_same_load::<Option<u64>>(&bytes));
 
     // runs longer than any memory holds, in a few bytes
     let long = usize::MAX / 4;
-    let mut new = VerifiedDeltaEncoder::<Option<u32>>::new();
+    let mut new = DeltaEncoder::<Option<u32>>::new();
     for value in [Some(7), None, Some(7)] {
         new.append_n(value, long);
         golden::note(&new.len());
@@ -13199,7 +13136,7 @@ fn delta_encoders_told() {
     // a number no column holds is none of an encoder's values: to ask
     // after it is no error
     let misfit = Some(u64::MAX);
-    let mut new = VerifiedDeltaEncoderState::<Option<u64>>::new();
+    let mut new = DeltaEncoderState::<Option<u64>>::new();
     let mut buf = vec![];
     assert!(new.is_uniform(misfit));
     new.append(&mut buf, Some(3));
@@ -13213,7 +13150,7 @@ fn delta_encoders_told() {
     let new = delta_fed(&[(Some(3u64), 4)]);
     assert_eq!(new.save_to_unless(&mut out, misfit), 2..2 + n);
     assert_eq!(out, [&[1, 2][..], &bytes[..]].concat());
-    type New = VerifiedDeltaEncoder<'static, Option<u64>>;
+    type New = DeltaEncoder<'static, Option<u64>>;
     let r = New::encode_to_unless(&mut out, threes, Some(3));
     assert_eq!(r, 2 + n..2 + n);
     let r = New::encode_to_unless(&mut out, threes, misfit);
@@ -13223,13 +13160,13 @@ fn delta_encoders_told() {
     // two states, one after the other, into one buffer: each keeps what
     // is before it and writes its own column after
     let mut buf = vec![0xee];
-    let mut first = VerifiedDeltaEncoderState::<u32>::new();
+    let mut first = DeltaEncoderState::<u32>::new();
     first.append_n(&mut buf, 7, 2);
     first.append(&mut buf, 9);
     assert!(!first.is_uniform(7));
     first.finish(&mut buf);
     let mid = buf.len();
-    let mut second = VerifiedDeltaEncoderState::<Option<i64>>::new();
+    let mut second = DeltaEncoderState::<Option<i64>>::new();
     second.append(&mut buf, Some(-5));
     second.append_n(&mut buf, None, 2);
     second.extend(&mut buf, [Some(i64::MIN)]);
@@ -13260,7 +13197,7 @@ fn delta_encoders_stop_at_values_too_far_apart() {
         [i64::MAX, -1],
         [i64::MIN, i64::MAX],
     ] {
-        let new = panic_of(move || VerifiedDeltaEncoder::<i64>::encode(values));
+        let new = panic_of(move || DeltaEncoder::<i64>::encode(values));
         assert_eq!(new, told, "{values:?}");
 
         let feed = [(values[0], 3), (values[1], 1)];
@@ -13271,14 +13208,13 @@ fn delta_encoders_stop_at_values_too_far_apart() {
         assert_eq!(panic_of(move || new.save_to(&mut vec![1])), told);
         let new = delta_fed(&feed);
         assert_eq!(panic_of(move || new.save_to_unless(&mut vec![], 7)), told);
-        let new = panic_of(move || VerifiedDeltaEncoder::<i64>::encode_to(&mut vec![], values));
+        let new = panic_of(move || DeltaEncoder::<i64>::encode_to(&mut vec![], values));
         assert_eq!(new, told);
-        let new = panic_of(move || {
-            VerifiedDeltaEncoder::<i64>::encode_to_unless(&mut vec![], values, values[0])
-        });
+        let new =
+            panic_of(move || DeltaEncoder::<i64>::encode_to_unless(&mut vec![], values, values[0]));
         assert_eq!(new, told);
 
-        let mut new = VerifiedDeltaEncoderState::<i64>::new();
+        let mut new = DeltaEncoderState::<i64>::new();
         let mut buf = vec![];
         new.extend(&mut buf, values);
         assert_eq!(new.len(), 2);
@@ -13288,7 +13224,7 @@ fn delta_encoders_stop_at_values_too_far_apart() {
 
     // with nulls between, and of a type that has them
     let values = [Some(i64::MIN), None, Some(5), None];
-    let new = panic_of(move || VerifiedDeltaEncoder::<Option<i64>>::encode(values));
+    let new = panic_of(move || DeltaEncoder::<Option<i64>>::encode(values));
     assert_eq!(new, told);
 }
 
@@ -13331,10 +13267,10 @@ fn delta_decodes<T: DeltaStepped>(seed: u64) {
     let diffs = delta_diffs(&values);
 
     // read whole, whichever way the decoder is made
-    let new = VerifiedDeltaDecoder::<T>::new(&bytes);
+    let new = DeltaDecoder::<T>::new(&bytes);
     golden::note(&format!("{new:?}"));
     assert_eq!(new.collect::<Vec<T>>(), values, "seed {seed}");
-    let mut new = VerifiedDeltaDecoder::<T>::try_new(&bytes).unwrap();
+    let mut new = DeltaDecoder::<T>::try_new(&bytes).unwrap();
     assert_eq!(new.clone().collect::<Vec<T>>(), values, "seed {seed}");
 
     // and moved step by step; `at` is how many values are behind
@@ -13410,7 +13346,7 @@ fn delta_decoders_agree() {
 /// Whether a checked decoder is made of `bytes`. What it then reads, or
 /// the error it is refused with, goes to the digest.
 fn delta_try_new<T: Deltad>(bytes: &[u8]) -> bool {
-    match VerifiedDeltaDecoder::<T>::try_new(bytes) {
+    match DeltaDecoder::<T>::try_new(bytes) {
         Ok(new) => {
             // a spoilt count can be of more values than there is time for
             golden::note(&new.take(5000).collect::<Vec<_>>());
@@ -13516,27 +13452,27 @@ fn delta_decoders_told() {
     }
 
     // nothing saved, nothing read
-    let mut dec = VerifiedDeltaDecoder::<u32>::new(&[]);
+    let mut dec = DeltaDecoder::<u32>::new(&[]);
     assert_eq!(dec.next_delta_run_max(usize::MAX), None);
     assert_eq!(dec.next(), None);
     assert_eq!(dec.nth(3), None);
     dec.advance_by(2);
-    assert_eq!(format!("{dec:?}"), "VerifiedDeltaDecoder { running: 0 }");
+    assert_eq!(format!("{dec:?}"), "DeltaDecoder { running: 0 }");
 
     // the differences of 3, 5, 7, 7 are 3, 2, 2 and 0: a run is of one
     // difference, and of no more values than asked for
     let bytes = delta_bytes::<u32>(&[3, 5, 7, 7]);
-    let mut dec = VerifiedDeltaDecoder::<u32>::new(&bytes);
+    let mut dec = DeltaDecoder::<u32>::new(&bytes);
     assert_eq!(dec.next_delta_run_max(0), None);
     assert_eq!(dec.next_delta_run_max(9), run(1, 3));
     assert_eq!(dec.next_delta_run_max(1), run(1, 2));
-    assert_eq!(format!("{dec:?}"), "VerifiedDeltaDecoder { running: 5 }");
+    assert_eq!(format!("{dec:?}"), "DeltaDecoder { running: 5 }");
     assert_eq!(dec.clone().collect::<Vec<_>>(), [7, 7]);
     assert_eq!(dec.next_delta_run_max(9), run(1, 2));
     assert_eq!(dec.next_delta_run_max(9), run(1, 0));
     assert_eq!(dec.next_delta_run_max(9), None);
-    assert_eq!(format!("{dec:?}"), "VerifiedDeltaDecoder { running: 7 }");
-    let mut dec = VerifiedDeltaDecoder::<u32>::new(&bytes);
+    assert_eq!(format!("{dec:?}"), "DeltaDecoder { running: 7 }");
+    let mut dec = DeltaDecoder::<u32>::new(&bytes);
     assert_eq!(dec.nth(0), Some(3));
     assert_eq!(dec.next_delta_run_max(usize::MAX), run(2, 2));
     assert_eq!(dec.nth(1), None);
@@ -13545,20 +13481,20 @@ fn delta_decoders_told() {
     // nulls are runs of their own, and move no sum
     let values = [None, None, Some(-4), None, Some(-4), Some(-8)];
     let bytes = delta_bytes::<Option<i64>>(&values);
-    let mut dec = VerifiedDeltaDecoder::<Option<i64>>::new(&bytes);
+    let mut dec = DeltaDecoder::<Option<i64>>::new(&bytes);
     let nulls = Some(Run {
         count: 2,
         value: None,
     });
     assert_eq!(dec.next_delta_run_max(5), nulls);
-    assert_eq!(format!("{dec:?}"), "VerifiedDeltaDecoder { running: 0 }");
+    assert_eq!(format!("{dec:?}"), "DeltaDecoder { running: 0 }");
     assert_eq!(dec.next(), Some(Some(-4)));
     assert_eq!(dec.nth(1), Some(Some(-4)));
-    assert_eq!(format!("{dec:?}"), "VerifiedDeltaDecoder { running: -4 }");
+    assert_eq!(format!("{dec:?}"), "DeltaDecoder { running: -4 }");
     dec.advance_by(7);
     assert_eq!(dec.next(), None);
-    assert_eq!(format!("{dec:?}"), "VerifiedDeltaDecoder { running: -8 }");
-    let mut dec = VerifiedDeltaDecoder::<Option<i64>>::new(&bytes);
+    assert_eq!(format!("{dec:?}"), "DeltaDecoder { running: -8 }");
+    let mut dec = DeltaDecoder::<Option<i64>>::new(&bytes);
     dec.advance_by(3);
     assert_eq!(dec.clone().collect::<Vec<_>>(), values[3..]);
     dec.advance_by(0);
@@ -13571,7 +13507,7 @@ fn delta_decoders_told() {
         delta_checked_decoders(&bytes),
         [false, false, true, true, false, false, false, true, true, false]
     );
-    let err = VerifiedDeltaDecoder::<u32>::try_new(&bytes).unwrap_err();
+    let err = DeltaDecoder::<u32>::try_new(&bytes).unwrap_err();
     assert!(
         err.to_string().contains("delta value out of domain"),
         "{err}"
@@ -13588,10 +13524,10 @@ fn delta_decoders_told() {
     // bytes, as the load does. Read with sums that wrap they are the
     // values `i64::MAX` and `i64::MIN`, and that is how the specification
     // reads them: `new` gives a decoder of those.
-    let wrap = VerifiedColumn::<i64>::from_values(&[i64::MAX, 1]).save();
+    let wrap = Column::<i64>::from_values(&[i64::MAX, 1]).save();
     assert!(!delta_try_new::<i64>(&wrap));
     assert!(!delta_same_load::<i64>(&wrap));
-    let dec = VerifiedDeltaDecoder::<i64>::new(&wrap);
+    let dec = DeltaDecoder::<i64>::new(&wrap);
     assert_eq!(dec.collect::<Vec<_>>(), [i64::MAX, i64::MIN]);
 }
 
@@ -13944,23 +13880,23 @@ fn raw_cuts_follow_splices() {
 fn codec_named_at_the_import() {
     let _golden = golden::test(concat!(module_path!(), "::codec_named_at_the_import"));
     use hexane::verified::leb128 as l;
-    let col: l::VerifiedColumn<u64> = VerifiedColumn::<u64>::from_values(&[1, 2]);
+    let col: l::Column<u64> = Column::<u64>::from_values(&[1, 2]);
     let bytes = col.save();
-    let _: l::VerifiedPrefixColumn<u64> = VerifiedPrefixColumn::<u64>::new();
-    let _: l::VerifiedAccColumn<Mark> = VerifiedAccColumn::<Mark>::new();
-    let deltas: l::VerifiedDeltaColumn<i64> = VerifiedDeltaColumn::<i64>::from_values(&[5, 6]);
+    let _: l::PrefixColumn<u64> = PrefixColumn::<u64>::new();
+    let _: l::AccColumn<Mark> = AccColumn::<Mark>::new();
+    let deltas: l::DeltaColumn<i64> = DeltaColumn::<i64>::from_values(&[5, 6]);
     let delta_bytes = deltas.save();
-    let mut e: l::VerifiedEncoder<'_, u64> = VerifiedEncoder::<u64>::new();
+    let mut e: l::Encoder<'_, u64> = Encoder::<u64>::new();
     e.append(1);
     e.append(2);
     assert_eq!(e.save(), bytes);
-    let d: l::VerifiedDecoder<'_, u64> = VerifiedDecoder::<u64>::new(&bytes);
+    let d: l::Decoder<'_, u64> = Decoder::<u64>::new(&bytes);
     assert_eq!(d.collect::<Vec<u64>>(), [1, 2]);
-    let mut e: l::VerifiedDeltaEncoder<'_, i64> = VerifiedDeltaEncoder::<i64>::new();
+    let mut e: l::DeltaEncoder<'_, i64> = DeltaEncoder::<i64>::new();
     e.append(5);
     e.append(6);
     assert_eq!(e.save(), delta_bytes);
-    let d: l::VerifiedDeltaDecoder<'_, i64> = VerifiedDeltaDecoder::<i64>::new(&delta_bytes);
+    let d: l::DeltaDecoder<'_, i64> = DeltaDecoder::<i64>::new(&delta_bytes);
     assert_eq!(d.collect::<Vec<i64>>(), [5, 6]);
 }
 
@@ -13968,7 +13904,7 @@ fn codec_named_at_the_import() {
 /// the same: the number and its length, or that there is none. What each
 /// says goes to the digest, which checks it is what the old codec said,
 /// in the same words where the bytes are refused.
-fn codec_reads<C: hexane::verified::VCodec>(data: &[u8]) {
+fn codec_reads<C: hexane::verified::Codec>(data: &[u8]) {
     let new = C::read_u(data);
     golden::note(&new.as_ref().map_err(|e| e.to_string()));
     assert_eq!(C::read_u_opt(data), new.as_ref().ok().copied(), "{data:?}");
@@ -13991,7 +13927,7 @@ fn codec_reads<C: hexane::verified::VCodec>(data: &[u8]) {
 /// A codec of the verified API writes each number after what the buffer
 /// holds, and reads it back; the digest checks it writes the bytes the
 /// old codec wrote.
-fn codec_numbers<C: hexane::verified::VCodec>() {
+fn codec_numbers<C: hexane::verified::Codec>() {
     let mut rng = Rng(0xc0_dec5);
     for round in 0..4000 {
         let n = rng.number();
@@ -14042,7 +13978,7 @@ fn codec_numbers<C: hexane::verified::VCodec>() {
 /// The count that heads a run of unlike values, rewritten in place by the
 /// verified API's codec: the bytes before it and after it stay, and the
 /// buffer grows or shrinks by what is returned.
-fn codec_headers<C: hexane::verified::VCodec>() {
+fn codec_headers<C: hexane::verified::Codec>() {
     let mut rng = Rng(0x04ea_de25);
     for _ in 0..1500 {
         let before: Vec<u8> = (0..rng.below(5)).map(|_| rng.next() as u8).collect();
@@ -14078,15 +14014,15 @@ fn codecs_agree_leb128() {
 #[cfg(feature = "bijou64")]
 mod bijou {
     use super::*;
-    use hexane::verified::{bijou as vb, VCodec};
+    use hexane::verified::{bijou as vb, Codec};
     use hexane::Bijou64;
 
     /// A value type of the verified API's columns, whichever the codec.
-    trait BKind: Kind + VValue<Bijou64> {}
+    trait BKind: Kind + ColumnValueRef<Bijou64> {}
 
-    impl<T: Kind + VValue<Bijou64>> BKind for T {}
+    impl<T: Kind + ColumnValueRef<Bijou64>> BKind for T {}
 
-    fn new_vals<T: BKind>(v: &vb::VerifiedColumn<T>) -> Vec<T> {
+    fn new_vals<T: BKind>(v: &vb::Column<T>) -> Vec<T> {
         v.to_vec().into_iter().map(T::keep).collect()
     }
 
@@ -14109,10 +14045,10 @@ mod bijou {
             (short, "buffer too short for bijou64 encoding"),
             (over, "bijou64 tier 8 payload overflows u64"),
         ] {
-            let new = <Bijou64 as VCodec>::read_u(data).unwrap_err().to_string();
+            let new = <Bijou64 as Codec>::read_u(data).unwrap_err().to_string();
             golden::note(&new);
             assert!(new.contains(&format!("bijou64: {why}")), "{new}");
-            let new = <Bijou64 as VCodec>::read_i(data).unwrap_err().to_string();
+            let new = <Bijou64 as Codec>::read_i(data).unwrap_err().to_string();
             golden::note(&new);
             assert!(new.contains(&format!("bijou64s: {why}")), "{new}");
 
@@ -14120,9 +14056,7 @@ mod bijou {
             assert!(!load_noted::<u64>(data));
             let run = [&[0x04][..], data].concat();
             assert!(!load_noted::<u64>(&run));
-            let new = vb::VerifiedColumn::<u64>::load(&run)
-                .unwrap_err()
-                .to_string();
+            let new = vb::Column::<u64>::load(&run).unwrap_err().to_string();
             assert!(new.contains(why), "{new}");
         }
     }
@@ -14133,9 +14067,9 @@ mod bijou {
     fn bytes_are_bijou64() {
         let _golden = golden::test(concat!(module_path!(), "::bytes_are_bijou64"));
         fn saved<T: BKind>(values: &[T]) -> (Vec<u8>, Vec<u8>) {
-            let bytes = vb::VerifiedColumn::<T>::from_values(&lent(values)).save();
+            let bytes = vb::Column::<T>::from_values(&lent(values)).save();
             golden::note(&bytes);
-            let leb = VerifiedColumn::<T>::from_values(&lent(values)).save();
+            let leb = Column::<T>::from_values(&lent(values)).save();
             golden::note(&leb);
             (bytes, leb)
         }
@@ -14157,7 +14091,7 @@ mod bijou {
 
     /// The column holds `model` and reads it; what it saves and how many
     /// slabs it lies in go to the digest.
-    fn check_column<T: BKind>(v: &vb::VerifiedColumn<T>, model: &[T], ctx: &str) {
+    fn check_column<T: BKind>(v: &vb::Column<T>, model: &[T], ctx: &str) {
         assert_eq!(
             (v.len(), v.is_empty()),
             (model.len(), model.is_empty()),
@@ -14179,7 +14113,7 @@ mod bijou {
     /// loads, or the error the load is refused with; a checked decoder is
     /// made of what loads.
     fn load_noted<T: BKind>(bytes: &[u8]) -> bool {
-        let decodes = match vb::VerifiedDecoder::<T>::try_new(bytes) {
+        let decodes = match vb::Decoder::<T>::try_new(bytes) {
             Ok(x) => {
                 // a spoilt count can be of more values than there is time for
                 golden::note(&x.take(3000).map(T::keep).collect::<Vec<T>>());
@@ -14190,7 +14124,7 @@ mod bijou {
                 false
             }
         };
-        match vb::VerifiedColumn::<T>::load(bytes) {
+        match vb::Column::<T>::load(bytes) {
             Ok(v) => {
                 assert!(decodes, "no decoder of {bytes:?}, which load");
                 golden::note(&v.len());
@@ -14215,25 +14149,21 @@ mod bijou {
     /// What the column saves is what the verified API's encoder writes,
     /// given the values at once or one by one; it loads, and the decoder
     /// reads it.
-    fn streams<T: BKind>(v: &vb::VerifiedColumn<T>, model: &[T], ctx: &str) {
+    fn streams<T: BKind>(v: &vb::Column<T>, model: &[T], ctx: &str) {
         let bytes = v.save();
         assert!(load_noted::<T>(&bytes), "{ctx}");
-        let loaded = vb::VerifiedColumn::<T>::load(&bytes).unwrap();
+        let loaded = vb::Column::<T>::load(&bytes).unwrap();
         assert_eq!(new_vals(&loaded), model, "{ctx}");
-        let built = vb::VerifiedColumn::<T>::from_values(&lent(model));
+        let built = vb::Column::<T>::from_values(&lent(model));
         assert_eq!(built.save(), bytes, "{ctx}");
-        assert_eq!(
-            vb::VerifiedEncoder::<T>::encode(lent(model)),
-            bytes,
-            "{ctx}"
-        );
-        let mut e = vb::VerifiedEncoder::<T>::new();
+        assert_eq!(vb::Encoder::<T>::encode(lent(model)), bytes, "{ctx}");
+        let mut e = vb::Encoder::<T>::new();
         for m in model {
             e.append(m.lend());
         }
         assert_eq!(e.len(), model.len(), "{ctx}");
         assert_eq!(e.save(), bytes, "{ctx}");
-        let read: Vec<T> = vb::VerifiedDecoder::<T>::new(&bytes).map(T::keep).collect();
+        let read: Vec<T> = vb::Decoder::<T>::new(&bytes).map(T::keep).collect();
         assert_eq!(read, model, "{ctx}");
     }
 
@@ -14241,7 +14171,7 @@ mod bijou {
         for seed in 1..=4u64 {
             let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xb170);
             let budget = [2, 4, 64][rng.below(3)];
-            let mut v = vb::VerifiedColumn::<T>::with_max_segments(budget);
+            let mut v = vb::Column::<T>::with_max_segments(budget);
             let mut model: Vec<T> = vec![];
             for step in 0..50 {
                 let ctx = format!("seed {seed} step {step}");
@@ -14307,7 +14237,7 @@ mod bijou {
         let (mut taken, mut refused) = (0, 0);
         for _ in 0..80 {
             let model: Vec<T> = rng.values(30);
-            let mut bytes = vb::VerifiedColumn::<T>::from_values(&lent(&model)).save();
+            let mut bytes = vb::Column::<T>::from_values(&lent(&model)).save();
             match rng.below(5) {
                 0 => bytes.truncate(rng.below(bytes.len() + 1)),
                 1 => bytes = (0..rng.below(12)).map(|_| rng.next() as u8).collect(),
@@ -14352,10 +14282,10 @@ mod bijou {
         let mut rng = Rng(0xac_2055);
         for _ in 0..12 {
             let model: Vec<T> = rng.values(40);
-            let leb = VerifiedColumn::<T>::from_values(&lent(&model));
-            let bij = vb::VerifiedColumn::<T>::from_values(&leb.to_vec());
+            let leb = Column::<T>::from_values(&lent(&model));
+            let bij = vb::Column::<T>::from_values(&leb.to_vec());
             assert_eq!(new_vals(&bij), model);
-            let back = VerifiedColumn::<T>::from_values(&bij.to_vec());
+            let back = Column::<T>::from_values(&bij.to_vec());
             assert_eq!(back.save(), leb.save());
             load_noted::<T>(&leb.save());
             check_same_load::<T>(&bij.save());
@@ -14375,25 +14305,24 @@ mod bijou {
         let _golden = golden::test(concat!(module_path!(), "::named_at_the_import"));
         use hexane::verified as v;
         let bytes = [];
-        let _: vb::VerifiedColumn<u64> = v::VerifiedColumn::<u64, Bijou64>::new();
-        let _: vb::VerifiedPrefixColumn<u64> = v::VerifiedPrefixColumn::<u64, Bijou64>::new();
-        let _: vb::VerifiedAccColumn<Mark> = v::VerifiedAccColumn::<Mark, Bijou64>::new();
-        let _: vb::VerifiedDeltaColumn<i64> = v::VerifiedDeltaColumn::<i64, Bijou64>::new();
-        let _: vb::VerifiedEncoder<'_, u64> = v::VerifiedEncoder::<u64, Bijou64>::new();
-        let _: vb::VerifiedDecoder<'_, u64> = v::VerifiedDecoder::<u64, Bijou64>::new(&bytes);
-        let _: vb::VerifiedDeltaEncoder<'_, i64> = v::VerifiedDeltaEncoder::<i64, Bijou64>::new();
-        let _: vb::VerifiedDeltaDecoder<'_, i64> =
-            v::VerifiedDeltaDecoder::<i64, Bijou64>::new(&bytes);
+        let _: vb::Column<u64> = v::Column::<u64, Bijou64>::new();
+        let _: vb::PrefixColumn<u64> = v::PrefixColumn::<u64, Bijou64>::new();
+        let _: vb::AccColumn<Mark> = v::AccColumn::<Mark, Bijou64>::new();
+        let _: vb::DeltaColumn<i64> = v::DeltaColumn::<i64, Bijou64>::new();
+        let _: vb::Encoder<'_, u64> = v::Encoder::<u64, Bijou64>::new();
+        let _: vb::Decoder<'_, u64> = v::Decoder::<u64, Bijou64>::new(&bytes);
+        let _: vb::DeltaEncoder<'_, i64> = v::DeltaEncoder::<i64, Bijou64>::new();
+        let _: vb::DeltaDecoder<'_, i64> = v::DeltaDecoder::<i64, Bijou64>::new(&bytes);
     }
 
     /// A prefix column with bijou64 as its codec answers from its sums what
     /// its values add up to, and loads what it saves; the digest checks it
     /// saves what the old API's saved.
-    fn sums<T: Totalled + VValue<Bijou64>>() {
+    fn sums<T: Totalled + ColumnValueRef<Bijou64>>() {
         let mut rng = Rng(0x50f5_b170);
         for round in 0..6 {
             let mut model: Vec<T> = rng.values(60);
-            let mut p = vb::VerifiedPrefixColumn::<T>::from_values(&lent(&model));
+            let mut p = vb::PrefixColumn::<T>::from_values(&lent(&model));
             for step in 0..6 {
                 let ctx = format!("round {round} step {step}");
                 let at = rng.below(model.len() + 1);
@@ -14418,7 +14347,7 @@ mod bijou {
                     assert_eq!(T::new_sum(p.sum_range(start, end)), want, "{ctx}");
                 }
             }
-            let loaded = vb::VerifiedPrefixColumn::<T>::load(&p.save()).unwrap();
+            let loaded = vb::PrefixColumn::<T>::load(&p.save()).unwrap();
             assert_eq!(loaded.save(), p.save());
             let last = model.len();
             assert_eq!(
@@ -14450,7 +14379,7 @@ mod bijou {
         let mut rng = Rng(0x005e_a2c4);
         for _ in 0..20 {
             let model: Vec<u64> = (0..rng.below(80)).map(|_| rng.next() % 5).collect();
-            let p = vb::VerifiedPrefixColumn::<u64>::from_values(&model);
+            let p = vb::PrefixColumn::<u64>::from_values(&model);
             let all: u128 = model.iter().map(|&m| m as u128).sum();
             for t in 0..all + 3 {
                 golden::note(&p.get_index_for_prefix(t));
@@ -14462,13 +14391,13 @@ mod bijou {
     /// An accumulator column with bijou64 as its codec gives what the same
     /// values give with LEB128, and saves what a plain column of them
     /// saves with bijou64.
-    fn accs<T: Accd + VValue<Bijou64>>() {
+    fn accs<T: Accd + ColumnValueRef<Bijou64>>() {
         let mut rng = Rng(0xacc5_b170);
         for _ in 0..6 {
             let model: Vec<T> = rng.values(60);
-            let a = vb::VerifiedAccColumn::<T>::from_values(&lent(&model));
-            let l = VerifiedAccColumn::<T>::from_values(&lent(&model));
-            let plain = vb::VerifiedColumn::<T>::from_values(&lent(&model));
+            let a = vb::AccColumn::<T>::from_values(&lent(&model));
+            let l = AccColumn::<T>::from_values(&lent(&model));
+            let plain = vb::Column::<T>::from_values(&lent(&model));
             assert_eq!(a.save(), plain.save());
             let kept: Vec<T> = a.to_vec().into_iter().map(T::keep).collect();
             assert_eq!(kept, model);
@@ -14478,7 +14407,7 @@ mod bijou {
                 let end = i + rng.below(model.len() + 1);
                 assert!(a.sum_range(i, end) == l.sum_range(i, end));
             }
-            let loaded = vb::VerifiedAccColumn::<T>::load(&a.save()).unwrap();
+            let loaded = vb::AccColumn::<T>::load(&a.save()).unwrap();
             assert!(loaded.get_prefix(model.len()) == l.get_prefix(model.len()));
         }
     }
@@ -14494,19 +14423,19 @@ mod bijou {
 
     /// A value type of the verified API's delta columns, whichever the
     /// codec.
-    trait BDelta: Deltad + VDeltaValue<Bijou64> {}
+    trait BDelta: Deltad + DeltaValue<Bijou64> {}
 
-    impl<T: Deltad + VDeltaValue<Bijou64>> BDelta for T {}
+    impl<T: Deltad + DeltaValue<Bijou64>> BDelta for T {}
 
     /// Whether `bytes` load as a delta column. What a checked decoder of
     /// them reads, or the error it is refused with, goes to the digest,
     /// and so does what loads, or the error the load is refused with.
     fn delta_load_noted<T: BDelta>(bytes: &[u8]) -> bool {
-        match vb::VerifiedDeltaDecoder::<T>::try_new(bytes) {
+        match vb::DeltaDecoder::<T>::try_new(bytes) {
             Ok(x) => golden::note(&x.take(3000).collect::<Vec<T>>()),
             Err(x) => golden::note(&x.to_string()),
         }
-        match vb::VerifiedDeltaColumn::<T>::load(bytes) {
+        match vb::DeltaColumn::<T>::load(bytes) {
             Ok(new) => {
                 golden::note(&new.len());
                 let len = new.len();
@@ -14536,7 +14465,7 @@ mod bijou {
         };
         let n = rng.below(120);
         let mut model = some(&mut rng, n);
-        let mut new = vb::VerifiedDeltaColumn::<T>::from_values(&model);
+        let mut new = vb::DeltaColumn::<T>::from_values(&model);
         for step in 0..20 {
             let ctx = format!("seed {seed} step {step}");
             let at = rng.below(model.len() + 1);
@@ -14557,15 +14486,15 @@ mod bijou {
         // and value by value, and read by the decoder
         let bytes = new.save();
         assert!(delta_load_noted::<T>(&bytes));
-        let loaded = vb::VerifiedDeltaColumn::<T>::load(&bytes).unwrap();
+        let loaded = vb::DeltaColumn::<T>::load(&bytes).unwrap();
         assert_eq!(loaded.to_vec(), model);
-        assert_eq!(vb::VerifiedDeltaEncoder::<T>::encode(model.clone()), bytes);
-        let mut e = vb::VerifiedDeltaEncoder::<T>::new();
+        assert_eq!(vb::DeltaEncoder::<T>::encode(model.clone()), bytes);
+        let mut e = vb::DeltaEncoder::<T>::new();
         for &m in &model {
             e.append(m);
         }
         assert_eq!(e.save(), bytes);
-        let read: Vec<T> = vb::VerifiedDeltaDecoder::<T>::new(&bytes).collect();
+        let read: Vec<T> = vb::DeltaDecoder::<T>::new(&bytes).collect();
         assert_eq!(read, model);
 
         // and spoilt
@@ -14825,7 +14754,7 @@ fn cursors<T: Kind>() {
     }
 }
 
-/// An edit cursor of the verified API (`VerifiedEdit`): under steps it
+/// An edit cursor of the verified API (`Edit`): under steps it
 /// stands at the places, sees the values and leaves the values that the
 /// steps make of a list, and the column counts an edit exactly where a
 /// step changed it. Its digest checks that it still rebuilds as many
@@ -14844,8 +14773,8 @@ fn sum_cursors<T: Totalled>() {
     for seed in 1..=6u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xed18);
         let budget = [2, 3, 4, 8, 64][rng.below(5)];
-        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
-        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut p = PrefixColumn::<T>::with_max_segments(budget);
+        let mut v = Column::<T>::with_max_segments(budget);
         let mut model: Vec<T> = rng.values(200);
         p.splice(0, 0, &lent(&model));
         v.splice(0, 0, &lent(&model));
@@ -14894,8 +14823,8 @@ fn acc_cursors<T: Accd>() {
     for seed in 1..=6u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xed19);
         let budget = [2, 3, 4, 8, 64][rng.below(5)];
-        let mut p = VerifiedAccColumn::<T>::with_max_segments(budget);
-        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut p = AccColumn::<T>::with_max_segments(budget);
+        let mut v = Column::<T>::with_max_segments(budget);
         let mut model: Vec<T> = rng.values(200);
         p.splice(0, 0, &lent(&model));
         v.splice(0, 0, &lent(&model));
@@ -14945,7 +14874,7 @@ fn a_cursor_of_an_accumulator_column() {
 #[test]
 fn a_cursor_step_by_step() {
     let _golden = golden::test(concat!(module_path!(), "::a_cursor_step_by_step"));
-    let mut v = VerifiedColumn::<u64>::from_values(&[1, 2, 3, 4, 5]);
+    let mut v = Column::<u64>::from_values(&[1, 2, 3, 4, 5]);
     let mut e = v.edit();
     assert_eq!((e.pos(), e.out_pos(), e.peek()), (0, 0, Some(1)));
     e.advance(1);
@@ -14976,7 +14905,7 @@ fn a_cursor_step_by_step() {
     assert_eq!(v.to_vec(), [1, 9, 8, 8, 4, 7]);
 
     // values that are lent: a look at one, and another in its place
-    let mut b = VerifiedColumn::<Vec<u8>>::from_values(&[&b"ab"[..], b"", b"c"]);
+    let mut b = Column::<Vec<u8>>::from_values(&[&b"ab"[..], b"", b"c"]);
     let mut e = b.edit();
     assert_eq!(e.peek(), Some(&b"ab"[..]));
     e.replace_with(b"xyz").replace_with(b"");
@@ -14993,7 +14922,7 @@ fn a_cursor_step_by_step() {
 fn a_cursor_dropped_unfinished() {
     let _golden = golden::test(concat!(module_path!(), "::a_cursor_dropped_unfinished"));
     let lost = "column used after a panic during an edit";
-    let mut v = VerifiedColumn::<u64>::from_values(&[1, 2, 3]);
+    let mut v = Column::<u64>::from_values(&[1, 2, 3]);
     {
         let mut e = v.edit();
         e.seek(1).insert(9);
@@ -15030,7 +14959,7 @@ fn a_cursor_goes_forward_only() {
         e.seek(3).seek(2);
         e.finish();
     }));
-    assert_eq!(new.as_deref(), Some("VerifiedEdit::seek is forward-only"));
+    assert_eq!(new.as_deref(), Some("Edit::seek is forward-only"));
     // a panic in the middle of an edit leaves the column without its
     // values
     assert_eq!((v.len(), v.is_empty()), (0, true));
@@ -15048,12 +14977,12 @@ mod bijou_cursors {
     use hexane::verified::bijou as vb;
     use hexane::Bijou64;
 
-    fn cursors<T: Kind + VValue<Bijou64>>() {
+    fn cursors<T: Kind + ColumnValueRef<Bijou64>>() {
         for seed in 1..=4u64 {
             let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xed1a);
             let budget = [2, 3, 8, 64][rng.below(4)];
             let mut model: Vec<T> = rng.values(200);
-            let mut v = vb::VerifiedColumn::<T>::with_max_segments(budget);
+            let mut v = vb::Column::<T>::with_max_segments(budget);
             v.splice(0, 0, &lent(&model));
             for _ in 0..25 {
                 let at = some_place(&mut rng, model.len());
@@ -15216,7 +15145,7 @@ fn some_delta_runs<T: Deltad>(rng: &mut Rng) -> Vec<hexane::DeltaRun> {
             last = l;
             values.push(v);
         }
-        let src = VerifiedDeltaColumn::<T>::from_values(&values);
+        let src = DeltaColumn::<T>::from_values(&values);
         let runs = src.iter().runs().collect();
         runs
     } else {
@@ -15234,7 +15163,7 @@ fn some_delta_runs<T: Deltad>(rng: &mut Rng) -> Vec<hexane::DeltaRun> {
                 count,
             });
         }
-        runs.retain(VerifiedDeltaColumn::<T>::run_fits);
+        runs.retain(DeltaColumn::<T>::run_fits);
         runs
     }
 }
@@ -15309,7 +15238,7 @@ macro_rules! new_delta_move {
 
 /// The delta column holds `model`; what it holds, saves and the slabs it
 /// lies in are noted.
-fn delta_cursor_check<T: Deltad>(v: &VerifiedDeltaColumn<T>, model: &[T]) {
+fn delta_cursor_check<T: Deltad>(v: &DeltaColumn<T>, model: &[T]) {
     assert_eq!(v.to_vec(), model);
     delta_noted(v);
     golden::note(&v.save());
@@ -15321,8 +15250,8 @@ fn delta_cursor_check<T: Deltad>(v: &VerifiedDeltaColumn<T>, model: &[T]) {
 fn delta_cursors<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
     let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xde1e);
     let mut v = match max_segments {
-        Some(m) => VerifiedDeltaColumn::<T>::with_max_segments(m),
-        None => VerifiedDeltaColumn::<T>::default(),
+        Some(m) => DeltaColumn::<T>::with_max_segments(m),
+        None => DeltaColumn::<T>::default(),
     };
     let mut last = 0;
     let mut model: Vec<T> = vec![];
@@ -15364,7 +15293,7 @@ fn delta_cursors<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
 }
 
 /// An edit cursor of a delta column of the verified API
-/// (`VerifiedDeltaEdit`): under steps it stands at the places, sees the
+/// (`DeltaEdit`): under steps it stands at the places, sees the
 /// values and leaves the values that the steps make of a list, and the
 /// column counts an edit exactly where a step changed it. Its digest
 /// checks that it still leaves the values in the slabs, saved as the
@@ -15393,7 +15322,7 @@ fn a_delta_cursor_edits_as_the_old_one_does() {
 #[test]
 fn a_delta_cursor_step_by_step() {
     let _golden = golden::test(concat!(module_path!(), "::a_delta_cursor_step_by_step"));
-    let mut v = VerifiedDeltaColumn::<u64>::from_values(&[10, 20, 30, 40, 50]);
+    let mut v = DeltaColumn::<u64>::from_values(&[10, 20, 30, 40, 50]);
     let mut e = v.edit();
     assert_eq!((e.pos(), e.out_pos(), e.peek()), (0, 0, Some(10)));
     e.advance(1);
@@ -15444,7 +15373,7 @@ fn a_delta_cursor_step_by_step() {
     assert_eq!(v.to_vec(), [10, 25, 27, 27, 40, 45]);
 
     // nulls: looked at, put in and replaced
-    let mut n = VerifiedDeltaColumn::<Option<i32>>::from_values(&[Some(-1), None, Some(4)]);
+    let mut n = DeltaColumn::<Option<i32>>::from_values(&[Some(-1), None, Some(4)]);
     let mut e = n.edit();
     assert_eq!(e.peek(), Some(Some(-1)));
     e.replace_with(None).insert_run(None, 2);
@@ -15463,7 +15392,7 @@ fn a_delta_cursor_dropped_unfinished() {
         module_path!(),
         "::a_delta_cursor_dropped_unfinished"
     ));
-    let mut v = VerifiedDeltaColumn::<u64>::from_values(&[1, 2, 3]);
+    let mut v = DeltaColumn::<u64>::from_values(&[1, 2, 3]);
     {
         let mut e = v.edit();
         e.seek(1).insert(9);
@@ -15490,7 +15419,7 @@ fn a_delta_cursor_panics_as_the_old_one_does() {
         module_path!(),
         "::a_delta_cursor_panics_as_the_old_one_does"
     ));
-    let mut v = VerifiedDeltaColumn::<u64>::from_values(&[1, 2, 3, 4]);
+    let mut v = DeltaColumn::<u64>::from_values(&[1, 2, 3, 4]);
     let new = panic_of(std::panic::AssertUnwindSafe(|| v.edit_at(5).finish()));
     assert_eq!(new.as_deref(), Some("edit_at out of bounds"));
     golden::note(&new);
@@ -15499,7 +15428,7 @@ fn a_delta_cursor_panics_as_the_old_one_does() {
     v.edit_at(4).finish();
     delta_cursor_check(&v, &[1, 2, 3, 4]);
 
-    let mut v = VerifiedDeltaColumn::<i64>::from_values(&[0]);
+    let mut v = DeltaColumn::<i64>::from_values(&[0]);
     let new = panic_of(std::panic::AssertUnwindSafe(|| {
         let mut e = v.edit();
         e.insert(i64::MIN).seek(1).insert(i64::MAX);
@@ -15521,10 +15450,10 @@ mod bijou_delta_cursors {
     use hexane::verified::bijou as vb;
     use hexane::Bijou64;
 
-    fn cursors<T: DeltaStepped + VDeltaValue<Bijou64>>(seed: u64) {
+    fn cursors<T: DeltaStepped + DeltaValue<Bijou64>>(seed: u64) {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xde1a);
         let budget = [2, 3, 8, 64][rng.below(4)];
-        let mut v = vb::VerifiedDeltaColumn::<T>::with_max_segments(budget);
+        let mut v = vb::DeltaColumn::<T>::with_max_segments(budget);
         let mut last = 0;
         let mut model: Vec<T> = vec![];
         for _ in 0..rng.below(200) {
@@ -15676,16 +15605,16 @@ fn sum_copies<T: Totalled>() {
     for seed in 1..=4u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xc098);
         let budget = [2, 3, 8, 64][rng.below(4)];
-        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
-        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut p = PrefixColumn::<T>::with_max_segments(budget);
+        let mut v = Column::<T>::with_max_segments(budget);
         let mut model: Vec<T> = rng.values(150);
         p.splice(0, 0, &lent(&model));
         v.splice(0, 0, &lent(&model));
         for _ in 0..10 {
             let n = [0, 3, 40, 400][rng.below(4)];
             let src: Vec<T> = rng.values(n);
-            let mut ps = VerifiedPrefixColumn::<T>::with_max_segments(budget);
-            let mut vs = VerifiedColumn::<T>::with_max_segments(budget);
+            let mut ps = PrefixColumn::<T>::with_max_segments(budget);
+            let mut vs = Column::<T>::with_max_segments(budget);
             ps.splice(0, 0, &lent(&src));
             vs.splice(0, 0, &lent(&src));
             let splices = some_splices(&mut rng, model.len(), src.len());
@@ -15715,8 +15644,8 @@ fn copies_of_a_prefix_column() {
 #[test]
 fn copies_step_by_step() {
     let _golden = golden::test(concat!(module_path!(), "::copies_step_by_step"));
-    let mut v = VerifiedColumn::<u64>::from_values(&[1, 2, 3]);
-    let src = VerifiedColumn::<u64>::from_values(&[7, 8, 9, 10]);
+    let mut v = Column::<u64>::from_values(&[1, 2, 3]);
+    let src = Column::<u64>::from_values(&[7, 8, 9, 10]);
     let splices = [
         Splice {
             pos: 1,
@@ -15732,13 +15661,13 @@ fn copies_step_by_step() {
     v.copy_ranges(src, &splices);
     assert_eq!(v.to_vec(), [1, 8, 9, 3, 10]);
     // the default splice: all of the source, at the front
-    let src = VerifiedColumn::<u64>::from_values(&[5, 6]);
+    let src = Column::<u64>::from_values(&[5, 6]);
     v.copy_ranges(src, &[Splice::default()]);
     assert_eq!(v.to_vec(), [5, 6, 1, 8, 9, 3, 10]);
     // no splices, and splices that change nothing
-    let src = VerifiedColumn::<u64>::from_values(&[4]);
+    let src = Column::<u64>::from_values(&[4]);
     v.copy_ranges(src, &[]);
-    let src = VerifiedColumn::<u64>::from_values(&[4]);
+    let src = Column::<u64>::from_values(&[4]);
     let none = [Splice {
         pos: 2,
         delete: 0,
@@ -15786,8 +15715,8 @@ fn copies_out_of_order_panic() {
         ],
     ];
     for splices in bad {
-        let mut v = VerifiedColumn::<u64>::from_values(&[1, 2, 3, 4]);
-        let vs = VerifiedColumn::<u64>::from_values(&[7, 8, 9, 10]);
+        let mut v = Column::<u64>::from_values(&[1, 2, 3, 4]);
+        let vs = Column::<u64>::from_values(&[7, 8, 9, 10]);
         let new = panic_of(std::panic::AssertUnwindSafe(|| v.copy_ranges(vs, splices)));
         assert!(new.is_some(), "{splices:?}");
         golden::note(&new);
@@ -15810,11 +15739,11 @@ fn delta_copies<T: Deltad>(seed: u64, max_segments: Option<usize>) {
     };
     let made = |values: &[T], m: Option<usize>| match m {
         Some(m) => {
-            let mut v = VerifiedDeltaColumn::<T>::with_max_segments(m);
+            let mut v = DeltaColumn::<T>::with_max_segments(m);
             v.splice(0, 0, values);
             v
         }
-        None => VerifiedDeltaColumn::<T>::from_values(values),
+        None => DeltaColumn::<T>::from_values(values),
     };
     let n = rng.below(150);
     let mut model = some(&mut rng, n);
@@ -15888,14 +15817,14 @@ fn delta_copies_panic_as_the_old_ones_do() {
             range: 1..2,
         },
     ];
-    let mut v = VerifiedDeltaColumn::<i64>::from_values(&[1, 2, 3]);
-    let vs = VerifiedDeltaColumn::<i64>::from_values(&[7, 8]);
+    let mut v = DeltaColumn::<i64>::from_values(&[1, 2, 3]);
+    let vs = DeltaColumn::<i64>::from_values(&[7, 8]);
     let new = panic_of(std::panic::AssertUnwindSafe(|| v.copy_ranges(vs, &bad)));
     assert!(new.is_some());
     golden::note(&new);
 
-    let mut v = VerifiedDeltaColumn::<i64>::from_values(&[i64::MIN]);
-    let vs = VerifiedDeltaColumn::<i64>::from_values(&[i64::MAX]);
+    let mut v = DeltaColumn::<i64>::from_values(&[i64::MIN]);
+    let vs = DeltaColumn::<i64>::from_values(&[i64::MAX]);
     let onto = [Splice {
         pos: 1,
         ..Default::default()
@@ -15911,9 +15840,9 @@ fn delta_copies_panic_as_the_old_ones_do() {
     assert_eq!(v.to_vec(), [5]);
 }
 
-// ── Repositioning an iterator: VShiftable, Unshift, Ranges ──────────────────
+// ── Repositioning an iterator: Shiftable, Unshift, Ranges ──────────────────
 
-use hexane::verified::VShiftable;
+use hexane::verified::Shiftable;
 
 /// Ranges for `ranges` of a column of `len` values, from `from` on:
 /// ascending and not overlapping, some touching, some empty, some past
@@ -15958,7 +15887,7 @@ fn shifted<T: Kind>() {
             let a = rng.below(len + 2);
             let rs = some_ranges(&mut rng, a, len);
             let mut x = v.iter();
-            VShiftable::advance_to(&mut x, a);
+            Shiftable::advance_to(&mut x, a);
             let new: Vec<T> = x.ranges(&rs).map(T::keep).collect();
             assert_eq!(new, ranges_of(&model, &rs), "{rs:?}");
 
@@ -15980,29 +15909,29 @@ fn shifted<T: Kind>() {
                 }
             }
 
-            // the moves of `VShiftable`
+            // the moves of `Shiftable`
             let mut x = v.iter();
             for _ in 0..6 {
-                let p = VShiftable::get_pos(&x);
+                let p = Shiftable::get_pos(&x);
                 golden::note(&p);
-                golden::note(&VShiftable::get_max(&x));
-                golden::note(&VShiftable::get_range(&x));
+                golden::note(&Shiftable::get_max(&x));
+                golden::note(&Shiftable::get_range(&x));
                 let t = p + rng.below(15);
                 match rng.below(6) {
-                    0 => VShiftable::set_max(&mut x, t),
-                    1 => VShiftable::advance_to(&mut x, t),
-                    2 => VShiftable::advance_by(&mut x, t - p),
+                    0 => Shiftable::set_max(&mut x, t),
+                    1 => Shiftable::advance_to(&mut x, t),
+                    2 => Shiftable::advance_by(&mut x, t - p),
                     3 => {
                         let r = t..t + rng.below(20);
-                        VShiftable::shift(&mut x, r);
+                        Shiftable::shift(&mut x, r);
                     }
                     4 => {
                         let r = t..t + rng.below(20);
-                        let a = VShiftable::shift_next(&mut x, r).map(T::keep);
+                        let a = Shiftable::shift_next(&mut x, r).map(T::keep);
                         golden::note(&a);
                     }
                     _ => {
-                        let a = VShiftable::seek_to(&mut x, t).map(T::keep);
+                        let a = Shiftable::seek_to(&mut x, t).map(T::keep);
                         golden::note(&a);
                     }
                 }
@@ -16014,7 +15943,7 @@ fn shifted<T: Kind>() {
 
 /// A verified iterator repositions: the values of several ranges in turn
 /// (`ranges`) are the model's. The digest checks that a lookahead and its
-/// moves (`unshift`), and each move of `VShiftable` with the place and
+/// moves (`unshift`), and each move of `Shiftable` with the place and
 /// window it starts from, still give what `Column`'s iterator gave under
 /// the old API's `Shiftable`.
 #[test]
@@ -16050,7 +15979,7 @@ fn prefix_shifted<T: Totalled>() {
     for seed in 1..=4u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x5418);
         let budget = [2, 3, 8, 64][rng.below(4)];
-        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+        let mut p = PrefixColumn::<T>::with_max_segments(budget);
         let model: Vec<T> = rng.values(120);
         p.splice(0, 0, &lent(&model));
         let len = model.len();
@@ -16058,7 +15987,7 @@ fn prefix_shifted<T: Totalled>() {
             let a = rng.below(len + 2);
             let rs = some_ranges(&mut rng, a, len);
             let mut x = p.prefix_iter();
-            VShiftable::advance_to(&mut x, a);
+            Shiftable::advance_to(&mut x, a);
             let new: Vec<Item<T>> = x.ranges(&rs).map(|pv| new_item(Some(pv))).collect();
             golden::note(&new);
 
@@ -16097,7 +16026,7 @@ fn acc_shifted<T: Accd>() {
     for seed in 1..=4u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x5419);
         let budget = [2, 3, 8, 64][rng.below(4)];
-        let mut p = VerifiedAccColumn::<T>::with_max_segments(budget);
+        let mut p = AccColumn::<T>::with_max_segments(budget);
         let model: Vec<T> = rng.values(120);
         p.splice(0, 0, &lent(&model));
         let len = model.len();
@@ -16113,7 +16042,7 @@ fn acc_shifted<T: Accd>() {
             let a = rng.below(len + 2);
             let rs = some_ranges(&mut rng, a, len);
             let mut x = p.prefix_iter();
-            VShiftable::advance_to(&mut x, a);
+            Shiftable::advance_to(&mut x, a);
             let new: Vec<AccItem<T>> = x.ranges(&rs).map(|av| acc_item(Some(av))).collect();
             assert_eq!(new.iter().collect::<Vec<_>>(), of(&rs), "{rs:?}");
 
@@ -16150,13 +16079,13 @@ fn delta_shifted<T: Deltad>(seed: u64) {
         last = l;
         model.push(x);
     }
-    let v = VerifiedDeltaColumn::<T>::from_values(&model);
+    let v = DeltaColumn::<T>::from_values(&model);
     let len = model.len();
     for _ in 0..15 {
         let a = rng.below(len + 2);
         let rs = some_ranges(&mut rng, a, len);
         let mut x = v.iter();
-        VShiftable::advance_to(&mut x, a);
+        Shiftable::advance_to(&mut x, a);
         let new: Vec<T> = x.ranges(&rs).collect();
         assert_eq!(new, ranges_of(&model, &rs), "{rs:?}");
 
@@ -16224,7 +16153,7 @@ fn runs_shifted<T: Kind>() {
             let a = rng.below(len + 2);
             let rs = some_ranges(&mut rng, a, len);
             let mut x = v.iter().runs();
-            VShiftable::advance_to(&mut x, a);
+            Shiftable::advance_to(&mut x, a);
             let new: Vec<(usize, T)> = x.ranges(&rs).map(|r| (r.count, T::keep(r.value))).collect();
             golden::note(&new);
             let flat: Vec<T> = new
@@ -16246,30 +16175,30 @@ fn runs_shifted<T: Kind>() {
                 }
             }
 
-            // the moves of `VShiftable`, each with a read after it
+            // the moves of `Shiftable`, each with a read after it
             let mut x = v.iter().runs();
             for _ in 0..6 {
-                let p = VShiftable::get_pos(&x);
+                let p = Shiftable::get_pos(&x);
                 golden::note(&p);
-                golden::note(&VShiftable::get_max(&x));
-                golden::note(&VShiftable::get_range(&x));
+                golden::note(&Shiftable::get_max(&x));
+                golden::note(&Shiftable::get_range(&x));
                 let t = p + rng.below(15);
                 match rng.below(6) {
-                    0 => VShiftable::set_max(&mut x, t),
-                    1 => VShiftable::advance_to(&mut x, t),
-                    2 => VShiftable::advance_by(&mut x, t - p),
+                    0 => Shiftable::set_max(&mut x, t),
+                    1 => Shiftable::advance_to(&mut x, t),
+                    2 => Shiftable::advance_by(&mut x, t - p),
                     3 => {
                         let r = t..t + rng.below(20);
-                        VShiftable::shift(&mut x, r);
+                        Shiftable::shift(&mut x, r);
                     }
                     4 => {
                         let r = t..t + rng.below(20);
                         let a =
-                            VShiftable::shift_next(&mut x, r).map(|r| (r.count, T::keep(r.value)));
+                            Shiftable::shift_next(&mut x, r).map(|r| (r.count, T::keep(r.value)));
                         golden::note(&a);
                     }
                     _ => {
-                        let a = VShiftable::seek_to(&mut x, t).map(|r| (r.count, T::keep(r.value)));
+                        let a = Shiftable::seek_to(&mut x, t).map(|r| (r.count, T::keep(r.value)));
                         golden::note(&a);
                     }
                 }
@@ -16281,7 +16210,7 @@ fn runs_shifted<T: Kind>() {
 
 /// The runs of a verified column reposition: the runs of several ranges
 /// in turn (`ranges`) are the model's values. The digest checks that
-/// those runs, a lookahead (`unshift`), and each move of `VShiftable`
+/// those runs, a lookahead (`unshift`), and each move of `Shiftable`
 /// with the place and window it starts from and a read after it, still
 /// give what `Column`'s runs gave under the old API's `Shiftable`.
 #[test]
@@ -16312,13 +16241,13 @@ fn delta_runs_shifted<T: DeltaStepped>(seed: u64) {
         rng.next();
     }
     let len = model.len();
-    let v = VerifiedDeltaColumn::<T>::from_values(&model);
+    let v = DeltaColumn::<T>::from_values(&model);
     for _ in 0..15 {
         // the runs of ranges, from a place the runs have moved on to
         let a = rng.below(len + 2);
         let rs = some_ranges(&mut rng, a, len);
         let mut x = v.iter().runs();
-        VShiftable::advance_to(&mut x, a);
+        Shiftable::advance_to(&mut x, a);
         let new: Vec<DeltaRun> = x.ranges(&rs).collect();
         golden::note(&new);
 
@@ -16337,29 +16266,29 @@ fn delta_runs_shifted<T: DeltaStepped>(seed: u64) {
             }
         }
 
-        // the moves of `VShiftable`, each with a read after it
+        // the moves of `Shiftable`, each with a read after it
         let mut x = v.iter().runs();
         for _ in 0..6 {
-            let p = VShiftable::get_pos(&x);
+            let p = Shiftable::get_pos(&x);
             golden::note(&p);
-            golden::note(&VShiftable::get_max(&x));
-            golden::note(&VShiftable::get_range(&x));
+            golden::note(&Shiftable::get_max(&x));
+            golden::note(&Shiftable::get_range(&x));
             let t = p + rng.below(15);
             match rng.below(6) {
-                0 => VShiftable::set_max(&mut x, t),
-                1 => VShiftable::advance_to(&mut x, t),
-                2 => VShiftable::advance_by(&mut x, t - p),
+                0 => Shiftable::set_max(&mut x, t),
+                1 => Shiftable::advance_to(&mut x, t),
+                2 => Shiftable::advance_by(&mut x, t - p),
                 3 => {
                     let r = t..t + rng.below(20);
-                    VShiftable::shift(&mut x, r);
+                    Shiftable::shift(&mut x, r);
                 }
                 4 => {
                     let r = t..t + rng.below(20);
-                    let a = VShiftable::shift_next(&mut x, r);
+                    let a = Shiftable::shift_next(&mut x, r);
                     golden::note(&a);
                 }
                 _ => {
-                    let a = VShiftable::seek_to(&mut x, t);
+                    let a = Shiftable::seek_to(&mut x, t);
                     golden::note(&a);
                 }
             }
@@ -16371,7 +16300,7 @@ fn delta_runs_shifted<T: DeltaStepped>(seed: u64) {
 /// The runs of a verified delta column reposition: the runs of a
 /// lookahead (`unshift`) are the model's, and the digest checks that the
 /// runs of several ranges in turn (`ranges`), each with the number before
-/// it, and each move of `VShiftable` with the place and window it starts
+/// it, and each move of `Shiftable` with the place and window it starts
 /// from and a read after it, still give what `DeltaColumn`'s runs gave
 /// under the old API's `Shiftable`.
 #[test]
@@ -16424,7 +16353,7 @@ fn loaded_by_runs<T: Kind>() {
         }
         let opts = LoadOpts::new().with_max_segments(budget);
         let k = rng.below(200);
-        let mut x = VerifiedColumn::<T>::load_iter(&bytes, opts);
+        let mut x = Column::<T>::load_iter(&bytes, opts);
         let a = pulled(k, || {
             x.try_next_run()
                 .map(|r| r.map(|r| (r.count, T::keep(r.value))))
@@ -16472,12 +16401,12 @@ fn prefix_loaded_by_runs<T: Totalled>() {
         let budget = [2, 3, 8, 64][rng.below(4)];
         let n = rng.below(120);
         let model: Vec<T> = rng.values(n);
-        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+        let mut p = PrefixColumn::<T>::with_max_segments(budget);
         p.splice(0, 0, &lent(&model));
         let bytes = p.save();
         let opts = LoadOpts::new().with_max_segments(budget);
         let k = rng.below(60);
-        let mut x = VerifiedPrefixColumn::<T>::load_iter(&bytes, opts);
+        let mut x = PrefixColumn::<T>::load_iter(&bytes, opts);
         let a = pulled(k, || {
             x.try_next_run()
                 .map(|r| r.map(|r| (r.count, T::keep(r.value))))
@@ -16523,7 +16452,7 @@ fn a_fill_loads_by_runs_as_the_old_one_does() {
     ));
     for n in [0usize, 1, 5, 1000] {
         let opts = LoadOpts::new().with_length(n).with_fill(7u64);
-        let mut x = VerifiedColumn::<u64>::load_iter(&[], opts);
+        let mut x = Column::<u64>::load_iter(&[], opts);
         let a = pulled(5, || {
             x.try_next_run().map(|r| r.map(|r| (r.count, r.value)))
         });
@@ -16567,7 +16496,7 @@ impl Tag {
     }
 }
 
-impl VPack for Tag {
+impl RleValue for Tag {
     fn same(a: &Tag, b: &Tag) -> bool {
         a == b
     }
@@ -16576,19 +16505,19 @@ impl VPack for Tag {
         a.cmp(b)
     }
 
-    fn try_unpack<C: VCodec>(data: &[u8]) -> Result<(usize, Tag), PackError> {
+    fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, Tag), PackError> {
         Tag::of_byte(data)
     }
 
-    fn unpack<C: VCodec>(data: &[u8]) -> (usize, Tag) {
+    fn unpack<C: Codec>(data: &[u8]) -> (usize, Tag) {
         Tag::of_byte(data).unwrap()
     }
 
-    fn value_len<C: VCodec>(_data: &[u8]) -> Option<usize> {
+    fn value_len<C: Codec>(_data: &[u8]) -> Option<usize> {
         Some(1)
     }
 
-    fn pack<C: VCodec>(v: &Tag, buf: &mut Vec<u8>) -> usize {
+    fn pack<C: Codec>(v: &Tag, buf: &mut Vec<u8>) -> usize {
         buf.push(v.byte());
         1
     }
@@ -16611,11 +16540,8 @@ fn a_clients_own_encoding() {
     assert_eq!(v.save(), [0x7f, 0xff, 0x00, 0x02]);
     #[cfg(feature = "bijou64")]
     {
-        let w = hexane::verified::bijou::VerifiedColumn::<Tag>::from_values(&[
-            Tag::Int,
-            Tag::Str,
-            Tag::Str,
-        ]);
+        let w =
+            hexane::verified::bijou::Column::<Tag>::from_values(&[Tag::Int, Tag::Str, Tag::Str]);
         assert_eq!(w.save(), [0x01, 0x00, 0x04, 0xff]);
     }
 
@@ -16652,7 +16578,7 @@ impl Fixed8 {
     }
 }
 
-impl VCodec for Fixed8 {
+impl Codec for Fixed8 {
     fn put_u(n: u64, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&n.to_le_bytes());
     }
@@ -16662,7 +16588,7 @@ impl VCodec for Fixed8 {
     }
 
     fn read_u(data: &[u8]) -> Result<(usize, u64), PackError> {
-        <Fixed8 as VCodec>::read_u_opt(data).ok_or_else(|| refused("fewer than eight bytes"))
+        <Fixed8 as Codec>::read_u_opt(data).ok_or_else(|| refused("fewer than eight bytes"))
     }
 
     fn read_u_opt(data: &[u8]) -> Option<(usize, u64)> {
@@ -16670,7 +16596,7 @@ impl VCodec for Fixed8 {
     }
 
     fn read_i(data: &[u8]) -> Result<(usize, i64), PackError> {
-        <Fixed8 as VCodec>::read_i_opt(data).ok_or_else(|| refused("fewer than eight bytes"))
+        <Fixed8 as Codec>::read_i_opt(data).ok_or_else(|| refused("fewer than eight bytes"))
     }
 
     fn read_i_opt(data: &[u8]) -> Option<(usize, i64)> {
@@ -16698,13 +16624,13 @@ impl VCodec for Fixed8 {
 /// codec.
 fn fixed8_saves<T>(vals: &[T])
 where
-    T: Kind + VValue<Fixed8>,
+    T: Kind + ColumnValueRef<Fixed8>,
 {
-    let mut v = VerifiedColumn::<T, Fixed8>::new();
+    let mut v = Column::<T, Fixed8>::new();
     v.splice(0, 0, &lent(vals));
     let bytes = v.save();
     golden::note(&bytes);
-    let back = VerifiedColumn::<T, Fixed8>::load(&bytes).unwrap();
+    let back = Column::<T, Fixed8>::load(&bytes).unwrap();
     let back: Vec<T> = back.to_vec().into_iter().map(T::keep).collect();
     assert_eq!(back, vals);
     // a literal run grown and cut: its header rewritten
@@ -16712,7 +16638,7 @@ where
         let at = vals.len() / 2;
         v.splice(at, 1, &lent(&vals[..2]));
         golden::note(&v.save());
-        assert!(VerifiedColumn::<T, Fixed8>::load(&v.save()).is_ok());
+        assert!(Column::<T, Fixed8>::load(&v.save()).is_ok());
     }
 }
 
@@ -16723,14 +16649,14 @@ fn a_clients_own_codec() {
     let _golden = golden::test(concat!(module_path!(), "::a_clients_own_codec"));
     // a literal run of two (a header of -2), then the numbers, eight
     // bytes each
-    let v = VerifiedColumn::<u64, Fixed8>::from_values(&[5, 6]);
+    let v = Column::<u64, Fixed8>::from_values(&[5, 6]);
     let mut want = (-2i64).to_le_bytes().to_vec();
     want.extend(5u64.to_le_bytes());
     want.extend(6u64.to_le_bytes());
     assert_eq!(v.save(), want);
     // a header cut short, or a number
-    assert!(VerifiedColumn::<u64, Fixed8>::load(&want[..5]).is_err());
-    assert!(VerifiedColumn::<u64, Fixed8>::load(&want[..20]).is_err());
+    assert!(Column::<u64, Fixed8>::load(&want[..5]).is_err());
+    assert!(Column::<u64, Fixed8>::load(&want[..20]).is_err());
 
     let mut rng = Rng(0xf1c8);
     for _ in 0..20 {
@@ -16754,8 +16680,8 @@ fn a_clients_own_codec() {
 /// as many slabs, read as the model at places and loaded back the same.
 fn bit_index_keeps<T: Kind>() {
     let mut rng = Rng(0xb17);
-    let mut v = VerifiedColumn::<T, Leb128, LenBitIndex>::new();
-    let mut plain = VerifiedColumn::<T>::new();
+    let mut v = Column::<T, Leb128, LenBitIndex>::new();
+    let mut plain = Column::<T>::new();
     let mut model: Vec<T> = vec![];
     for _ in 0..150 {
         let at = rng.below(model.len() + 1);
@@ -16780,7 +16706,7 @@ fn bit_index_keeps<T: Kind>() {
     }
     let got: Vec<T> = v.to_vec().into_iter().map(T::keep).collect();
     assert_eq!(got, model);
-    let back = VerifiedColumn::<T, Leb128, LenBitIndex>::load(&v.save()).unwrap();
+    let back = Column::<T, Leb128, LenBitIndex>::load(&v.save()).unwrap();
     let back: Vec<T> = back.to_vec().into_iter().map(T::keep).collect();
     assert_eq!(back, model);
 }
@@ -16818,13 +16744,13 @@ fn leb_sizes_agree() {
     }
     for n in us {
         let mut buf = vec![];
-        <Leb128 as hexane::verified::VCodec>::put_u(n, &mut buf);
+        <Leb128 as hexane::verified::Codec>::put_u(n, &mut buf);
         assert_eq!(hexane::verified::ulebsize(n), buf.len() as u64, "{n}");
         golden::note(&hexane::verified::ulebsize(n));
     }
     for i in is {
         let mut buf = vec![];
-        <Leb128 as hexane::verified::VCodec>::put_i(i, &mut buf);
+        <Leb128 as hexane::verified::Codec>::put_i(i, &mut buf);
         assert_eq!(hexane::verified::lebsize(i), buf.len() as u64, "{i}");
         golden::note(&hexane::verified::lebsize(i));
     }

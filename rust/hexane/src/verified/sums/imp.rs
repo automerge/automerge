@@ -77,7 +77,7 @@ pub(super) proof fn lemma_wrap(x: int, y: int, m: int)
 
 } // verus!
 
-/// [`VSum`] and [`VCount`] for an unsigned type: its integers are those
+/// [`VSum`] and [`UnsignedPrefix`] for an unsigned type: its integers are those
 /// from zero, and it wraps by the remainder.
 macro_rules! unsigned_sum {
     ($t:ty) => {
@@ -157,7 +157,7 @@ macro_rules! unsigned_sum {
             }
         }
 
-        impl VCount for $t {
+        impl UnsignedPrefix for $t {
             proof fn lemma_count() {
             }
 
@@ -417,7 +417,7 @@ impl seal::SummedSeal for bool {
 
 }
 
-pub(super) proof fn lemma_sum_cat_impl<V: VSummed>(a: Seq<<V as VSpec>::S>, b: Seq<<V as VSpec>::S>)
+pub(super) proof fn lemma_sum_cat_impl<V: PrefixValue>(a: Seq<<V as VSpec>::S>, b: Seq<<V as VSpec>::S>)
     ensures
         summed::<V>(a + b) == summed::<V>(a) + summed::<V>(b),
     decreases b.len(),
@@ -430,7 +430,7 @@ pub(super) proof fn lemma_sum_cat_impl<V: VSummed>(a: Seq<<V as VSpec>::S>, b: S
     }
 }
 
-pub(super) proof fn lemma_sum_run_impl<V: VSummed>(n: nat, x: <V as VSpec>::S)
+pub(super) proof fn lemma_sum_run_impl<V: PrefixValue>(n: nat, x: <V as VSpec>::S)
     ensures
         summed::<V>(Seq::new(n, |_i: int| x)) == V::amount(x) * n,
     decreases n,
@@ -445,7 +445,7 @@ pub(super) proof fn lemma_sum_run_impl<V: VSummed>(n: nat, x: <V as VSpec>::S)
     }
 }
 
-pub(super) proof fn lemma_sum_bound_impl<V: VSummed>(vs: Seq<<V as VSpec>::S>)
+pub(super) proof fn lemma_sum_bound_impl<V: PrefixValue>(vs: Seq<<V as VSpec>::S>)
     ensures
         -(vs.len() * V::most()) <= summed::<V>(vs) <= vs.len() * V::most(),
         V::Sum::lo() == 0 ==> summed::<V>(vs) >= 0,
@@ -462,7 +462,7 @@ pub(super) proof fn lemma_sum_bound_impl<V: VSummed>(vs: Seq<<V as VSpec>::S>)
     }
 }
 
-pub(super) proof fn lemma_sum_mono_impl<V: VSummed>(vs: Seq<<V as VSpec>::S>, k: int)
+pub(super) proof fn lemma_sum_mono_impl<V: PrefixValue>(vs: Seq<<V as VSpec>::S>, k: int)
     requires
         V::Sum::lo() == 0,
         0 <= k <= vs.len(),
@@ -475,7 +475,7 @@ pub(super) proof fn lemma_sum_mono_impl<V: VSummed>(vs: Seq<<V as VSpec>::S>, k:
     lemma_sum_bound::<V>(vs.skip(k));
 }
 
-pub(super) proof fn lemma_sums_fit_impl<V: VSummed>(vs: Seq<<V as VSpec>::S>)
+pub(super) proof fn lemma_sums_fit_impl<V: PrefixValue>(vs: Seq<<V as VSpec>::S>)
     requires
         vs.len() <= V::safe(),
     ensures
@@ -495,7 +495,7 @@ pub(super) proof fn lemma_sums_fit_impl<V: VSummed>(vs: Seq<<V as VSpec>::S>)
     }
 }
 
-pub(super) proof fn lemma_sums_fit_unsigned_impl<V: VSummed>(vs: Seq<<V as VSpec>::S>)
+pub(super) proof fn lemma_sums_fit_unsigned_impl<V: PrefixValue>(vs: Seq<<V as VSpec>::S>)
     requires
         V::Sum::lo() == 0,
     ensures
@@ -513,7 +513,7 @@ pub(super) proof fn lemma_sums_fit_unsigned_impl<V: VSummed>(vs: Seq<<V as VSpec
     }
 }
 
-pub(super) proof fn lemma_sums_fit_take_impl<V: VSummed>(vs: Seq<<V as VSpec>::S>, k: int)
+pub(super) proof fn lemma_sums_fit_take_impl<V: PrefixValue>(vs: Seq<<V as VSpec>::S>, k: int)
     requires
         sums_fit::<V>(vs),
         0 <= k <= vs.len(),
@@ -528,7 +528,7 @@ pub(super) proof fn lemma_sums_fit_take_impl<V: VSummed>(vs: Seq<<V as VSpec>::S
     }
 }
 
-pub(super) proof fn lemma_sum_range_impl<V: VSummed>(vs: Seq<<V as VSpec>::S>, i: int, j: int)
+pub(super) proof fn lemma_sum_range_impl<V: PrefixValue>(vs: Seq<<V as VSpec>::S>, i: int, j: int)
     requires
         0 <= i <= j <= vs.len(),
     ensures
@@ -557,7 +557,7 @@ pub(super) proof fn lemma_sum_range_impl<V: VSummed>(vs: Seq<<V as VSpec>::S>, i
 }
 
 /// What one value adds is a sum of the type.
-pub(super) proof fn lemma_part<V: VSummed>(x: <V as VSpec>::S)
+pub(super) proof fn lemma_part<V: PrefixValue>(x: <V as VSpec>::S)
     ensures
         V::Sum::lo() <= V::amount(x) <= V::Sum::hi(),
         V::Sum::of_int(V::amount(x)).as_int() == V::amount(x),
@@ -583,7 +583,7 @@ pub(super) proof fn lemma_part<V: VSummed>(x: <V as VSpec>::S)
 #[verifier::reject_recursive_types(V)]
 pub struct SumOf<V>(PhantomData<V>);
 
-impl<'a, V: VSummed> PrefixOps<Get<'a, V>> for SumOf<V> {
+impl<'a, V: PrefixValue> PrefixOps<Get<'a, V>> for SumOf<V> {
     type P = V::Sum;
 
     type W = SumWeight<V::Sum>;
@@ -658,7 +658,7 @@ impl<'a, V: VSummed> PrefixOps<Get<'a, V>> for SumOf<V> {
 
 /// The sum the shared proofs speak of is the sum of the values,
 /// wrapped.
-pub(crate) proof fn lemma_vsum<'a, V: VSummed>(vs: Seq<Get<'a, V>>)
+pub(crate) proof fn lemma_vsum<'a, V: PrefixValue>(vs: Seq<Get<'a, V>>)
     ensures
         vsum::<Get<'a, V>, SumOf<V>>(vs) == V::Sum::of_int(summed::<V>(<Get<'a, V> as VGet>::svs(vs))),
     decreases vs.len(),
@@ -701,7 +701,7 @@ pub(crate) proof fn lemma_sum_diff<P: VSum>(base: P, t: P, a: int, b: int)
 /// negative: what the shared search by sum takes of them (`PrefixOrd`).
 /// That a prefix type's sums and order are its numbers' is trusted of
 /// the old API's types; of these it is proved.
-impl<'a, V: VSummed> PrefixOrd<Get<'a, V>> for SumOf<V> where V::Sum: VCount {
+impl<'a, V: PrefixValue> PrefixOrd<Get<'a, V>> for SumOf<V> where V::Sum: UnsignedPrefix {
     open spec fn pnum(p: V::Sum) -> nat {
         p.as_int() as nat
     }
@@ -783,8 +783,8 @@ impl<'a, V: VSummed> PrefixOrd<Get<'a, V>> for SumOf<V> where V::Sum: VCount {
 
 /// The number the shared search takes for a sum of values is what the
 /// values add up to.
-pub(crate) proof fn lemma_nsum<'a, V: VSummed>(vs: Seq<Get<'a, V>>)
-    where V::Sum: VCount
+pub(crate) proof fn lemma_nsum<'a, V: PrefixValue>(vs: Seq<Get<'a, V>>)
+    where V::Sum: UnsignedPrefix
     ensures
         nsum::<Get<'a, V>, SumOf<V>>(vs) == summed::<V>(<Get<'a, V> as VGet>::svs(vs)),
     decreases vs.len(),
@@ -826,7 +826,7 @@ pub(super) proof fn lemma_one_more<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, k
 
 /// `t` and the sum of a slab's values, where that fits; for sums of an
 /// unsigned type.
-pub(super) fn slab_fits<'a, V: VSummed + VValue<C>, C: VCodec>(slab: &'a Slab<<V::E as Slabs>::Tail>, t: V::Sum) -> (r: Option<
+pub(super) fn slab_fits<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(slab: &'a Slab<<V::E as Slabs>::Tail>, t: V::Sum) -> (r: Option<
     V::Sum,
 >)
     requires
@@ -924,7 +924,7 @@ pub(super) fn slab_fits<'a, V: VSummed + VValue<C>, C: VCodec>(slab: &'a Slab<<V
 /// Whether the sums of the values of `slabs`, `len` of them, fit:
 /// exactly, reading every value where the column is long enough for
 /// them not to.
-pub(super) fn fits<V: VSummed + VValue<C>, C: VCodec>(slabs: &[Slab<<V::E as Slabs>::Tail>], len: usize) -> (r: bool)
+pub(super) fn fits<V: PrefixValue + ColumnValueRef<C>, C: Codec>(slabs: &[Slab<<V::E as Slabs>::Tail>], len: usize) -> (r: bool)
     requires
         all_ok::<V::E>(slabs@),
         len == total(slab_lens(slabs@)),
@@ -1016,7 +1016,7 @@ pub(super) fn fits<V: VSummed + VValue<C>, C: VCodec>(slabs: &[Slab<<V::E as Sla
 
 /// What a column's slabs hold are, in a specification, the values read
 /// of them.
-pub(crate) proof fn lemma_svs_slabs<V: VValue<C>, C: VCodec>(s: Seq<Slab<<V::E as Slabs>::Tail>>)
+pub(crate) proof fn lemma_svs_slabs<V: ColumnValueRef<C>, C: Codec>(s: Seq<Slab<<V::E as Slabs>::Tail>>)
     requires
         all_ok::<V::E>(s),
     ensures
@@ -1032,7 +1032,7 @@ pub(crate) proof fn lemma_svs_slabs<V: VValue<C>, C: VCodec>(s: Seq<Slab<<V::E a
 
 /// The values read of a slab add up to what those read of a copy of it
 /// do.
-pub(super) proof fn lemma_same_sum<V: VSummed + VValue<C>, C: VCodec>(
+pub(super) proof fn lemma_same_sum<V: PrefixValue + ColumnValueRef<C>, C: Codec>(
     a: Slab<<V::E as Slabs>::Tail>,
     b: Slab<<V::E as Slabs>::Tail>,
 )
@@ -1057,7 +1057,7 @@ pub(super) proof fn lemma_same_sum<V: VSummed + VValue<C>, C: VCodec>(
     lemma_vsum::<V>(xb);
 }
 
-impl<V: VSummed + VValue<C>, C: VCodec> Weigh<V::E, SumWeight<V::Sum>> for SumModel<V, C> {
+impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Weigh<V::E, SumWeight<V::Sum>> for SumModel<V, C> {
     open spec fn wrel(w: SumWeight<V::Sum>, s: Slab<<V::E as Slabs>::Tail>) -> bool {
         w.len == s.len && w.sum == vsum::<Get<'static, V>, SumOf<V>>(<V::X as Decoders<'static>>::vals(s))
     }
@@ -1125,7 +1125,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> Weigh<V::E, SumWeight<V::Sum>> for SumMo
 
 /// A clone of a prefix column's slabs and index is a prefix column of
 /// the same values.
-impl<V: VSummed + VValue<C>, C: VCodec> CopyWeigh<V::E, SumWeight<V::Sum>> for SumModel<V, C> {
+impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> CopyWeigh<V::E, SumWeight<V::Sum>> for SumModel<V, C> {
     proof fn lemma_copy_weight() {
     }
 
@@ -1151,7 +1151,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> CopyWeigh<V::E, SumWeight<V::Sum>> for S
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> Accumulate<Get<'a, V>, SumWeight<V::Sum>> for SumModel<V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> Accumulate<Get<'a, V>, SumWeight<V::Sum>> for SumModel<V, C> {
     open spec fn wvals(w: SumWeight<V::Sum>, vs: Seq<Get<'a, V>>) -> bool {
         w.len == vs.len() && w.sum == vsum::<Get<'a, V>, SumOf<V>>(vs)
     }
@@ -1182,7 +1182,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> Accumulate<Get<'a, V>, SumWeight<V::
 
 /// A load computes each slab's weight, and then checks that the sums
 /// fit: it refuses a column for its sums only where they do not.
-impl<'a, V: VSummed + VValue<C>, C: VCodec> LoadWeigh<'a, V::E, V::X, SumWeight<V::Sum>> for SumModel<V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> LoadWeigh<'a, V::E, V::X, SumWeight<V::Sum>> for SumModel<V, C> {
     open spec fn accumulates() -> bool {
         false
     }
@@ -1297,8 +1297,8 @@ pub(super) fn vamount_part_of_nonzerou32(v: NonZeroU32) -> (r: u64)
 
 pub(super) proof fn vsummed_lemma_amount_option_t<T: VAmount>(v: Option<T>)
     ensures
-        -(<Option<T> as VSummed>::most() as int) <= <Option<T> as VSummed>::amount(v) <= <Option<T> as VSummed>::most(),
-        <Option<T> as VSummed>::Sum::lo() == 0 ==> <Option<T> as VSummed>::amount(v) >= 0,
+        -(<Option<T> as PrefixValue>::most() as int) <= <Option<T> as PrefixValue>::amount(v) <= <Option<T> as PrefixValue>::most(),
+        <Option<T> as PrefixValue>::Sum::lo() == 0 ==> <Option<T> as PrefixValue>::amount(v) >= 0,
 {
     match v {
         Some(x) => T::lemma_amount_of(x),
@@ -1309,7 +1309,7 @@ pub(super) proof fn vsummed_lemma_amount_option_t<T: VAmount>(v: Option<T>)
 #[inline(always)]
 pub(super) fn vsummed_to_part_option_t<T: VAmount>(v: Option<T>) -> (r: <T as VAmount>::Sum)
     ensures
-        r.as_int() == <Option<T> as VSummed>::amount(v.sv()),
+        r.as_int() == <Option<T> as PrefixValue>::amount(v.sv()),
 {
     match v {
         Some(x) => T::part_of(x),
@@ -1326,7 +1326,7 @@ pub(super) fn vsummed_to_part_option_t<T: VAmount>(v: Option<T>) -> (r: <T as VA
 #[inline(always)]
 pub(super) fn vsummed_to_part_bool(v: bool) -> (r: usize)
     ensures
-        r.as_int() == <bool as VSummed>::amount(v.sv()),
+        r.as_int() == <bool as PrefixValue>::amount(v.sv()),
 {
     if v {
         1

@@ -20,7 +20,7 @@ verus! {
 
 /// Splices applied to values, as specifications have them, are the
 /// values of the splices applied.
-pub(super) proof fn lemma_svs_applied<V: VValue<C>, C: VCodec>(d: Seq<Held<V, C>>, s: Seq<Held<V, C>>, sps: Seq<Splice>)
+pub(super) proof fn lemma_svs_applied<V: ColumnValueRef<C>, C: Codec>(d: Seq<Held<V, C>>, s: Seq<Held<V, C>>, sps: Seq<Splice>)
     requires
         in_order(sps, d.len() as int),
     ensures
@@ -51,7 +51,7 @@ pub(super) proof fn lemma_applied_none<T>(d: Seq<T>, s: Seq<T>, sps: Seq<Splice>
     assert(applied(d, s, sps) =~= d);
 }
 
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     pub(super) fn copy_ranges_impl(&mut self, src: Self, splices: &[Splice])
         requires
             in_order(splices@, old(self)@.len() as int),

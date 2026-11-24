@@ -1,5 +1,5 @@
-//! Edits of a [`VerifiedColumn`] at a cursor: [`VerifiedEdit`], which
-//! [`VerifiedColumn::edit`] and [`VerifiedColumn::edit_at`] open.
+//! Edits of a [`Column`] at a cursor: [`Edit`], which
+//! [`Column::edit`] and [`Column::edit_at`] open.
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each
@@ -11,7 +11,7 @@ use super::model::Model;
 use super::seal;
 #[cfg(verus_keep_ghost)]
 use super::{after_call, gives, run_values, Held, VGet};
-use super::{Get, LenIndex, RunsFeed, VCodec, VIndex, VValue, VerifiedColumn};
+use super::{Codec, Column, ColumnValueRef, Get, LenIndex, RunsFeed, VIndex};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{Insertable, Slabs};
 #[cfg(verus_keep_ghost)]
@@ -27,9 +27,9 @@ use imp::*;
 
 verus! {
 
-/// An edit of a [`VerifiedColumn`] in progress: a cursor that walks the
+/// An edit of a [`Column`] in progress: a cursor that walks the
 /// column once, front to back, and writes the edited column as it goes.
-/// [`VerifiedColumn::edit`] and [`VerifiedColumn::edit_at`] open one.
+/// [`Column::edit`] and [`Column::edit_at`] open one.
 ///
 /// A cursor passes over values ([`seek`](Self::seek),
 /// [`advance`](Self::advance)), which keeps them; puts values before the
@@ -45,9 +45,9 @@ verus! {
 /// another, and [`finish`](Self::finish) hands the edited column back:
 ///
 /// ```
-/// use hexane::verified::VerifiedColumn;
+/// use hexane::verified::Column;
 ///
-/// let mut col = VerifiedColumn::<u64>::from_values(&[1, 2, 3, 4, 5]);
+/// let mut col = Column::<u64>::from_values(&[1, 2, 3, 4, 5]);
 /// let mut e = col.edit();
 /// e.seek(1).delete(2).insert(9).seek(4).replace_with(7);
 /// e.finish();
@@ -73,8 +73,8 @@ verus! {
 /// on. Every step says what it does to these three, and that the rest
 /// stays as it was (`kept`).
 #[must_use = "an edit gives the column back when `finish` is called"]
-pub struct VerifiedEdit<'a, V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C> = LenIndex> {
-    col: &'a mut VerifiedColumn<V, C, K>,
+pub struct Edit<'a, V: ColumnValueRef<C>, C: Codec = Leb128, K: VIndex<V, C> = LenIndex> {
+    col: &'a mut Column<V, C, K>,
     core: KEdit<V, C, K>,
     /// the column's count of edits when the cursor was opened
     counter: usize,
@@ -82,11 +82,11 @@ pub struct VerifiedEdit<'a, V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C> = 
     changed: bool,
 }
 
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     /// A cursor to edit the column with, standing at its first value.
-    /// See [`VerifiedEdit`].
+    /// See [`Edit`].
     #[inline(always)]
-    pub fn edit(&mut self) -> (e: VerifiedEdit<'_, V, C, K>)
+    pub fn edit(&mut self) -> (e: Edit<'_, V, C, K>)
         ensures
             e.wf(),
             e.orig() == old(self)@,
@@ -101,13 +101,13 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
 
     /// A cursor to edit the column with, standing at the value at `at`
     /// (at the end, where `at` is the column's length), with the values
-    /// before it kept. See [`VerifiedEdit`].
+    /// before it kept. See [`Edit`].
     ///
     /// The cursor's `result()` is the column as it will be when the
     /// borrow of it ends: what `finish` says of that is what is known of
     /// the column afterwards.
     #[inline(always)]
-    pub fn edit_at(&mut self, at: usize) -> (e: VerifiedEdit<'_, V, C, K>)
+    pub fn edit_at(&mut self, at: usize) -> (e: Edit<'_, V, C, K>)
         requires
             at <= old(self)@.len(),
         ensures
@@ -123,7 +123,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Edit<'a, V, C, K> {
     /// The cursor is one a column gave, or one a step of such a cursor
     /// left: every step asks for this and keeps it.
     pub closed spec fn wf(&self) -> bool {
@@ -166,7 +166,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
     /// The column as it will be when the edit is over and its borrow
     /// ends. [`finish`](Self::finish) says what it holds.
     #[verifier::prophetic]
-    pub closed spec fn result(&self) -> VerifiedColumn<V, C, K> {
+    pub closed spec fn result(&self) -> Column<V, C, K> {
         *final(self.col)
     }
 
@@ -322,7 +322,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
     /// times as its count says (`run_values`).
     ///
     /// The specification speaks of the iterator as
-    /// [`splice_runs`](VerifiedColumn::splice_runs)'s does. The cursor
+    /// [`splice_runs`](Column::splice_runs)'s does. The cursor
     /// has changed the column if a value was written.
     #[inline(always)]
     pub fn insert_runs<'v, I: IntoIterator<Item = Run<Get<'v, V>>>>(&mut self, runs: I) -> (r: &mut Self)

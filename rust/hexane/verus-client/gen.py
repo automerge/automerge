@@ -70,8 +70,8 @@ t = t.replace("#[allow(dead_code)]\n", "")
 # another verified crate (an internal error, vir/src/sst_to_air_func.rs).
 # `collect()` is the same call.
 t, n_from_iter = re.subn(
-    r"let (\w+) = VerifiedColumn::<(.+)>::from_iter\((\w+)\);",
-    r"let \1: VerifiedColumn<\2> = \3.into_iter().collect();",
+    r"let (\w+) = Column::<(.+)>::from_iter\((\w+)\);",
+    r"let \1: Column<\2> = \3.into_iter().collect();",
     t,
 )
 assert "from_iter" not in t, "a from_iter call this script does not rewrite"

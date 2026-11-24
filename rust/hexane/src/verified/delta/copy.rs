@@ -1,5 +1,5 @@
-//! Ranges of one [`VerifiedDeltaColumn`] copied into another at several
-//! places in one pass: [`VerifiedDeltaColumn::copy_ranges`].
+//! Ranges of one [`DeltaColumn`] copied into another at several
+//! places in one pass: [`DeltaColumn::copy_ranges`].
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each
@@ -8,12 +8,12 @@
 
 #[cfg(verus_keep_ghost)]
 use super::VDelta;
-use super::{VDeltaValue, VerifiedDeltaColumn};
+use super::{DeltaColumn, DeltaValue};
 #[cfg(verus_keep_ghost)]
 use crate::splices::{applied, in_order, ranges_ascend, splices_do};
 #[cfg(verus_keep_ghost)]
 use crate::verified::after_call;
-use crate::verified::codec::VCodec;
+use crate::verified::codec::Codec;
 use crate::Splice;
 use vstd::prelude::*;
 
@@ -23,9 +23,9 @@ use imp::*;
 
 verus! {
 
-impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// Copy ranges of `src` into the column, at several places in one
-    /// pass, as [`VerifiedColumn::copy_ranges`](crate::verified::VerifiedColumn::copy_ranges)
+    /// pass, as [`Column::copy_ranges`](crate::verified::Column::copy_ranges)
     /// does: the column becomes `applied(self@, src@, splices@)`, and
     /// counts an edit more if a splice deletes a value or copies one
     /// (`splices_do`).

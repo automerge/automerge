@@ -263,7 +263,7 @@ impl<T: VDeltaNum> seal::DeltaValSeal for Option<T> {
 #[verifier::reject_recursive_types(C)]
 pub struct VDeltas<I, C>(PhantomData<(I, C)>);
 
-impl<C: VCodec> DeltaOps<i64> for VDeltas<i64, C> {
+impl<C: Codec> DeltaOps<i64> for VDeltas<i64, C> {
     open spec fn dv(v: i64) -> Option<i64> {
         Some(v)
     }
@@ -274,7 +274,7 @@ impl<C: VCodec> DeltaOps<i64> for VDeltas<i64, C> {
     }
 }
 
-impl<C: VCodec> DeltaOps<Option<i64>> for VDeltas<Option<i64>, C> {
+impl<C: Codec> DeltaOps<Option<i64>> for VDeltas<Option<i64>, C> {
     open spec fn dv(v: Option<i64>) -> Option<i64> {
         v
     }
@@ -285,7 +285,7 @@ impl<C: VCodec> DeltaOps<Option<i64>> for VDeltas<Option<i64>, C> {
     }
 }
 
-impl<'a, C: VCodec> DeltaWrite<'a, RleModel<VWrite<i64, C>>, RleReads<VOps<i64, C>>> for VDeltas<i64, C> {
+impl<'a, C: Codec> DeltaWrite<'a, RleModel<VWrite<i64, C>>, RleReads<VOps<i64, C>>> for VDeltas<i64, C> {
     type Ins = ReadIns<'a, VWrite<i64, C>>;
 
     open spec fn dvo(o: i64) -> Option<i64> {
@@ -310,7 +310,7 @@ impl<'a, C: VCodec> DeltaWrite<'a, RleModel<VWrite<i64, C>>, RleReads<VOps<i64, 
     }
 }
 
-impl<'a, C: VCodec> DeltaWrite<'a, RleModel<VOptWrite<i64, C>>, RleReads<VOptOps<i64, C>>> for VDeltas<
+impl<'a, C: Codec> DeltaWrite<'a, RleModel<VOptWrite<i64, C>>, RleReads<VOptOps<i64, C>>> for VDeltas<
     Option<i64>,
     C,
 > {
@@ -828,9 +828,9 @@ impl<'v> BoundedItems for RunItems<'v> {
 
 /// How a delta column of the type is kept: the column underneath, of
 /// `i64`s or of `Option<i64>`s, and how its values are deltas.
-pub(crate) trait DKind<C: VCodec>: VDelta {
+pub(crate) trait DKind<C: Codec>: VDelta {
     /// What the column underneath holds.
-    type I: VValue<C>;
+    type I: ColumnValueRef<C>;
 
     /// Its values as deltas.
     type B: for <'a>DeltaWrite<'a, <Self::I as seal::Sealed<C>>::E, <Self::I as seal::Sealed<C>>::X>;
@@ -910,7 +910,7 @@ pub(crate) trait DKind<C: VCodec>: VDelta {
     ;
 }
 
-impl<T: VDeltaNum, C: VCodec> DKind<C> for T {
+impl<T: VDeltaNum, C: Codec> DKind<C> for T {
     type I = i64;
 
     type B = VDeltas<i64, C>;
@@ -959,7 +959,7 @@ impl<T: VDeltaNum, C: VCodec> DKind<C> for T {
     }
 }
 
-impl<T: VDeltaNum, C: VCodec> DKind<C> for Option<T> {
+impl<T: VDeltaNum, C: Codec> DKind<C> for Option<T> {
     type I = Option<i64>;
 
     type B = VDeltas<Option<i64>, C>;
@@ -1038,7 +1038,7 @@ pub(crate) proof fn lemma_kept<T: VDelta>(vs: Seq<T>)
     assert(vals::<T>(dvs(vs)) =~= vs);
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// Every value kept is one of the type's.
     #[verifier::type_invariant]
     pub(super) open spec fn inv(&self) -> bool {
@@ -1063,7 +1063,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             assert(rvals::<DE<T, C>, DX<T, C>, <T as DKind<C>>::B>(core@) =~= Seq::empty());
             assert(vals::<T>(Seq::empty()) =~= Seq::<T>::empty());
         }
-        VerifiedDeltaColumn { core }
+        DeltaColumn { core }
     }
 
     pub(super) fn from_values_impl(values: &[T]) -> (r: Self)
@@ -1078,7 +1078,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
         proof {
             lemma_kept(values@);
         }
-        VerifiedDeltaColumn { core }
+        DeltaColumn { core }
     }
 
     pub(super) fn len_impl(&self) -> (n: usize)
@@ -1151,7 +1151,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             assert(k1 == k0.take(at as int) + ds + k0.skip(at + del));
             assert(vals::<T>(k1) =~= vals::<T>(k0).take(at as int) + values@ + vals::<T>(k0).skip(at + del));
         }
-        *self = VerifiedDeltaColumn { core };
+        *self = DeltaColumn { core };
     }
 
     pub(super) fn run_fits_impl(run: &DeltaRun) -> (r: bool)
@@ -1249,7 +1249,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             assert(k1 == k0.take(at as int) + ds + k0.skip(at + del));
             assert(vals::<T>(k1) =~= vals::<T>(k0).take(at as int) + vals::<T>(ds) + vals::<T>(k0).skip(at + del));
         }
-        *self = VerifiedDeltaColumn { core };
+        *self = DeltaColumn { core };
     }
 
     pub(super) fn get_impl(&self, index: usize) -> (r: Option<T>)
@@ -1430,7 +1430,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             assert(rvals::<DE<T, C>, DX<T, C>, <T as DKind<C>>::B>(core@) =~= Seq::empty());
             assert(vals::<T>(Seq::empty()) =~= Seq::<T>::empty());
         }
-        *self = VerifiedDeltaColumn { core };
+        *self = DeltaColumn { core };
     }
 
     pub(super) fn pop_impl(&mut self) -> (r: Option<T>)
@@ -1645,7 +1645,7 @@ pub(super) proof fn lemma_rz_inj(p: int, a: Seq<Option<i64>>, b: Seq<Option<i64>
     }
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     pub(super) proof fn lemma_save_unique_impl(x: Seq<u8>, y: Seq<u8>)
         requires
             Self::valid(x),
@@ -2011,7 +2011,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
                 T::lemma_kind(core@[i], core@[i]);
             }
         }
-        Ok(VerifiedDeltaColumn { core })
+        Ok(DeltaColumn { core })
     }
 
     /// [`load`](Self::load), in slabs of at most `max_segments` runs,
@@ -2049,14 +2049,14 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
                     }
                     assert(vals::<T>(k).len() == core@.len());
                 }
-                Ok(VerifiedDeltaColumn { core })
+                Ok(DeltaColumn { core })
             },
             Err(e) => Err(e),
         }
     }
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     pub(super) fn clone_impl(&self) -> (r: Self)
         ensures
             r@ == self@,
@@ -2065,7 +2065,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
         proof {
             use_type_invariant(self);
         }
-        VerifiedDeltaColumn { core: self.core.duplicate() }
+        DeltaColumn { core: self.core.duplicate() }
     }
 }
 
@@ -2247,11 +2247,11 @@ pub(super) fn vdelta_from_i64_option_t<T: VDeltaNum>(d: Option<i64>) -> (r: Opti
 
 } // verus!
 
-impl<T: VDeltaValue<C>, C: VCodec> std::fmt::Debug for VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> std::fmt::Debug for DeltaColumn<T, C> {
     /// How many values and how many slabs, as `DeltaColumn` prints
     /// itself.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedDeltaColumn")
+        f.debug_struct("DeltaColumn")
             .field("len", &self.core.len())
             .field("slabs", &self.core.slabs().len())
             .finish()

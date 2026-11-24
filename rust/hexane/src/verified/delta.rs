@@ -3,8 +3,8 @@
 //! are deltas (`VDeltas`, in place of the old API's trusted
 //! `delta::indexed::DB`), sources of values that say what they give
 //! (`SliceValues`, `SliceItems`), so that what the verified cores build
-//! from them is known, and the column ([`VerifiedDeltaColumn`]). The
-//! column's iterator ([`VerifiedDeltaIter`]) is in `delta/iter.rs`.
+//! from them is known, and the column ([`DeltaColumn`]). The
+//! column's iterator ([`DeltaIter`]) is in `delta/iter.rs`.
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each
@@ -20,34 +20,34 @@ mod enc;
 mod find;
 mod iter;
 
-pub use dec::VerifiedDeltaDecoder;
+pub use dec::DeltaDecoder;
 #[cfg(verus_keep_ghost)]
 pub use diffs::{
     delta_at, delta_prefix, delta_run_prefix, delta_run_units, delta_runs_at, delta_units,
     delta_units_of_runs, deltas, lemma_delta_run_at, lemma_delta_runs_at,
 };
-pub use edit::VerifiedDeltaEdit;
+pub use edit::DeltaEdit;
 #[cfg(verus_keep_ghost)]
 pub use enc::{delta_iter_fits, delta_near, delta_span_ok};
-pub use enc::{VerifiedDeltaEncoder, VerifiedDeltaEncoderState};
-pub use find::VerifiedFindByRange;
+pub use enc::{DeltaEncoder, DeltaEncoderState};
+pub use find::FindByRange;
 #[cfg(verus_keep_ghost)]
 pub use find::{delta_finds, lemma_delta_finds, lemma_delta_finds_first, lemma_delta_within_one};
-pub use iter::{VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns};
+pub use iter::{DeltaIter, DeltaIterState, DeltaRuns};
 
-use super::codec::VCodec;
+use super::codec::Codec;
 #[cfg(verus_keep_ghost)]
 use super::fill_of;
 use super::model::Model;
 #[cfg(verus_keep_ghost)]
 use super::only;
 use super::seal;
-use super::value::{VOps, VOptOps, VOptWrite, VPack, VWrite};
+use super::value::{RleValue, VOps, VOptOps, VOptWrite, VWrite};
 #[cfg(verus_keep_ghost)]
 use super::VGet;
 #[cfg(verus_keep_ghost)]
 use super::{after_call, after_edit};
-use super::{VSpec, VValue, MAX_SEG};
+use super::{ColumnValueRef, VSpec, MAX_SEG};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{ReadsAgree, Slabs, Visitor, Weigh};
 #[cfg(verus_keep_ghost)]
@@ -95,7 +95,7 @@ verus! {
 /// `usize`. A delta column keeps its values' running sums as `i64`s, so
 /// of the wider types it holds the numbers up to `i64::MAX` only
 /// (`fits`).
-pub trait VDeltaNum: VPack + seal::DeltaSeal {
+pub trait VDeltaNum: RleValue + seal::DeltaSeal {
     /// Whether a delta column can hold the number: always, but for a
     /// `u64` or a `usize` above `i64::MAX`.
     spec fn fits(self) -> bool;
@@ -134,7 +134,7 @@ pub trait VDeltaNum: VPack + seal::DeltaSeal {
             r == self.n64(),
     ;
 
-    /// A number that fits is ordered (`VPack::num`) as the `i64` it is
+    /// A number that fits is ordered (`RleValue::num`) as the `i64` it is
     /// kept as, and one that does not fit comes after all that do.
     #[doc(hidden)]
     proof fn lemma_fit_order(v: Self)
@@ -461,7 +461,7 @@ pub open spec fn dom(d: Option<i64>, least: i64, most: i64, nullable: bool) -> b
 /// `Option` of one, `None` the null.
 pub trait VDelta: VSpec<S = Self> + Copy + seal::DeltaValSeal {
     /// What a load fills a delta column of the type with
-    /// ([`VerifiedDeltaColumn::load_with`]): the difference between
+    /// ([`DeltaColumn::load_with`]): the difference between
     /// each value and the one before it, an `i64`; for a type with a
     /// null an `Option<i64>`, of which none fills with nulls.
     type Fill: Copy;
@@ -893,22 +893,22 @@ pub proof fn lemma_delta_runs_one<T: VDelta>(r: DeltaRun)
 /// A value type of a delta column under codec `C`: a number
 /// ([`VDeltaNum`]) or an `Option` of one.
 #[allow(private_bounds)]
-pub trait VDeltaValue<C: VCodec = Leb128>: DKind<C> {
+pub trait DeltaValue<C: Codec = Leb128>: DKind<C> {
 
 }
 
-impl<T: DKind<C>, C: VCodec> VDeltaValue<C> for T {
+impl<T: DKind<C>, C: Codec> DeltaValue<C> for T {
 
 }
 
 /// A delta column of the verified public API: a column of numbers, or
 /// of `Option`s of them, kept as each one's difference from the one
 /// before it.
-pub struct VerifiedDeltaColumn<T: VDeltaValue<C>, C: VCodec = Leb128> {
+pub struct DeltaColumn<T: DeltaValue<C>, C: Codec = Leb128> {
     core: DCore<T, C>,
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> View for VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> View for DeltaColumn<T, C> {
     type V = Seq<T>;
 
     closed spec fn view(&self) -> Seq<T> {
@@ -928,7 +928,7 @@ pub open spec fn all_dom<T: VDelta>(ds: Seq<Option<i64>>) -> bool {
     forall|i: int| 0 <= i < ds.len() ==> in_dom::<T>(#[trigger] ds[i])
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// What the column keeps: each value as an `i64`, or none for a
     /// null.
     #[doc(hidden)]
@@ -1245,7 +1245,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
 
 // The saved form is the column's underneath, of `i64`s or of
 // `Option<i64>`s: the values' deltas, each value one of the type's.
-impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// What the saved column `d` keeps: each value as an `i64`, or
     /// none for a null.
     #[doc(hidden)]
@@ -1419,7 +1419,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
     }
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> Default for VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> Default for DeltaColumn<T, C> {
     /// An empty column.
     fn default() -> (r: Self)
         ensures
@@ -1429,7 +1429,7 @@ impl<T: VDeltaValue<C>, C: VCodec> Default for VerifiedDeltaColumn<T, C> {
     }
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> Clone for VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> Clone for DeltaColumn<T, C> {
     /// A column of its own with the same values, which counts the edits
     /// this one does.
     #[inline(always)]

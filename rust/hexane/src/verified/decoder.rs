@@ -1,4 +1,4 @@
-//! The decoder of the verified public API ([`VerifiedDecoder`]),
+//! The decoder of the verified public API ([`Decoder`]),
 //! verified with Verus.
 //!
 //! It runs the slab decoders that a column's iterator runs (`rle::dec`,
@@ -17,10 +17,10 @@
 
 use super::model::Model;
 #[cfg(verus_keep_ghost)]
-use super::VerifiedColumn;
+use super::Column;
 #[cfg(verus_keep_ghost)]
 use super::{past, VGet, VSpec};
-use super::{Get, VCodec, VValue};
+use super::{Codec, ColumnValueRef, Get};
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::Decode;
 use crate::iter_core::Decoders;
@@ -76,7 +76,7 @@ pub proof fn lemma_head_len<S>(o: Seq<S>, v: S, n: int, max: int)
     imp::lemma_head_len_impl::<S>(o, v, n, max)
 }
 
-/// What [`VerifiedDecoder::scan_for`] returns for the values `o`, the
+/// What [`Decoder::scan_for`] returns for the values `o`, the
 /// target `t` and the bound `max`: that it passed `skipped` values and
 /// then found `count` of the target.
 ///
@@ -101,7 +101,7 @@ pub open spec fn scan_of<V: VSpec>(o: Seq<V::S>, t: V::S, max: int, skipped: int
     }
 }
 
-/// How many of the values `o` a [`VerifiedDecoder::scan_for`] has moved
+/// How many of the values `o` a [`Decoder::scan_for`] has moved
 /// past that returned `skipped` and `count` for the bound `max`: the
 /// values it passed and the run it found, and, where it found a value
 /// that comes after the target, that value's run too (counted up to
@@ -127,7 +127,7 @@ pub open spec fn scan_taken<S>(o: Seq<S>, max: int, skipped: int, count: int) ->
 /// specifications of the standard library's iterator functions speak of
 /// `remaining()`, which is `items()`. A decoder made of bytes has all
 /// the values to give that the bytes are the saved column of
-/// (`VerifiedColumn::values`), which are the values of the column or
+/// (`Column::values`), which are the values of the column or
 /// the encoder that saved them.
 ///
 /// [`new`](Self::new) stands for the old API's
@@ -137,11 +137,11 @@ pub open spec fn scan_taken<S>(o: Seq<S>, max: int, skipped: int, count: int) ->
 ///
 /// A value that borrows (a byte string or a string) borrows from the
 /// bytes, for `'a`.
-pub struct VerifiedDecoder<'a, V: VValue<C>, C: VCodec = Leb128> {
+pub struct Decoder<'a, V: ColumnValueRef<C>, C: Codec = Leb128> {
     d: <V::X as Decoders<'a>>::D,
 }
 
-impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> Decoder<'a, V, C> {
     /// What the decoder has left to give.
     pub closed spec fn items(&self) -> Seq<Get<'a, V>> {
         self.d.rest()
@@ -172,9 +172,9 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
     #[inline(always)]
     pub fn new(bytes: &'a [u8]) -> (r: Self)
         requires
-            VerifiedColumn::<V, C>::valid(bytes@),
+            Column::<V, C>::valid(bytes@),
         ensures
-            r.rest() == VerifiedColumn::<V, C>::values(bytes@),
+            r.rest() == Column::<V, C>::values(bytes@),
     {
         Self::new_impl(bytes)
     }
@@ -186,10 +186,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
     pub fn try_new(bytes: &'a [u8]) -> (r: Result<Self, PackError>)
         ensures
             r matches Ok(d) ==> {
-                &&& VerifiedColumn::<V, C>::valid(bytes@)
-                &&& d.rest() == VerifiedColumn::<V, C>::values(bytes@)
+                &&& Column::<V, C>::valid(bytes@)
+                &&& d.rest() == Column::<V, C>::values(bytes@)
             },
-            VerifiedColumn::<V, C>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
+            Column::<V, C>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
     {
         Self::try_new_impl(bytes)
     }
@@ -279,7 +279,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, V: VValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for VerifiedDecoder<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> vstd::std_specs::iter::IteratorSpecImpl for Decoder<'a, V, C> {
     /// The decoder keeps to what Verus asks of an iterator: `next` gives
     /// `remaining()`, one value after another, and then `None`.
     open spec fn obeys_prophetic_iter_laws(&self) -> bool {
@@ -307,7 +307,7 @@ impl<'a, V: VValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for Ve
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedDecoder<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> Iterator for Decoder<'a, V, C> {
     type Item = Get<'a, V>;
 
     /// The next value, if one is left.
@@ -351,7 +351,7 @@ impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedDecoder<'a, V, C> {
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> Clone for VerifiedDecoder<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> Clone for Decoder<'a, V, C> {
     /// A decoder of its own with the same values left.
     #[inline(always)]
     fn clone(&self) -> (r: Self)

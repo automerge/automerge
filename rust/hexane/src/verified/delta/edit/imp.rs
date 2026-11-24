@@ -25,7 +25,7 @@ use crate::rle::lift::Lift;
 use crate::rle::model::{RleOps, WriteOps};
 #[cfg(verus_keep_ghost)]
 use crate::verified::after_call;
-use crate::verified::codec::VCodec;
+use crate::verified::codec::Codec;
 use crate::{DeltaRun, Leb128};
 use vstd::prelude::*;
 
@@ -129,9 +129,9 @@ pub(super) fn insert_all<L, O, B>(core: &mut DeltaEditCore<L, O, B>, runs: &[Del
     }
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     #[inline(always)]
-    pub(super) fn edit_impl(&mut self) -> (e: VerifiedDeltaEdit<'_, T, C>)
+    pub(super) fn edit_impl(&mut self) -> (e: DeltaEdit<'_, T, C>)
         ensures
             e.wf(),
             e.orig() == old(self)@,
@@ -148,7 +148,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
         e
     }
 
-    pub(super) fn edit_at_impl(&mut self, at: usize) -> (e: VerifiedDeltaEdit<'_, T, C>)
+    pub(super) fn edit_at_impl(&mut self, at: usize) -> (e: DeltaEdit<'_, T, C>)
         requires
             at <= old(self)@.len(),
         ensures
@@ -181,11 +181,11 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             assert(k0.len() == old(self).core@.len());
             lemma_vals_sub::<T>(k0, 0, at as int);
         }
-        VerifiedDeltaEdit { col: self, held, core, counter, changed: false }
+        DeltaEdit { col: self, held, core, counter, changed: false }
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEdit<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaEdit<'a, T, C> {
     pub(super) proof fn lemma_at_impl(&self)
         requires
             self.wf(),
@@ -517,7 +517,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEdit<'a, T, C> {
             lemma_vals_sub::<T>(o, a, o.len() as int);
             lemma_vals_add::<T>(w, o.skip(a));
         }
-        let VerifiedDeltaEdit { col: column, held: mut slabs, core: mut cursor, counter: before, changed: edit } = self;
+        let DeltaEdit { col: column, held: mut slabs, core: mut cursor, counter: before, changed: edit } = self;
         cursor.end(&mut slabs, T::lo(), T::hi());
         let mut store = T::of_edit(slabs);
         // the shared cursor moves the count as it writes, by a number
@@ -529,7 +529,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEdit<'a, T, C> {
                 before
             },
         );
-        *column = VerifiedDeltaColumn { core: store };
+        *column = DeltaColumn { core: store };
     }
 }
 

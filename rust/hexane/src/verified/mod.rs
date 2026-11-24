@@ -1,6 +1,6 @@
 //! A verified public API for columns.
 //!
-//! [`VerifiedColumn`] is a column whose every operation carries a
+//! [`Column`] is a column whose every operation carries a
 //! specification that [Verus](https://github.com/verus-lang/verus) has
 //! checked, stated in terms of the column's values as a sequence
 //! (`col@`). A client that is itself checked by Verus can so prove what
@@ -17,19 +17,19 @@
 //! `counts`, `bytes`) and all that lies between this API and the core are
 //! verified too.
 //!
-//! [`VerifiedEncoder`] takes values one after another and gives the
+//! [`Encoder`] takes values one after another and gives the
 //! saved column of them, with no column in between.
-//! [`VerifiedEncoderState`] does so into a buffer of its client's,
-//! holding only the run in hand. [`VerifiedDecoder`] gives a saved
+//! [`EncoderState`] does so into a buffer of its client's,
+//! holding only the run in hand. [`Decoder`] gives a saved
 //! column's values one after another from its bytes, with no column in
 //! between either.
 //!
-//! [`VerifiedEdit`] is a cursor that edits a column in one pass from
-//! front to back ([`edit`](VerifiedColumn::edit),
-//! [`edit_at`](VerifiedColumn::edit_at)): it passes over values, puts
+//! [`Edit`] is a cursor that edits a column in one pass from
+//! front to back ([`edit`](Column::edit),
+//! [`edit_at`](Column::edit_at)): it passes over values, puts
 //! values in and takes values out where it stands, and gives the
 //! column its values when it is finished
-//! ([`finish`](VerifiedEdit::finish)), as it must be. It edits a
+//! ([`finish`](Edit::finish)), as it must be. It edits a
 //! column of any kind of index.
 //!
 //! # Reviewing the specification
@@ -73,8 +73,8 @@
 //! * a lemma (`proof fn`) states a fact that a client may use in its
 //!   proofs. It is proved, and so cannot be wrong: it is there to be
 //!   used, and may help to read what is said of a closed function;
-//! * a trait that a client implements (`VPack`, `VNewtype`, `VCodec`,
-//!   `VAmount`, `VGroup`, `VAccum`, `VAdds`, `VShiftable`) says in its
+//! * a trait that a client implements (`RleValue`, `VNewtype`, `Codec`,
+//!   `VAmount`, `VGroup`, `VAccum`, `VAdds`, `Shiftable`) says in its
 //!   methods' contracts what it asks of the client, which Verus proves of
 //!   the client's implementation;
 //! * what is trusted, listed in [What is trusted](#what-is-trusted), is
@@ -87,8 +87,8 @@
 //!
 //! # Value types
 //!
-//! A `VerifiedColumn<V>` holds values of a type `V` that is a
-//! [`VValue`]:
+//! A `Column<V>` holds values of a type `V` that is a
+//! [`ColumnValueRef`]:
 //!
 //! * a number: `u64`, `i64`, `u32`, `i32`, `usize` or `NonZeroU32`;
 //! * `bool`;
@@ -96,7 +96,7 @@
 //!   ([`VNewtype`]). The client says which number each value is, and a
 //!   load refuses bytes that hold a number that is none of its values;
 //! * a client's own type with an encoding of its own, of one to ten
-//!   bytes a value ([`VPack`]): the client writes and reads the bytes,
+//!   bytes a value ([`RleValue`]): the client writes and reads the bytes,
 //!   and proves that they keep the laws a column relies on;
 //! * a byte string: `Vec<u8>`;
 //! * `Option<T>` of a number, a client's type or a byte string `T`:
@@ -140,10 +140,10 @@
 //! client's type is in the order of the numbers it is stored as,
 //! whatever order it may have in Rust.
 //!
-//! The second parameter of `VerifiedColumn<V, C>` is the codec the
-//! column's numbers are written with, a [`VCodec`]. It is [`Leb128`]
+//! The second parameter of `Column<V, C>` is the codec the
+//! column's numbers are written with, a [`Codec`]. It is [`Leb128`]
 //! where none is named. The other of this crate's is `Bijou64`, behind
-//! the feature `bijou64`, and a client may write its own ([`VCodec`]
+//! the feature `bijou64`, and a client may write its own ([`Codec`]
 //! says what it must keep). The modules [`leb128`] and `bijou` give
 //! every column type with its codec named, so that one import picks
 //! the codec. [`ulebsize`] and [`lebsize`] say how many bytes a number
@@ -151,15 +151,15 @@
 //!
 //! # Prefix columns
 //!
-//! A [`VerifiedPrefixColumn`] is a column kept with the sums of its
-//! values: a `VerifiedColumn` whose third parameter, the kind of index
+//! A [`PrefixColumn`] is a column kept with the sums of its
+//! values: a `Column` whose third parameter, the kind of index
 //! it is kept with ([`VIndex`]), is [`SumIndex`], where a plain
 //! column's is [`LenIndex`]. Its values are of a type that is summed
-//! ([`VSummed`]): `u64`, `i64`, `u32` or `NonZeroU32`, or an `Option`
+//! ([`PrefixValue`]): `u64`, `i64`, `u32` or `NonZeroU32`, or an `Option`
 //! of one, whose `None` adds nothing, or `bool`, whose `true` adds
 //! one. The sums are kept in a `u128` for `u64`, an `i128` for `i64`,
 //! a `u64` for `u32` and `NonZeroU32`, and a `usize` for `bool`
-//! ([`VSummed::Sum`]).
+//! ([`PrefixValue::Sum`]).
 //!
 //! Every method of a column is a prefix column's, with the
 //! specification it has of a plain one, and a prefix column saves the
@@ -176,44 +176,44 @@
 //!
 //! A prefix column answers from its sums, without reading the values
 //! they are of: what the values before a position add up to
-//! ([`get_prefix`](VerifiedColumn::get_prefix)), what those through it
-//! do ([`get_total`](VerifiedColumn::get_total)), and what those of a
-//! range do ([`sum_range`](VerifiedColumn::sum_range)). Their
+//! ([`get_prefix`](Column::get_prefix)), what those through it
+//! do ([`get_total`](Column::get_total)), and what those of a
+//! range do ([`sum_range`](Column::sum_range)). Their
 //! specifications say the answer as an integer, `summed` of the values,
 //! which the sum returned is (`VSum::as_int`). Where the sums are never
-//! negative ([`VCount`]: every summed type but `i64` and `Option<i64>`),
+//! negative ([`UnsignedPrefix`]: every summed type but `i64` and `Option<i64>`),
 //! they do not fall from one position to the next, and the column is
 //! searched by sum: for the first position that the values before it
 //! add up to a target
-//! ([`get_index_for_prefix`](VerifiedColumn::get_index_for_prefix)), and
+//! ([`get_index_for_prefix`](Column::get_index_for_prefix)), and
 //! for the first that the values through it do
-//! ([`get_index_for_total`](VerifiedColumn::get_index_for_total)).
+//! ([`get_index_for_total`](Column::get_index_for_total)).
 //!
 //! A prefix column is also read with its sums, value by value:
-//! [`prefix_iter`](VerifiedColumn::prefix_iter) gives a
-//! [`VerifiedPrefixIter`], an iterator that moves as a [`VerifiedIter`]
+//! [`prefix_iter`](Column::prefix_iter) gives a
+//! [`PrefixIter`], an iterator that moves as a [`Iter`]
 //! does and keeps the sum of the values it has passed. What it gives is
-//! each value as a [`VerifiedPrefixedValue`], with what the values
+//! each value as a [`PrefixedValue`], with what the values
 //! through it add up to and what those before it do; a long move
 //! ([`nth`](Iterator::nth), `advance_to`, `shift`) takes the sum of
 //! what it passes over from the index. Its specifications say the
 //! running sum as an integer too: it is `summed` of the column's values
 //! from where the sum counts from (the column's start, or where
-//! [`reset_prefix`](VerifiedPrefixIter::reset_prefix) was called) up to
-//! the iterator. [`get_prefixed`](VerifiedColumn::get_prefixed) is one
+//! [`reset_prefix`](PrefixIter::reset_prefix) was called) up to
+//! the iterator. [`get_prefixed`](Column::get_prefixed) is one
 //! value read so.
 //!
 //! The iterator reads by runs too
-//! ([`next_run`](VerifiedPrefixIter::next_run)), and reads on to a
+//! ([`next_run`](PrefixIter::next_run)), and reads on to a
 //! value it is asked for by count
-//! ([`delta_nth`](VerifiedPrefixIter::delta_nth)) or by sum
-//! ([`advance_prefix`](VerifiedPrefixIter::advance_prefix), the first
+//! ([`delta_nth`](PrefixIter::delta_nth)) or by sum
+//! ([`advance_prefix`](PrefixIter::advance_prefix), the first
 //! value at which what it has passed adds up to more than a number):
-//! what it finds is a [`VerifiedPrefixSeek`], the value with its
+//! what it finds is a [`PrefixSeek`], the value with its
 //! position and with what the values passed over add up to. It is put
-//! away and taken up again as a [`VerifiedPrefixIterState`], which
+//! away and taken up again as a [`PrefixIterState`], which
 //! keeps where the sum counts from; the sum itself is asked of the
-//! column's index on resuming. [`delta`](VerifiedColumn::delta) is the
+//! column's index on resuming. [`delta`](Column::delta) is the
 //! value at a position with the sum of a range before it.
 //!
 //! That a prefix column refuses the saved columns
@@ -223,8 +223,8 @@
 //!
 //! # Accumulator columns
 //!
-//! A [`VerifiedAccColumn`] is a column kept with what its values add up
-//! to in a type its client gives: a `VerifiedColumn` whose kind of
+//! A [`AccColumn`] is a column kept with what its values add up
+//! to in a type its client gives: a `Column` whose kind of
 //! index is [`AccIndex`]. The type is an accumulator ([`VAccum`]), and
 //! its client proves the laws of it ([`VGroup`]): that its addition is
 //! associative, that its zero adds nothing, and that what was added can
@@ -243,15 +243,15 @@
 //! what those of a range do (`sum_range`): each is `accumulated` of
 //! those values, which adds them in the order the column holds them.
 //!
-//! `prefix_iter` of an accumulator column gives a [`VerifiedAccIter`]:
+//! `prefix_iter` of an accumulator column gives a [`AccIter`]:
 //! an iterator that keeps what the values it has passed add up to, and
 //! gives each value with what the values through it add up to and what
-//! those before it do ([`VerifiedAccValue`]). It moves as a
-//! [`VerifiedPrefixIter`] does, but for the search by sum, which an
+//! those before it do ([`AccValue`]). It moves as a
+//! [`PrefixIter`] does, but for the search by sum, which an
 //! accumulator has no order for. A move that finds a value gives it
-//! with what the values passed over add up to ([`VerifiedAccSeek`]),
+//! with what the values passed over add up to ([`AccSeek`]),
 //! and the iterator's place is kept without the borrow of the column
-//! in a [`VerifiedAccIterState`]. An accumulator need not be `Copy`:
+//! in a [`AccIterState`]. An accumulator need not be `Copy`:
 //! what the iterator gives holds a copy of its running sum, made as
 //! the accumulator says one is (`dup`).
 //!
@@ -294,23 +294,23 @@
 //! Of every method, its `ensures`, for every input that meets its
 //! `requires`, for every value type and codec. In particular:
 //!
-//! * [`splice`](VerifiedColumn::splice) leaves the values before `at`,
+//! * [`splice`](Column::splice) leaves the values before `at`,
 //!   the values given, then the values from `at + del`;
-//! * [`splice_iter`](VerifiedColumn::splice_iter) does so with the values
-//!   an iterator gives, and [`splice_runs`](VerifiedColumn::splice_runs)
+//! * [`splice_iter`](Column::splice_iter) does so with the values
+//!   an iterator gives, and [`splice_runs`](Column::splice_runs)
 //!   with runs, each a value and how many times to repeat it (their
 //!   values are `run_values`). `extend` appends what an iterator gives,
 //!   and `collect()` makes a column of it;
-//! * [`from_values`](VerifiedColumn::from_values) gives a column of the
-//!   values of a slice, and [`fill`](VerifiedColumn::fill) one of a value
+//! * [`from_values`](Column::from_values) gives a column of the
+//!   values of a slice, and [`fill`](Column::fill) one of a value
 //!   repeated;
-//! * [`remove_n`](VerifiedColumn::remove_n),
-//!   [`truncate`](VerifiedColumn::truncate) and
-//!   [`clear`](VerifiedColumn::clear) leave the values a `splice` that
+//! * [`remove_n`](Column::remove_n),
+//!   [`truncate`](Column::truncate) and
+//!   [`clear`](Column::clear) leave the values a `splice` that
 //!   deletes the same ones would;
-//! * [`get`](VerifiedColumn::get) and [`to_vec`](VerifiedColumn::to_vec)
+//! * [`get`](Column::get) and [`to_vec`](Column::to_vec)
 //!   give the column's values;
-//! * the [iterator](VerifiedIter) is one of the standard library's
+//! * the [iterator](Iter) is one of the standard library's
 //!   (`Iterator` and `ExactSizeIterator`, and a borrowed column is an
 //!   `IntoIterator`). It has the column's values left to give, or those
 //!   of a range (`rest`), and `next` gives the first of them and leaves
@@ -321,48 +321,48 @@
 //!   `size_hint` the number left, and `fold` what the client's function
 //!   makes of the values in turn (`folded`), as that function's own
 //!   `ensures` says it;
-//! * the iterator says where it stands: [`pos`](VerifiedIter::pos) is
+//! * the iterator says where it stands: [`pos`](Iter::pos) is
 //!   the index in the column of the value it gives next, and
-//!   [`end_pos`](VerifiedIter::end_pos) is where its window ends. What it
+//!   [`end_pos`](Iter::end_pos) is where its window ends. What it
 //!   has left is the values of its column (`column()`) between the two,
 //!   as far as the column goes (`window`), and `next` and `nth` say where
-//!   they leave it. [`set_max`](VerifiedIter::set_max) moves the window's
-//!   end, [`advance_to`](VerifiedIter::advance_to) and
-//!   [`advance_by`](VerifiedIter::advance_by) move the iterator on (what
+//!   they leave it. [`set_max`](Iter::set_max) moves the window's
+//!   end, [`advance_to`](Iter::advance_to) and
+//!   [`advance_by`](Iter::advance_by) move the iterator on (what
 //!   it has left is then `past` what it had),
-//!   [`shift`](VerifiedIter::shift) moves the window to a range ahead,
-//!   and [`shift_next`](VerifiedIter::shift_next) gives the first value
+//!   [`shift`](Iter::shift) moves the window to a range ahead,
+//!   and [`shift_next`](Iter::shift_next) gives the first value
 //!   there;
-//! * [`next_run`](VerifiedIter::next_run) gives the value the iterator
+//! * [`next_run`](Iter::next_run) gives the value the iterator
 //!   gives next and how many times it comes before another value does
 //!   or the iterator has no more (`head_run`), and moves past them all.
-//!   [`runs`](VerifiedIter::runs) makes of the iterator one of such
-//!   runs ([`VerifiedRuns`]). It gives the runs of what the iterator
+//!   [`runs`](Iter::runs) makes of the iterator one of such
+//!   runs ([`Runs`]). It gives the runs of what the iterator
 //!   had left (`runs_of`), which are those values
 //!   (`lemma_runs_of_values`) with no two runs side by side of one
 //!   value, and are what `splice_runs` takes;
-//! * [`suspend`](VerifiedIter::suspend) gives what an iterator needs to
-//!   go on later ([`VerifiedIterState`]), which holds no borrow of the
-//!   column, and [`try_resume`](VerifiedIterState::try_resume) gives an
+//! * [`suspend`](Iter::suspend) gives what an iterator needs to
+//!   go on later ([`IterState`]), which holds no borrow of the
+//!   column, and [`try_resume`](IterState::try_resume) gives an
 //!   iterator from it exactly when the state fits the column it is
 //!   given (`fits`): one that stands where the first stood and has left
 //!   that column's values in the same window. The state of an iterator
 //!   fits the column the iterator reads (`source()`), which no method of
 //!   the iterator changes, and whose values are the iterator's
 //!   (`lemma_source`);
-//! * [`is_only`](VerifiedColumn::is_only) says whether every value of the
-//!   column is the one given (`only`), and [`VValue::same`] whether two
+//! * [`is_only`](Column::is_only) says whether every value of the
+//!   column is the one given (`only`), and [`ColumnValueRef::same`] whether two
 //!   values in a column's form are one value;
-//! * [`scope_to_value`](VerifiedColumn::scope_to_value) finds a value
+//! * [`scope_to_value`](Column::scope_to_value) finds a value
 //!   among values in order (`sorted`): it gives the range of the places
 //!   that hold it, which has the values that come before it on one side
 //!   and those that come after it on the other, and is so the empty
 //!   range at the place where the value would stand where none holds
 //!   it. The values need be in order only as far as the value looked for
 //!   can tell (`sorted_for`). Of values in no order it gives some range
-//!   within the one searched. [`VValue::compare`] says how two values in
+//!   within the one searched. [`ColumnValueRef::compare`] says how two values in
 //!   a column's form stand in the order;
-//! * [`remap`](VerifiedColumn::remap) puts in each place what a function
+//! * [`remap`](Column::remap) puts in each place what a function
 //!   of the client's gave for the value that was there (`mapped`). The
 //!   function is handed a value of the type itself (for a byte string a
 //!   `Vec<u8>` of its own, for a string a `String`) and has to accept
@@ -372,72 +372,72 @@
 //! * `clone` gives a column with the same values. It is a column of its
 //!   own, as Rust's ownership has it: an edit of either says nothing of
 //!   the other, whose values so stay what they were;
-//! * [`save`](VerifiedColumn::save) writes the one encoding of the
+//! * [`save`](Column::save) writes the one encoding of the
 //!   column's values (`encoding`): bytes that are `valid` and hold those
 //!   `values`, and no more of them than the values' `size_bound`. Two
 //!   columns of the same values so save to the same bytes
-//!   (`lemma_save_unique`). [`save_to`](VerifiedColumn::save_to) writes
+//!   (`lemma_save_unique`). [`save_to`](Column::save_to) writes
 //!   that encoding after what a buffer holds, which it keeps, and
-//!   [`save_to_unless`](VerifiedColumn::save_to_unless) writes nothing
+//!   [`save_to_unless`](Column::save_to_unless) writes nothing
 //!   where every value is the one given;
-//! * [`validate_encoding`](VerifiedColumn::validate_encoding) saves the
+//! * [`validate_encoding`](Column::validate_encoding) saves the
 //!   column and reads the bytes through, and returns no error for a
 //!   column that saves to less than 4 GiB: what it looks for at run
 //!   time is proved of `save`;
-//! * [`load`](VerifiedColumn::load) gives a column only for valid bytes,
+//! * [`load`](Column::load) gives a column only for valid bytes,
 //!   and then the column of their values; and it does give one for all
 //!   valid bytes short of 4 GiB that hold values a `usize` can count
 //!   (`loadable`);
-//! * [`load_with`](VerifiedColumn::load_with) is `load` with options
+//! * [`load_with`](Column::load_with) is `load` with options
 //!   ([`LoadOpts`]). Asked for a length, it gives a column only of that
 //!   many values, and does give one for loadable bytes that hold that
 //!   many. Given a fill value too, it makes of no bytes a column of the
 //!   value that many times, for every length a column can have
 //!   (`fill_of` says when); for a longer one it returns an error, since
 //!   no bytes are the saved column of no values (`lemma_no_bytes`);
-//! * [`slab_lens`](VerifiedColumn::slab_lens) gives numbers that add up
+//! * [`slab_lens`](Column::slab_lens) gives numbers that add up
 //!   to the column's length (`sum_of`);
-//! * a [`VerifiedEncoder`] is specified by the values it has been given
+//! * a [`Encoder`] is specified by the values it has been given
 //!   (`enc@`): each `append` adds its value to them, `append_n` adds it
 //!   that many times, and `extend` adds what an iterator gives. Its
-//!   [`save`](VerifiedEncoder::save) writes the `encoding` of them, which
+//!   [`save`](Encoder::save) writes the `encoding` of them, which
 //!   is what a column of those values saves, and
-//!   [`save_to`](VerifiedEncoder::save_to) writes it after what a buffer
+//!   [`save_to`](Encoder::save_to) writes it after what a buffer
 //!   holds. An encoder asks of its client what a column does not: every
 //!   method requires `wf()`, which `new` gives and every method keeps;
-//! * a [`VerifiedEncoderState`] is specified by the values it has been
+//! * a [`EncoderState`] is specified by the values it has been
 //!   given too (`state@`), and writes into a buffer that each call is
-//!   handed. Its [`finish`](VerifiedEncoderState::finish) leaves the
+//!   handed. Its [`finish`](EncoderState::finish) leaves the
 //!   buffer holding what it held before the state wrote to it
 //!   (`before`) and then the `encoding` of the values. What it asks of
 //!   its client is that the buffer be the one it has written to, with
 //!   those bytes as they were left (`on`): every method that takes the
 //!   buffer requires it, a state that was given nothing has it of any
 //!   buffer, and nothing checks it as the program runs. The static
-//!   forms ([`encode`](VerifiedEncoder::encode),
-//!   [`encode_to`](VerifiedEncoder::encode_to),
-//!   [`encode_to_unless`](VerifiedEncoder::encode_to_unless)) give a
+//!   forms ([`encode`](Encoder::encode),
+//!   [`encode_to`](Encoder::encode_to),
+//!   [`encode_to_unless`](Encoder::encode_to_unless)) give a
 //!   state the values of an iterator and finish it;
-//! * a [`VerifiedDecoder`] is specified, as an iterator of a column
+//! * a [`Decoder`] is specified, as an iterator of a column
 //!   is, by what it has left to give (`items()`, and as values
-//!   `rest()`). [`new`](VerifiedDecoder::new) requires that the bytes
+//!   `rest()`). [`new`](Decoder::new) requires that the bytes
 //!   be a saved column (`valid`) and gives a decoder that has its
 //!   `values` left, all of them;
-//!   [`try_new`](VerifiedDecoder::try_new) reads the bytes through
+//!   [`try_new`](Decoder::try_new) reads the bytes through
 //!   first, and gives such a decoder or an error. `next`, `nth` and
-//!   [`advance_by`](VerifiedDecoder::advance_by) are an iterator's.
-//!   [`next_run_max`](VerifiedDecoder::next_run_max) gives the next
+//!   [`advance_by`](Decoder::advance_by) are an iterator's.
+//!   [`next_run_max`](Decoder::next_run_max) gives the next
 //!   run counted up to a bound (`head_run_max`), and
-//!   [`next_run`](VerifiedDecoder::next_run) up to `usize::MAX`;
-//!   [`scan_for`](VerifiedDecoder::scan_for) passes the runs that come
+//!   [`next_run`](Decoder::next_run) up to `usize::MAX`;
+//!   [`scan_for`](Decoder::scan_for) passes the runs that come
 //!   before a target and says how many values those were and how many
 //!   of the target follow (`scan_of`), and how far it has moved
 //!   (`scan_taken`);
-//! * a [`VerifiedEdit`] is specified by the values of the column it
+//! * a [`Edit`] is specified by the values of the column it
 //!   was opened on (`orig()`), where it stands among them (`at()`) and
 //!   the values it has written (`written()`): each step says what it
 //!   adds to those written and how far it goes on, and
-//!   [`finish`](VerifiedEdit::finish) gives the column the values
+//!   [`finish`](Edit::finish) gives the column the values
 //!   written and then the original ones from where the cursor stands
 //!   (`now()`). A cursor asks of its client what an encoder does:
 //!   every method requires `wf()`, which opening it gives and every
@@ -446,7 +446,7 @@
 //!   as a panic in the middle of an edit does.
 //!
 //! `valid`, `values`, `encoding` and `loadable` are specification
-//! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
+//! functions of a column type (`Column::<V>::valid(bytes)`),
 //! `on` and `before` are of a state (`state.on(bytes)`),
 //! `size_bound` is one of a value type (for byte strings it counts their
 //! bytes, as `total_len` of them, and for strings their UTF-8 bytes, as
@@ -461,10 +461,10 @@
 //! `lemma_runs_first`, `lemma_runs_of`, `lemma_runs_of_values`,
 //! `lemma_head_run_max` and `lemma_head_len` are
 //! lemmas, as are `VSpec::lemma_below` (the order is a strict total
-//! order), `VerifiedIter::lemma_items_len`, `VerifiedIter::lemma_rest`,
-//! `VerifiedDecoder::lemma_items_len`,
-//! `VerifiedIter::lemma_source` and
-//! `VerifiedEncoderState::lemma_before`: they exist only for Verus, and
+//! order), `Iter::lemma_items_len`, `Iter::lemma_rest`,
+//! `Decoder::lemma_items_len`,
+//! `Iter::lemma_source` and
+//! `EncoderState::lemma_before`: they exist only for Verus, and
 //! a normal build compiles them away. What options hold is
 //! said by `length()`, `fill()` and `max_segments()` of a [`LoadOpts`],
 //! and what fill value there is by `value()` of its fill state
@@ -488,18 +488,18 @@
 //! saved, and they refuse the same bytes with the same error.
 //!
 //! How a column lies in memory is no part of any specification:
-//! [`slab_count`](VerifiedColumn::slab_count),
-//! [`slab_lens`](VerifiedColumn::slab_lens),
-//! [`slab_segments`](VerifiedColumn::slab_segments) and what
-//! [`dump_slabs`](VerifiedColumn::dump_slabs) and `Debug` print tell of
-//! it, as does an iterator's [`get_slab`](VerifiedIter::get_slab), and
+//! [`slab_count`](Column::slab_count),
+//! [`slab_lens`](Column::slab_lens),
+//! [`slab_segments`](Column::slab_segments) and what
+//! [`dump_slabs`](Column::dump_slabs) and `Debug` print tell of
+//! it, as does an iterator's [`get_slab`](Iter::get_slab), and
 //! promise nothing but that the lengths add up. Nor is how
-//! often [`remap`](VerifiedColumn::remap) calls its function: once for
+//! often [`remap`](Column::remap) calls its function: once for
 //! each run of equal values, as `Column`'s does, which is tested. After
-//! the same edits a `VerifiedColumn` has the slabs of a
+//! the same edits a `Column` has the slabs of a
 //! [`Column`](crate::Column), each as long and of as many runs, and
 //! `dump_slabs` prints the same lines. That is tested too, but for one
-//! case: a column that [`clear`](VerifiedColumn::clear) has emptied has
+//! case: a column that [`clear`](Column::clear) has emptied has
 //! no slab, where `Column` keeps an empty one, until the next edit.
 //!
 //! That an edit of a column ends what was suspended of it is proved. A
@@ -512,7 +512,7 @@
 //! the place of its equal too, and a `remap` is one always. A cursor is
 //! one edit, counted when it is finished, if a step of it deleted a
 //! value or inserted one; a value it replaced with its equal
-//! ([`replace_with`](VerifiedEdit::replace_with)) is none. The count is
+//! ([`replace_with`](Edit::replace_with)) is none. The count is
 //! a `usize` that wraps around, as `Column`'s is: after one edit or
 //! more, and no more of them than `usize::MAX`, it is not what it was
 //! (`lemma_after_edits`), so a state taken before them is refused. The
@@ -570,7 +570,7 @@
 //!   (some `usize::MAX` values, or a slab of 4 GiB) or what the format
 //!   can write (a run of more than `i64::MAX` equal values that are
 //!   neither nulls nor `bool`s, which
-//!   [`splice_runs`](VerifiedColumn::splice_runs) can ask for in one
+//!   [`splice_runs`](Column::splice_runs) can ask for in one
 //!   call), and, like every Rust function, a method of this API may run
 //!   out of memory;
 //! * the constructors of [`PackError`], of which nothing is assumed
@@ -604,7 +604,7 @@
 //! Three functions of a column are not checked, and nothing is specified
 //! of them. They read the column through checked functions that ask
 //! nothing of a caller, and then print or compare: `Debug`;
-//! [`dump_slabs`](VerifiedColumn::dump_slabs), whose printing of what
+//! [`dump_slabs`](Column::dump_slabs), whose printing of what
 //! checked code has read of each slab is not checked; and
 //! `check_invariants`, a tool for tests that these docs leave out, as
 //! [`Column`](crate::Column)'s do. It looks at run time for what is
@@ -614,7 +614,7 @@
 //! and no two neighbours should have been merged), and panics if it
 //! finds otherwise. As `Column`'s, it takes every column as one that
 //! edits have made, and panics for some that were loaded: a load leaves
-//! a short last slab unmerged. `Debug` of a [`VerifiedEncoder`] is not
+//! a short last slab unmerged. `Debug` of a [`Encoder`] is not
 //! checked either: it prints the number that the checked `len` returns.
 //!
 //! That a load returns an error for what a column cannot hold, and does
@@ -625,16 +625,16 @@
 //!
 //! A client's own value type is checked with the client: Verus proves
 //! what [`VNewtype`] asks of it when it is run on the client's crate,
-//! or [`VPack`] of one with an encoding of its own, and so what
+//! or [`RleValue`] of one with an encoding of its own, and so what
 //! [`VAmount`] asks of one that a prefix column adds up, and what
 //! [`VGroup`], [`VAccum`] and [`VAdds`] ask of an accumulator and of the
-//! values added up in it. So too what [`VCodec`] asks of a client's own
-//! codec, and [`VShiftable`] of a client's own repositionable iterator.
+//! values added up in it. So too what [`Codec`] asks of a client's own
+//! codec, and [`Shiftable`] of a client's own repositionable iterator.
 //! A client that is compiled without Verus has that to keep by itself,
 //! as it has every `requires` of this API.
 //!
 //! That a splice returns is proved where it takes a slice:
-//! [`splice`](VerifiedColumn::splice), `from_values`, `insert`, `push`,
+//! [`splice`](Column::splice), `from_values`, `insert`, `push`,
 //! `remove`, `remove_n`, `truncate` and `clear` of every column, every
 //! splice of a delta column (which takes only slices), and
 //! `copy_ranges`. (Verus checks that each loop ends; that a function
@@ -643,13 +643,13 @@
 //! core's loop over the values to insert, which Verus is not asked to
 //! show ends. It ends when the iterator does: with an iterator that
 //! never ends,
-//! [`splice_iter`](VerifiedColumn::splice_iter),
-//! [`splice_runs`](VerifiedColumn::splice_runs), `extend` and `collect()`
+//! [`splice_iter`](Column::splice_iter),
+//! [`splice_runs`](Column::splice_runs), `extend` and `collect()`
 //! do not return (they run until memory is out, or a column's length is
 //! more than it can count, which panics). Nor is it proved that an edit
-//! cursor's [`insert_runs`](VerifiedEdit::insert_runs) returns, or an
-//! encoder's [`extend`](VerifiedEncoder::extend), or a state's
-//! ([`VerifiedEncoderState::extend`]), or a static form that is built on
+//! cursor's [`insert_runs`](Edit::insert_runs) returns, or an
+//! encoder's [`extend`](Encoder::extend), or a state's
+//! ([`EncoderState::extend`]), or a static form that is built on
 //! one: each is a loop over the client's iterator. Every other loop is
 //! proved to end.
 
@@ -702,12 +702,12 @@ pub use crate::splices::{
 pub use crate::window::windows;
 #[cfg(verus_keep_ghost)]
 pub use acc::{accumulated, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_cancel, times};
-pub use acc::{AccIndex, VAccum, VAccumulated, VAdds, VGroup, VerifiedAccColumn};
-pub use acc_iter::{VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue};
+pub use acc::{AccColumn, AccIndex, VAccum, VAccumulated, VAdds, VGroup};
+pub use acc_iter::{AccIter, AccIterState, AccSeek, AccValue};
 #[cfg(verus_keep_ghost)]
 pub use bytes::{below_at, bytes_below, total_len, total_len_opt};
-pub use codec::{lebsize, ulebsize, VCodec};
-pub use decoder::VerifiedDecoder;
+pub use codec::{lebsize, ulebsize, Codec};
+pub use decoder::Decoder;
 #[cfg(verus_keep_ghost)]
 pub use decoder::{
     head_len, head_run_max, lemma_head_len, lemma_head_run_max, scan_of, scan_taken,
@@ -723,30 +723,27 @@ pub use delta::{
     lemma_delta_runs_push, lemma_delta_within_one, vals,
 };
 pub use delta::{
-    VDelta, VDeltaNum, VDeltaValue, VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEdit,
-    VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState,
-    VerifiedDeltaRuns, VerifiedFindByRange,
+    DeltaColumn, DeltaDecoder, DeltaEdit, DeltaEncoder, DeltaEncoderState, DeltaIter,
+    DeltaIterState, DeltaRuns, DeltaValue, FindByRange, VDelta, VDeltaNum,
 };
-pub use edit::VerifiedEdit;
-pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
+pub use edit::Edit;
+pub use encoder::{Encoder, EncoderState};
 pub use kind::{LenBitIndex, LenIndex, VIndex, VKeeps};
-pub use load::VerifiedLoadIter;
-pub use prefix::{SumIndex, VerifiedPrefixColumn};
-pub use prefix_iter::{
-    VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
-};
+pub use load::ColumnLoadIter;
+pub use prefix::{PrefixColumn, SumIndex};
+pub use prefix_iter::{PrefixIter, PrefixIterState, PrefixSeek, PrefixedValue};
 #[cfg(verus_keep_ghost)]
 pub use shift::{lemma_singles, lemma_svs_windows, run_units, unit_runs, units_of_runs};
-pub use shift::{VShiftable, VerifiedRanges, VerifiedUnshift};
+pub use shift::{Ranges, Shiftable, Unshift};
 #[cfg(verus_keep_ghost)]
 pub use sums::{
     lemma_sum_bound, lemma_sum_cat, lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit,
     lemma_sums_fit_take, lemma_sums_fit_unsigned, summed, sums_fit, u32_room,
 };
-pub use sums::{VAmount, VCount, VSum, VSummed};
+pub use sums::{PrefixValue, UnsignedPrefix, VAmount, VSum};
 #[cfg(verus_keep_ghost)]
 pub use text::{total_str_len, total_str_len_opt};
-pub use value::{refused, VNewtype, VPack};
+pub use value::{refused, RleValue, VNewtype};
 
 #[cfg(verus_keep_ghost)]
 use crate::bool_edit::BoolModel;
@@ -902,7 +899,7 @@ pub trait VGet: Copy + seal::GetSeal {
     ;
 }
 
-impl<T: VPack> VGet for T {
+impl<T: RleValue> VGet for T {
     type S = T;
 
     open spec fn sv(self) -> T {
@@ -920,7 +917,7 @@ impl<T: VPack> VGet for T {
     }
 }
 
-impl<T: VPack> VGet for Option<T> {
+impl<T: RleValue> VGet for Option<T> {
     type S = Option<T>;
 
     open spec fn sv(self) -> Option<T> {
@@ -957,7 +954,7 @@ impl VGet for bool {
 }
 
 /// A type of values, and what a value of it is in a specification.
-/// Every [`VValue`] is one, and no other type: the trait cannot be
+/// Every [`ColumnValueRef`] is one, and no other type: the trait cannot be
 /// implemented outside this crate.
 pub trait VSpec: Sized + seal::SpecSeal {
     /// What a value is in a specification: for a number, the number,
@@ -974,7 +971,7 @@ pub trait VSpec: Sized + seal::SpecSeal {
     /// Whether `a` comes before `b` in the order of the type's values.
     /// Numbers are in the order of numbers, and a type stored as a
     /// number ([`VNewtype`]) in the order of the numbers it is stored as
-    /// ([`VPack::num`]); `false` comes before `true`; byte strings are
+    /// ([`RleValue::num`]); `false` comes before `true`; byte strings are
     /// in the order of slices ([`bytes_below`]: byte by byte, and a
     /// byte string before every longer one that starts with it);
     /// strings are in that order of their UTF-8 bytes (`bytes_below` of
@@ -1009,7 +1006,7 @@ pub trait VForm<'a>: VSpec {
 /// string.
 pub type Get<'a, V> = <V as VForm<'a>>::Get;
 
-impl<T: VPack> VSpec for T {
+impl<T: RleValue> VSpec for T {
     type S = T;
 
     open spec fn sv_of(v: T) -> T {
@@ -1025,11 +1022,11 @@ impl<T: VPack> VSpec for T {
     }
 }
 
-impl<'a, T: VPack> VForm<'a> for T {
+impl<'a, T: RleValue> VForm<'a> for T {
     type Get = T;
 }
 
-impl<T: VPack> VSpec for Option<T> {
+impl<T: RleValue> VSpec for Option<T> {
     type S = Option<T>;
 
     open spec fn sv_of(v: Option<T>) -> Option<T> {
@@ -1049,7 +1046,7 @@ impl<T: VPack> VSpec for Option<T> {
     }
 }
 
-impl<'a, T: VPack> VForm<'a> for Option<T> {
+impl<'a, T: RleValue> VForm<'a> for Option<T> {
     type Get = Option<T>;
 }
 
@@ -1082,28 +1079,28 @@ pub closed spec fn own_kept<'a, V: seal::Sealed<C>, C>(v: Get<'a, V>) -> bool {
 // ── The saved form ──────────────────────────────────────────────────────────
 
 /// `d` is a saved column of `V` under codec `C`
-/// ([`VerifiedColumn::valid`]).
+/// ([`Column::valid`]).
 #[doc(hidden)]
 pub closed spec fn saved<V: seal::Sealed<C>, C>(d: Seq<u8>) -> bool {
     <V::E as Model<V::X>>::valid(d)
 }
 
-/// The values of the saved column `d` ([`VerifiedColumn::values`]).
+/// The values of the saved column `d` ([`Column::values`]).
 #[doc(hidden)]
 pub closed spec fn saved_values<V: seal::Sealed<C>, C>(d: Seq<u8>) -> Seq<<V as VSpec>::S> {
     <Held<V, C> as VGet>::svs(<V::E as Model<V::X>>::values(d))
 }
 
-/// A value type a [`VerifiedColumn`] can hold, its numbers written with
+/// A value type a [`Column`] can hold, its numbers written with
 /// codec `C`.
 ///
 /// These are `u64`, `i64`, `u32`, `i32`, `usize`, `NonZeroU32`, every
 /// type that says which of them it is stored as ([`VNewtype`]) and every
-/// type with an encoding of its own ([`VPack`]); byte strings
+/// type with an encoding of its own ([`RleValue`]); byte strings
 /// (`Vec<u8>`); an `Option` of any of those, whose `None` is a column's
 /// null; strings (`String`, and `Option<String>`); and `bool`.
 #[allow(private_bounds)]
-pub trait VValue<C: VCodec = Leb128>: seal::Sealed<C> + Owned<C> {
+pub trait ColumnValueRef<C: Codec = Leb128>: seal::Sealed<C> + Owned<C> {
     /// No column of the values `vs` saves to more bytes than this.
     spec fn size_bound(vs: Seq<Self::S>) -> nat;
 
@@ -1143,7 +1140,7 @@ pub trait VValue<C: VCodec = Leb128>: seal::Sealed<C> + Owned<C> {
     ;
 }
 
-impl<T: VPack, C: VCodec> VValue<C> for T {
+impl<T: RleValue, C: Codec> ColumnValueRef<C> for T {
     /// Ten bytes a value, and a header and a count of ten bytes each.
     open spec fn size_bound(vs: Seq<T>) -> nat {
         30 * vs.len()
@@ -1158,7 +1155,7 @@ impl<T: VPack, C: VCodec> VValue<C> for T {
 
     #[inline(always)]
     fn same<'a, 'b>(a: T, b: T) -> (r: bool) {
-        <T as VPack>::same(&a, &b)
+        <T as RleValue>::same(&a, &b)
     }
 
     #[inline(always)]
@@ -1167,7 +1164,7 @@ impl<T: VPack, C: VCodec> VValue<C> for T {
     }
 }
 
-impl<T: VPack, C: VCodec> VValue<C> for Option<T> {
+impl<T: RleValue, C: Codec> ColumnValueRef<C> for Option<T> {
     /// Ten bytes a value, and a header and a count of ten bytes each.
     open spec fn size_bound(vs: Seq<Option<T>>) -> nat {
         30 * vs.len()
@@ -1191,7 +1188,7 @@ impl<T: VPack, C: VCodec> VValue<C> for Option<T> {
     }
 }
 
-impl<C: VCodec> VValue<C> for bool {
+impl<C: Codec> ColumnValueRef<C> for bool {
     /// Ten bytes a run, which is at least one value but for the first.
     open spec fn size_bound(vs: Seq<bool>) -> nat {
         10 * vs.len() + 10
@@ -1288,7 +1285,7 @@ pub open spec fn sorted<V: VSpec>(vs: Seq<V::S>) -> bool {
 /// The values `vs` are in order as far as the value `t` can tell: those
 /// that come before `t` are first in `vs`, and those that come after
 /// `t` last. What a search for `t` needs
-/// ([`VerifiedColumn::scope_to_value`]), and what values in order
+/// ([`Column::scope_to_value`]), and what values in order
 /// ([`sorted`]) are for every `t` ([`lemma_sorted`]).
 pub open spec fn sorted_for<V: VSpec>(vs: Seq<V::S>, t: V::S) -> bool {
     forall|i: int, j: int|
@@ -1309,7 +1306,7 @@ pub proof fn lemma_sorted<V: VSpec>(vs: Seq<V::S>, t: V::S)
 }
 
 /// The function `f` gave, for a value that is `a` in a specification,
-/// one that is `b` ([`VerifiedColumn::remap`]): there are values `v` and
+/// one that is `b` ([`Column::remap`]): there are values `v` and
 /// `w` of the type, `a` and `b` in a specification (`VSpec::sv_of`),
 /// such that `f`'s `ensures` holds of the call `f(v)` and its result
 /// `w`.
@@ -1329,7 +1326,7 @@ pub open spec fn sum_of(lens: Seq<usize>) -> nat
     }
 }
 
-/// What a column counts of edits (`VerifiedColumn::edits`) after one
+/// What a column counts of edits (`Column::edits`) after one
 /// more, where it counted `n`: one more, and 0 after the greatest number
 /// a `usize` holds, for the count wraps around.
 pub open spec fn after_edit(n: usize) -> usize {
@@ -1367,7 +1364,7 @@ pub open spec fn after_edits(n: usize, k: nat) -> usize
 /// column counts `k` more than it did, less `usize::MAX + 1` where that
 /// is more than a `usize` holds. So after one edit or more it does not
 /// count what it did: a state taken before them is refused
-/// (`VerifiedIterState::lemma_fits`).
+/// (`IterState::lemma_fits`).
 pub proof fn lemma_after_edits(n: usize, k: nat)
     requires
         k <= usize::MAX,
@@ -1388,19 +1385,19 @@ pub proof fn lemma_after_edits(n: usize, k: nat)
 ///
 /// The third parameter is the kind of index the column is kept with
 /// ([`VIndex`]). A plain column's is [`LenIndex`], which need not be
-/// written: `VerifiedColumn<V>` and `VerifiedColumn<V, C>` are plain
+/// written: `Column<V>` and `Column<V, C>` are plain
 /// columns. Every method is of every kind's, the constructors and the
-/// loads too: `VerifiedColumn::<V>::new()` is a plain column, and where
-/// the type is known otherwise, `VerifiedColumn::new()` is of the kind
+/// loads too: `Column::<V>::new()` is a plain column, and where
+/// the type is known otherwise, `Column::new()` is of the kind
 /// it says. A column kept with a [`SumIndex`] is a prefix column
-/// ([`VerifiedPrefixColumn`]); one kept with a [`LenBitIndex`] is a
+/// ([`PrefixColumn`]); one kept with a [`LenBitIndex`] is a
 /// plain column whose index is a Fenwick tree, as the old API's
 /// `Column<V, C, LenWeight, BitIndex<usize>>`.
-pub struct VerifiedColumn<V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C> = LenIndex> {
+pub struct Column<V: ColumnValueRef<C>, C: Codec = Leb128, K: VIndex<V, C> = LenIndex> {
     core: KCore<V, C, K>,
 }
 
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> View for VerifiedColumn<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> View for Column<V, C, K> {
     type V = Seq<V::S>;
 
     closed spec fn view(&self) -> Seq<V::S> {
@@ -1408,7 +1405,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> View for VerifiedColumn<V, C, K> 
     }
 }
 
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> Default for VerifiedColumn<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Default for Column<V, C, K> {
     /// An empty column.
     fn default() -> (r: Self)
         ensures
@@ -1418,7 +1415,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> Default for VerifiedColumn<V, C, 
     }
 }
 
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> Clone for VerifiedColumn<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Clone for Column<V, C, K> {
     /// A column of its own with the same values, which counts the edits
     /// this one does.
     fn clone(&self) -> (r: Self)
@@ -1426,14 +1423,14 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> Clone for VerifiedColumn<V, C, K>
             r@ == self@,
             r.edits() == self.edits(),
     {
-        VerifiedColumn { core: self.core.duplicate() }
+        Column { core: self.core.duplicate() }
     }
 }
 
 
-impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Extend<Get<'v, V>> for VerifiedColumn<V, C, K> {
+impl<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Extend<Get<'v, V>> for Column<V, C, K> {
     /// Append the values that `iter` gives: what
-    /// [`splice_iter`](VerifiedColumn::splice_iter) does at the column's
+    /// [`splice_iter`](Column::splice_iter) does at the column's
     /// end, and specified as that is. The column counts an edit more if
     /// it is the longer for it.
     #[inline(always)]
@@ -1447,7 +1444,7 @@ impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Extend<Get<'v, V>> for Verifi
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> FromIteratorSpecImpl<Get<'v, V>> for VerifiedColumn<V, C, K> {
+impl<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> FromIteratorSpecImpl<Get<'v, V>> for Column<V, C, K> {
     /// A column collected from an iterator holds the values that the
     /// iterator was to give.
     open spec fn from_iter_ensures(remaining: Seq<Get<'v, V>>, will_return_none: bool, s: Self) -> bool {
@@ -1455,7 +1452,7 @@ impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> FromIteratorSpecImpl<Get<'v, 
     }
 }
 
-impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> FromIterator<Get<'v, V>> for VerifiedColumn<V, C, K> {
+impl<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> FromIterator<Get<'v, V>> for Column<V, C, K> {
     /// A column of the values that `iter` gives, which is what
     /// `collect()` returns. Verus's specification of `FromIterator`
     /// states it for an iterator that keeps to what Verus asks of every
@@ -1468,8 +1465,8 @@ impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> FromIterator<Get<'v, V>> for 
 }
 
 // The saved form. It is the same for every kind of index, and is
-// spoken of as a plain column's: `VerifiedColumn::<V, C>::valid(d)`.
-impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
+// spoken of as a plain column's: `Column::<V, C>::valid(d)`.
+impl<V: ColumnValueRef<C>, C: Codec> Column<V, C> {
     /// `d` is a saved column: the canonical encoding of some values.
     pub closed spec fn valid(d: Seq<u8>) -> bool {
         saved::<V, C>(d)
@@ -1485,7 +1482,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         choose|d: Seq<u8>| Self::valid(d) && Self::values(d) == vs
     }
 
-    /// A saved column that [`load`](VerifiedColumn::load) is sure to
+    /// A saved column that [`load`](Column::load) is sure to
     /// take: its bytes are short of 4 GiB by a header's length, and a
     /// `usize` can count its values with three to spare.
     pub open spec fn loadable(d: Seq<u8>) -> bool {
@@ -1527,7 +1524,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
 }
 
 // The constructors.
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     /// An empty column.
     #[inline(always)]
     pub fn new() -> (r: Self)
@@ -1587,7 +1584,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     }
 }
 
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     /// The number of values.
     #[inline(always)]
     pub fn len(&self) -> (r: usize)
@@ -1607,7 +1604,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     }
 
     /// The count of the column's edits, which a suspended iterator's
-    /// state keeps and [`VerifiedIterState::try_resume`] compares. Each
+    /// state keeps and [`IterState::try_resume`] compares. Each
     /// method that changes the column says what it is after the call:
     /// one more (`after_edit`) where the call was an edit, and what it
     /// was where the call was none.
@@ -1875,7 +1872,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
 
     /// An iterator over the values.
     #[inline(always)]
-    pub fn iter(&self) -> (it: VerifiedIter<'_, V, C, K>)
+    pub fn iter(&self) -> (it: Iter<'_, V, C, K>)
         ensures
             it.rest() == self@,
             it.column() == self@,
@@ -1888,7 +1885,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
 
     /// An iterator over the values `start..end`.
     #[inline(always)]
-    pub fn iter_range(&self, start: usize, end: usize) -> (it: VerifiedIter<'_, V, C, K>)
+    pub fn iter_range(&self, start: usize, end: usize) -> (it: Iter<'_, V, C, K>)
         requires
             start <= end <= self@.len(),
         ensures
@@ -1905,9 +1902,9 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     #[inline(always)]
     pub fn save(&self) -> (r: Vec<u8>)
         ensures
-            VerifiedColumn::<V, C>::valid(r@),
-            VerifiedColumn::<V, C>::values(r@) == self@,
-            r@ == VerifiedColumn::<V, C>::encoding(self@),
+            Column::<V, C>::valid(r@),
+            Column::<V, C>::values(r@) == self@,
+            r@ == Column::<V, C>::encoding(self@),
             r@.len() <= V::size_bound(self@),
     {
         self.save_impl()
@@ -1919,10 +1916,10 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     #[inline(always)]
     pub fn save_to(&self, out: &mut Vec<u8>) -> (r: Range<usize>)
         ensures
-            final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(self@),
-            VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(self@)),
-            VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(self@)) == self@,
-            VerifiedColumn::<V, C>::encoding(self@).len() <= V::size_bound(self@),
+            final(out)@ == old(out)@ + Column::<V, C>::encoding(self@),
+            Column::<V, C>::valid(Column::<V, C>::encoding(self@)),
+            Column::<V, C>::values(Column::<V, C>::encoding(self@)) == self@,
+            Column::<V, C>::encoding(self@).len() <= V::size_bound(self@),
             r.start == old(out)@.len(),
             r.end == final(out)@.len(),
     {
@@ -1938,12 +1935,12 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             final(out)@ == if only(self@, value.sv()) {
                 old(out)@
             } else {
-                old(out)@ + VerifiedColumn::<V, C>::encoding(self@)
+                old(out)@ + Column::<V, C>::encoding(self@)
             },
             !only(self@, value.sv()) ==> {
-                &&& VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(self@))
-                &&& VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(self@)) == self@
-                &&& VerifiedColumn::<V, C>::encoding(self@).len() <= V::size_bound(self@)
+                &&& Column::<V, C>::valid(Column::<V, C>::encoding(self@))
+                &&& Column::<V, C>::values(Column::<V, C>::encoding(self@)) == self@
+                &&& Column::<V, C>::encoding(self@).len() <= V::size_bound(self@)
             },
             r.start == old(out)@.len(),
             r.end == final(out)@.len(),
@@ -1962,7 +1959,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     #[inline(always)]
     pub fn validate_encoding(&self) -> (r: Result<(), PackError>)
         ensures
-            VerifiedColumn::<V, C>::encoding(self@).len() <= u32::MAX ==> r is Ok,
+            Column::<V, C>::encoding(self@).len() <= u32::MAX ==> r is Ok,
             V::size_bound(self@) <= u32::MAX ==> r is Ok,
     {
         self.validate_encoding_impl()
@@ -1971,7 +1968,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
 
 // The loads. What is saved is spoken of as a plain column's, whatever
 // the kind of the column loaded.
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     /// The column saved as `bytes`. An error unless `bytes` is a saved
     /// column; and no error for one that is `loadable` and whose values
     /// the column's kind of index is kept for (`VKeeps::keeps`: for a
@@ -1979,8 +1976,8 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     #[inline(always)]
     pub fn load(bytes: &[u8]) -> (r: Result<Self, PackError>)
         ensures
-            VerifiedColumn::<V, C>::loadable(bytes@) && K::keeps(VerifiedColumn::<V, C>::values(bytes@)) ==> r is Ok,
-            r matches Ok(c) ==> VerifiedColumn::<V, C>::valid(bytes@) && c@ == VerifiedColumn::<V, C>::values(bytes@),
+            Column::<V, C>::loadable(bytes@) && K::keeps(Column::<V, C>::values(bytes@)) ==> r is Ok,
+            r matches Ok(c) ==> Column::<V, C>::valid(bytes@) && c@ == Column::<V, C>::values(bytes@),
     {
         Self::load_impl(bytes)
     }
@@ -2009,12 +2006,12 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
                 Some((len, v)) => r matches Ok(c) && c@ == Seq::new(len as nat, |_i: int| v.sv()),
                 None => {
                     &&& r matches Ok(c) ==> {
-                        &&& VerifiedColumn::<V, C>::valid(bytes@)
-                        &&& c@ == VerifiedColumn::<V, C>::values(bytes@)
+                        &&& Column::<V, C>::valid(bytes@)
+                        &&& c@ == Column::<V, C>::values(bytes@)
                         &&& opts.length() matches Some(len) ==> c@.len() == len
                     }
-                    &&& VerifiedColumn::<V, C>::loadable(bytes@) && K::keeps(VerifiedColumn::<V, C>::values(bytes@))
-                        && (opts.length() matches Some(len) ==> VerifiedColumn::<V, C>::values(bytes@).len() == len)
+                    &&& Column::<V, C>::loadable(bytes@) && K::keeps(Column::<V, C>::values(bytes@))
+                        && (opts.length() matches Some(len) ==> Column::<V, C>::values(bytes@).len() == len)
                         ==> r is Ok
                 },
             },
@@ -2101,20 +2098,20 @@ pub proof fn lemma_runs_of_values<G: VGet>(o: Seq<G>)
 }
 
 /// An iterator over a column's values, which
-/// [`VerifiedColumn::iter`] and [`VerifiedColumn::iter_range`] give.
+/// [`Column::iter`] and [`Column::iter_range`] give.
 ///
 /// It is a `std::iter::Iterator`. What it has left to give is in a
 /// specification `items()`, and as values `rest()`. Verus's
 /// specifications of the standard library's iterator functions speak of
 /// `remaining()`, which is `items()`.
-pub struct VerifiedIter<'a, V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C> = LenIndex> {
+pub struct Iter<'a, V: ColumnValueRef<C>, C: Codec = Leb128, K: VIndex<V, C> = LenIndex> {
     it: ICore<<V::X as Decoders<'a>>::D>,
     slabs: &'a [Slab<<V::E as Slabs>::Tail>],
     /// The column the slabs are of; a default iterator has none.
     col: Option<&'a KCore<V, C, K>>,
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
     /// What the iterator has left to give.
     pub closed spec fn items(&self) -> Seq<Get<'a, V>> {
         self.it.out::<V::X>(self.slabs@)
@@ -2134,9 +2131,9 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     /// The column the iterator reads, as it was when the iterator was
     /// made of it; a default iterator reads none. No method of the
     /// iterator changes it.
-    pub closed spec fn source(&self) -> Option<VerifiedColumn<V, C, K>> {
+    pub closed spec fn source(&self) -> Option<Column<V, C, K>> {
         match self.col {
-            Some(c) => Some(VerifiedColumn { core: *c }),
+            Some(c) => Some(Column { core: *c }),
             None => None,
         }
     }
@@ -2228,13 +2225,13 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
 
     /// Where the iterator stands and where its window ends, to keep
     /// without the borrow of the column:
-    /// [`VerifiedIterState::try_resume`] gives an iterator from it.
+    /// [`IterState::try_resume`] gives an iterator from it.
     ///
     /// The state fits the column the iterator reads: resumed on that
     /// column, as it is, it gives an iterator that stands where this one
     /// does and has the same values left.
     #[inline(always)]
-    pub fn suspend(&self) -> (s: VerifiedIterState)
+    pub fn suspend(&self) -> (s: IterState)
         ensures
             s.pos() == self.pos(),
             s.end_pos() == self.end_pos(),
@@ -2436,9 +2433,9 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
 
     /// An iterator of the runs the iterator has left to give
     /// ([`next_run`](Self::next_run)): what
-    /// [`splice_runs`](VerifiedColumn::splice_runs) takes.
+    /// [`splice_runs`](Column::splice_runs) takes.
     #[inline(always)]
-    pub fn runs(self) -> (r: VerifiedRuns<'a, V, C, K>)
+    pub fn runs(self) -> (r: Runs<'a, V, C, K>)
         ensures
             r.iter() == self,
     {
@@ -2496,7 +2493,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     /// iterator has left.
     ///
     /// Few of the values are looked at
-    /// ([`scope_to_value`](VerifiedColumn::scope_to_value)). They need be
+    /// ([`scope_to_value`](Column::scope_to_value)). They need be
     /// in order only as far as `target` can tell (`sorted_for`); where
     /// they are not, the range is some range of the places searched.
     #[inline(always)]
@@ -2537,7 +2534,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> vstd::std_specs::iter::IteratorSpecImpl for VerifiedIter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> vstd::std_specs::iter::IteratorSpecImpl for Iter<'a, V, C, K> {
     /// The iterator keeps to what Verus asks of an iterator: `next` gives
     /// `remaining()`, one value after another, and then `None`.
     open spec fn obeys_prophetic_iter_laws(&self) -> bool {
@@ -2565,7 +2562,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> vstd::std_specs::iter::Iterat
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Iterator for VerifiedIter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iterator for Iter<'a, V, C, K> {
     type Item = Get<'a, V>;
 
     /// The next value, if one is left.
@@ -2653,13 +2650,13 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Iterator for VerifiedIter<'a,
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> vstd::std_specs::iter::ExactSizeIteratorSpecImpl for VerifiedIter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> vstd::std_specs::iter::ExactSizeIteratorSpecImpl for Iter<'a, V, C, K> {
     open spec fn exact_len(&self) -> usize {
         self.items().len() as usize
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> ExactSizeIterator for VerifiedIter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> ExactSizeIterator for Iter<'a, V, C, K> {
     /// How many values are left.
     #[inline]
     fn len(&self) -> (len: usize)
@@ -2671,7 +2668,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> ExactSizeIterator for Verifie
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Clone for VerifiedIter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Clone for Iter<'a, V, C, K> {
     /// An iterator of its own with the same values left.
     #[inline(always)]
     fn clone(&self) -> (r: Self)
@@ -2686,7 +2683,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Clone for VerifiedIter<'a, V,
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Default for VerifiedIter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Default for Iter<'a, V, C, K> {
     /// An iterator with nothing to give.
     #[inline(always)]
     fn default() -> (r: Self)
@@ -2702,14 +2699,14 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Default for VerifiedIter<'a, 
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> IntoIterator for &'a VerifiedColumn<V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> IntoIterator for &'a Column<V, C, K> {
     type Item = Get<'a, V>;
 
-    type IntoIter = VerifiedIter<'a, V, C, K>;
+    type IntoIter = Iter<'a, V, C, K>;
 
-    /// An iterator over the values ([`VerifiedColumn::iter`]).
+    /// An iterator over the values ([`Column::iter`]).
     #[inline(always)]
-    fn into_iter(self) -> (it: VerifiedIter<'a, V, C, K>)
+    fn into_iter(self) -> (it: Iter<'a, V, C, K>)
         ensures
             it.rest() == self@,
             it.column() == self@,
@@ -2722,14 +2719,14 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> IntoIterator for &'a Verified
 }
 
 
-/// Where a [`VerifiedIter`] stood and where its window ended, kept
-/// without the borrow of the column: [`VerifiedIter::suspend`] gives it,
+/// Where a [`Iter`] stood and where its window ended, kept
+/// without the borrow of the column: [`Iter::suspend`] gives it,
 /// and [`try_resume`](Self::try_resume) an iterator from it.
 ///
 /// It holds the iterator's place in the column's slabs, and how many
 /// slabs and edits the column counted then. It is of no value type: a
 /// state fits any column whose slabs it is a place in.
-pub struct VerifiedIterState {
+pub struct IterState {
     counter: usize,
     num_slabs: usize,
     slab_idx: usize,
@@ -2739,7 +2736,7 @@ pub struct VerifiedIterState {
     slab_consumed: usize,
 }
 
-impl VerifiedIterState {
+impl IterState {
     /// Where the iterator stood: its `pos()`.
     pub closed spec fn pos(&self) -> usize {
         self.pos
@@ -2751,7 +2748,7 @@ impl VerifiedIterState {
     }
 
     /// The count of edits of the column the state was taken of
-    /// (`VerifiedColumn::edits`).
+    /// (`Column::edits`).
     pub closed spec fn edits(&self) -> usize {
         self.counter
     }
@@ -2760,7 +2757,7 @@ impl VerifiedIterState {
     /// edits and the slabs that the state does, the state's place is one
     /// in those slabs, and it is in the column or at its end.
     /// [`try_resume`](Self::try_resume) gives an iterator exactly then.
-    pub closed spec fn fits<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(&self, column: &VerifiedColumn<V, C, K>) -> bool {
+    pub closed spec fn fits<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(&self, column: &Column<V, C, K>) -> bool {
         let lens = slab_lens(column.core.slabs_spec());
         &&& self.counter == column.core.count()
         &&& self.num_slabs == lens.len()
@@ -2772,7 +2769,7 @@ impl VerifiedIterState {
     /// column that has been edited since counts others
     /// (`lemma_after_edits`), so the state does not fit it, and
     /// [`try_resume`](Self::try_resume) refuses it.
-    pub proof fn lemma_fits<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(&self, column: &VerifiedColumn<V, C, K>)
+    pub proof fn lemma_fits<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(&self, column: &Column<V, C, K>)
         requires
             self.fits(column),
         ensures
@@ -2786,13 +2783,13 @@ impl VerifiedIterState {
     /// ([`PackError::InvalidResume`]) if it does not.
     ///
     /// A state fits the column it was taken of, as long as that is not
-    /// edited ([`VerifiedIter::suspend`]). The iterator given is one of
+    /// edited ([`Iter::suspend`]). The iterator given is one of
     /// `column` whatever column the state was taken of: it gives the
     /// values of `column` in the state's window. Where the state stands
     /// at the column's end, the iterator's window ends there.
     ///
     /// An edit moves the column's count of edits
-    /// (`VerifiedColumn::edits`), as each method that edits says, so a
+    /// (`Column::edits`), as each method that edits says, so a
     /// state taken before an edit is refused after it (`lemma_fits`),
     /// and after more edits unless they are `usize::MAX + 1` or more
     /// (`lemma_after_edits`).
@@ -2800,8 +2797,8 @@ impl VerifiedIterState {
     /// Panics, as [`Column`](crate::Column)'s does, where an edit's panic
     /// left `column` without its parts and the state would fit it.
     #[inline(always)]
-    pub fn try_resume<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(&self, column: &'a VerifiedColumn<V, C, K>) -> (r: Result<
-        VerifiedIter<'a, V, C, K>,
+    pub fn try_resume<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(&self, column: &'a Column<V, C, K>) -> (r: Result<
+        Iter<'a, V, C, K>,
         PackError,
     >)
         ensures
@@ -2820,21 +2817,21 @@ impl VerifiedIterState {
 }
 
 /// An iterator of the runs of a column's values, which
-/// [`VerifiedIter::runs`] gives: each run is of as many equal values as
+/// [`Iter::runs`] gives: each run is of as many equal values as
 /// lie together in what the iterator had left (`runs_of`).
-pub struct VerifiedRuns<'a, V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C> = LenIndex>(
-    VerifiedIter<'a, V, C, K>,
+pub struct Runs<'a, V: ColumnValueRef<C>, C: Codec = Leb128, K: VIndex<V, C> = LenIndex>(
+    Iter<'a, V, C, K>,
 );
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedRuns<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Runs<'a, V, C, K> {
     /// The iterator of values whose runs these are, where it stands now.
-    pub closed spec fn iter(&self) -> VerifiedIter<'a, V, C, K> {
+    pub closed spec fn iter(&self) -> Iter<'a, V, C, K> {
         self.0
     }
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> vstd::std_specs::iter::IteratorSpecImpl for VerifiedRuns<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> vstd::std_specs::iter::IteratorSpecImpl for Runs<'a, V, C, K> {
     /// The iterator keeps to what Verus asks of an iterator: `next` gives
     /// `remaining()`, one run after another, and then `None`.
     open spec fn obeys_prophetic_iter_laws(&self) -> bool {
@@ -2862,10 +2859,10 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> vstd::std_specs::iter::Iterat
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Iterator for VerifiedRuns<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iterator for Runs<'a, V, C, K> {
     type Item = Run<Get<'a, V>>;
 
-    /// The next run, if one is left ([`VerifiedIter::next_run`]).
+    /// The next run, if one is left ([`Iter::next_run`]).
     #[inline(always)]
     fn next(&mut self) -> (r: Option<Run<Get<'a, V>>>)
         ensures

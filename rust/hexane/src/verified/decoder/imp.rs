@@ -48,7 +48,7 @@ pub(super) proof fn lemma_head_len_impl<S>(o: Seq<S>, v: S, n: int, max: int)
     lemma_head_run_max(o, v, n, o[0], head_len(o, max), max);
 }
 
-impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> Decoder<'a, V, C> {
     /// The decoder stands in a saved column's bytes, at a value or at
     /// the end.
     #[verifier::type_invariant]
@@ -66,9 +66,9 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
     #[inline]
     pub(super) fn new_impl(bytes: &'a [u8]) -> (r: Self)
         requires
-            VerifiedColumn::<V, C>::valid(bytes@),
+            Column::<V, C>::valid(bytes@),
         ensures
-            r.rest() == VerifiedColumn::<V, C>::values(bytes@),
+            r.rest() == Column::<V, C>::values(bytes@),
     {
         let d = <V::E as Model<V::X>>::decoder(bytes);
         proof {
@@ -76,16 +76,16 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
             assert(<V::E as Model<V::X>>::values(bytes@) =~= held::<V, C>(o));
             lemma_held::<V, C>(o);
         }
-        VerifiedDecoder { d }
+        Decoder { d }
     }
 
     pub(super) fn try_new_impl(bytes: &'a [u8]) -> (r: Result<Self, PackError>)
         ensures
             r matches Ok(d) ==> {
-                &&& VerifiedColumn::<V, C>::valid(bytes@)
-                &&& d.rest() == VerifiedColumn::<V, C>::values(bytes@)
+                &&& Column::<V, C>::valid(bytes@)
+                &&& d.rest() == Column::<V, C>::values(bytes@)
             },
-            VerifiedColumn::<V, C>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
+            Column::<V, C>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
     {
         match <V::E as Model<V::X>>::validate(bytes) {
             Ok(_) => Ok(Self::new(bytes)),
@@ -268,7 +268,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> Decoder<'a, V, C> {
     #[inline]
     pub(super) fn next_impl(&mut self) -> (r: Option<Get<'a, V>>)
         ensures
@@ -332,7 +332,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> Decoder<'a, V, C> {
     pub(super) fn clone_impl(&self) -> (r: Self)
         ensures
             r.items() == self.items(),
@@ -340,14 +340,14 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
         proof {
             use_type_invariant(self);
         }
-        VerifiedDecoder { d: self.d.dup() }
+        Decoder { d: self.d.dup() }
     }
 }
 
 } // verus!
 
-impl<V: VValue<C>, C: VCodec> std::fmt::Debug for VerifiedDecoder<'_, V, C> {
+impl<V: ColumnValueRef<C>, C: Codec> std::fmt::Debug for Decoder<'_, V, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedDecoder").finish_non_exhaustive()
+        f.debug_struct("Decoder").finish_non_exhaustive()
     }
 }

@@ -66,11 +66,11 @@
 #[cfg(verus_keep_ghost)]
 use super::bytes::bytes_below;
 use super::bytes::{bytes_len, compare_bytes, put_bytes, read_bytes, try_read_bytes};
-use super::codec::VCodec;
+use super::codec::Codec;
 #[cfg(verus_keep_ghost)]
 use super::model::Model;
 use super::model::Plain;
-use super::{seal, Owned, VForm, VGet, VSpec, VValue};
+use super::{seal, ColumnValueRef, Owned, VForm, VGet, VSpec};
 #[cfg(verus_keep_ghost)]
 use crate::rle::lift::Lift;
 #[cfg(verus_keep_ghost)]
@@ -166,7 +166,7 @@ pub open spec fn total_str_len(vs: Seq<Seq<char>>) -> nat
     }
 }
 
-impl<C: VCodec> VValue<C> for String {
+impl<C: Codec> ColumnValueRef<C> for String {
     /// The strings' own bytes, and for each a length, a header and a
     /// count of ten bytes each.
     open spec fn size_bound(vs: Seq<Seq<char>>) -> nat {
@@ -273,7 +273,7 @@ pub open spec fn total_str_len_opt(vs: Seq<Option<Seq<char>>>) -> nat
     }
 }
 
-impl<C: VCodec> VValue<C> for Option<String> {
+impl<C: Codec> ColumnValueRef<C> for Option<String> {
     /// The strings' own bytes, and for each value a length, a header and
     /// a count of ten bytes each.
     open spec fn size_bound(vs: Seq<Option<Seq<char>>>) -> nat {

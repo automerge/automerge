@@ -12,7 +12,7 @@
 //! Trusted: nothing of the function, whose results the specification
 //! names (`Mapping::maps`) but does not constrain. What a function asks
 //! of a value (`Mapping::pre`) the caller has to show of every value of
-//! the column: `VerifiedColumn::remap` asks it of its client in turn.
+//! the column: `Column::remap` asks it of its client in turn.
 //! `Column::remap` is not checked, and its `Remapping` wraps a Rust
 //! closure, which takes every value of its argument's type.
 //!

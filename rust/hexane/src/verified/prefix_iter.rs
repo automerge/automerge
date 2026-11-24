@@ -1,19 +1,19 @@
 //! The iterator of a prefix column: its values, each with what the
 //! values up to it add up to.
 //!
-//! [`VerifiedColumn::prefix_iter`] gives a [`VerifiedPrefixIter`]. It
-//! moves as a [`VerifiedIter`] does, and keeps as it goes the sum of
-//! the values it has passed ([`total`](VerifiedPrefixIter::total)):
+//! [`Column::prefix_iter`] gives a [`PrefixIter`]. It
+//! moves as a [`Iter`] does, and keeps as it goes the sum of
+//! the values it has passed ([`total`](PrefixIter::total)):
 //! of those from the column's start, or from where
-//! [`reset_prefix`](VerifiedPrefixIter::reset_prefix) was last called
+//! [`reset_prefix`](PrefixIter::reset_prefix) was last called
 //! (`base_pos`). Each value it gives comes as a
-//! [`VerifiedPrefixedValue`]: the value, the sum through it and the sum
+//! [`PrefixedValue`]: the value, the sum through it and the sum
 //! before it. A move that finds a value ([`delta_nth`], [`advance_prefix`])
-//! gives a [`VerifiedPrefixSeek`]: the value with its sums, where it is,
+//! gives a [`PrefixSeek`]: the value with its sums, where it is,
 //! and what the values passed over on the way add up to.
 //!
-//! [`delta_nth`]: VerifiedPrefixIter::delta_nth
-//! [`advance_prefix`]: VerifiedPrefixIter::advance_prefix
+//! [`delta_nth`]: PrefixIter::delta_nth
+//! [`advance_prefix`]: PrefixIter::advance_prefix
 //!
 //! As with the sums a prefix column answers with, what is proved is
 //! said of integers: the running sum *is* what the column's values from
@@ -27,8 +27,8 @@
 //! to go to, and for what the slabs passed over add up to.
 //!
 //! An iterator's place is kept without the borrow of its column in a
-//! [`VerifiedPrefixIterState`] ([`VerifiedPrefixIter::suspend`]), from
-//! which [`VerifiedPrefixIterState::try_resume`] gives an iterator
+//! [`PrefixIterState`] ([`PrefixIter::suspend`]), from
+//! which [`PrefixIterState::try_resume`] gives an iterator
 //! again: one whose running sum counts from where the suspended one's
 //! did.
 //!
@@ -40,12 +40,12 @@
 use super::prefix::SumIndex;
 #[cfg(verus_keep_ghost)]
 use super::sums::{summed, sums_fit};
-use super::sums::{SumOf, SumWeight, VCount, VSum, VSummed};
+use super::sums::{PrefixValue, SumOf, SumWeight, UnsignedPrefix, VSum};
 use super::Get;
 #[cfg(verus_keep_ghost)]
 use super::{head_run, VGet, VSpec};
-use super::{VCodec, VValue, VerifiedColumn, VerifiedIter, VerifiedIterState, VerifiedRuns};
-use super::{VShiftable, VerifiedRanges, VerifiedUnshift};
+use super::{Codec, Column, ColumnValueRef, Iter, IterState, Runs};
+use super::{Ranges, Shiftable, Unshift};
 #[cfg(verus_keep_ghost)]
 use crate::btree::PrefixAggregate;
 use crate::btree::SlabBTree;
@@ -83,7 +83,7 @@ verus! {
 // ── A value with its sums ───────────────────────────────────────────────────
 
 /// A value of a prefix column with the running sum through it, as a
-/// [`VerifiedPrefixIter`] gives it.
+/// [`PrefixIter`] gives it.
 ///
 /// * [`prefix()`](Self::prefix) is what the values before this one add
 ///   up to;
@@ -91,9 +91,9 @@ verus! {
 ///
 /// Both count from where the iterator's running sum does: the column's
 /// start, unless the iterator's sum was reset
-/// ([`VerifiedPrefixIter::reset_prefix`]). With values `[1, 1, 1]`, the
+/// ([`PrefixIter::reset_prefix`]). With values `[1, 1, 1]`, the
 /// one at index 1 has `prefix() == 1` and `total() == 2`.
-pub struct VerifiedPrefixedValue<'a, V: VSummed> {
+pub struct PrefixedValue<'a, V: PrefixValue> {
     /// The value.
     pub value: Get<'a, V>,
     /// The running sum through the value: what [`total()`](Self::total)
@@ -103,7 +103,7 @@ pub struct VerifiedPrefixedValue<'a, V: VSummed> {
     pub total: V::Sum,
 }
 
-impl<'a, V: VSummed> VerifiedPrefixedValue<'a, V> {
+impl<'a, V: PrefixValue> PrefixedValue<'a, V> {
     /// [`total`](Self::total), as a specification sees it: there it is
     /// written `total()`.
     pub open spec fn spec_total(&self) -> V::Sum {
@@ -139,7 +139,7 @@ impl<'a, V: VSummed> VerifiedPrefixedValue<'a, V> {
     }
 }
 
-impl<'a, V: VSummed> Clone for VerifiedPrefixedValue<'a, V> {
+impl<'a, V: PrefixValue> Clone for PrefixedValue<'a, V> {
     fn clone(&self) -> (r: Self)
         ensures
             r == *self,
@@ -149,15 +149,15 @@ impl<'a, V: VSummed> Clone for VerifiedPrefixedValue<'a, V> {
 }
 
 // ── A value found, and how far it was ───────────────────────────────────────
-/// What [`VerifiedPrefixIter::delta_nth`],
-/// [`VerifiedPrefixIter::advance_prefix`] and [`VerifiedColumn::delta`]
+/// What [`PrefixIter::delta_nth`],
+/// [`PrefixIter::advance_prefix`] and [`Column::delta`]
 /// find: a value with its sums, where it is, and what the values passed
 /// over on the way to it add up to.
 ///
 /// With values `[1, 2, 3, 4]`, `delta_nth(2)` of an iterator at the
 /// start finds the `3`: `pos == 2`, `delta == 3` (the `1` and the `2`
 /// passed over), `pv.prefix() == 3` and `pv.total() == 6`.
-pub struct VerifiedPrefixSeek<'a, V: VSummed> {
+pub struct PrefixSeek<'a, V: PrefixValue> {
     /// The index in the column of the value found. The iterator stands
     /// just after it.
     pub pos: usize,
@@ -166,10 +166,10 @@ pub struct VerifiedPrefixSeek<'a, V: VSummed> {
     /// it was before the move.
     pub delta: V::Sum,
     /// The value found, with the running sums through it and before it.
-    pub pv: VerifiedPrefixedValue<'a, V>,
+    pub pv: PrefixedValue<'a, V>,
 }
 
-impl<'a, V: VSummed> Clone for VerifiedPrefixSeek<'a, V> {
+impl<'a, V: PrefixValue> Clone for PrefixSeek<'a, V> {
     fn clone(&self) -> (r: Self)
         ensures
             r == *self,
@@ -180,12 +180,12 @@ impl<'a, V: VSummed> Clone for VerifiedPrefixSeek<'a, V> {
 
 // ── The iterator ────────────────────────────────────────────────────────────
 /// An iterator over a prefix column's values that keeps their running
-/// sum, which [`VerifiedColumn::prefix_iter`] and
-/// [`VerifiedColumn::prefix_iter_range`] give.
+/// sum, which [`Column::prefix_iter`] and
+/// [`Column::prefix_iter_range`] give.
 ///
-/// It is a `std::iter::Iterator` of [`VerifiedPrefixedValue`]s. The
+/// It is a `std::iter::Iterator` of [`PrefixedValue`]s. The
 /// values it has left to give are in a specification `rest()`, as a
-/// [`VerifiedIter`]'s are, and what it gives of each is in `items()`.
+/// [`Iter`]'s are, and what it gives of each is in `items()`.
 /// Verus's specifications of the standard library's iterator functions
 /// speak of `remaining()`, which is `items()`.
 ///
@@ -194,10 +194,10 @@ impl<'a, V: VSummed> Clone for VerifiedPrefixSeek<'a, V> {
 /// `base_pos()` is the column's start until
 /// [`reset_prefix`](Self::reset_prefix) makes it where the iterator
 /// stands.
-pub struct VerifiedPrefixIter<'a, V: VSummed + VValue<C> + 'a, C: VCodec + 'a = Leb128> {
+pub struct PrefixIter<'a, V: PrefixValue + ColumnValueRef<C> + 'a, C: Codec + 'a = Leb128> {
     /// The column's index, for long moves; a default iterator has none.
     ix: Option<&'a SlabBTree<SumWeight<V::Sum>>>,
-    inner: VerifiedIter<'a, V, C, SumIndex>,
+    inner: Iter<'a, V, C, SumIndex>,
     /// What the values from `base_at` up to the iterator add up to.
     total: V::Sum,
     /// What the values before `base_at` add up to.
@@ -206,11 +206,11 @@ pub struct VerifiedPrefixIter<'a, V: VSummed + VValue<C> + 'a, C: VCodec + 'a = 
     base_at: usize,
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
-    /// The iterator without its sums: a [`VerifiedIter`] that stands
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
+    /// The iterator without its sums: a [`Iter`] that stands
     /// where this one does, over the same column, with the same values
     /// left.
-    pub closed spec fn plain(&self) -> VerifiedIter<'a, V, C, SumIndex> {
+    pub closed spec fn plain(&self) -> Iter<'a, V, C, SumIndex> {
         self.inner
     }
 
@@ -227,7 +227,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
 
     /// The column the iterator reads, as it was when the iterator was
     /// made of it. No method of the iterator changes it.
-    pub open spec fn source(&self) -> Option<VerifiedColumn<V, C, SumIndex>> {
+    pub open spec fn source(&self) -> Option<Column<V, C, SumIndex>> {
         self.plain().source()
     }
 
@@ -264,12 +264,12 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
 
     /// What the iterator has left to give: each of the values left, with
     /// the running sum through it.
-    pub closed spec fn items(&self) -> Seq<VerifiedPrefixedValue<'a, V>> {
+    pub closed spec fn items(&self) -> Seq<PrefixedValue<'a, V>> {
         let o = self.inner.items();
         Seq::new(
             o.len(),
             |i: int|
-                VerifiedPrefixedValue { value: o[i], total: V::Sum::of_int(self.sum_to(self.inner.it.pos + i + 1)) },
+                PrefixedValue { value: o[i], total: V::Sum::of_int(self.sum_to(self.inner.it.pos + i + 1)) },
         )
     }
 
@@ -346,7 +346,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 
     /// Where the iterator's window ends: the index in the column that
-    /// its last value comes before ([`VerifiedIter::end_pos`]).
+    /// its last value comes before ([`Iter::end_pos`]).
     #[verifier::when_used_as_spec(spec_end_pos)]
     #[inline(always)]
     pub fn end_pos(&self) -> (r: usize)
@@ -412,7 +412,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
 
     /// Make the window end at `end`: the iterator then gives the
     /// column's values from where it stands up to `end`, and none if it
-    /// stands at `end` or past it ([`VerifiedIter::set_max`]). The
+    /// stands at `end` or past it ([`Iter::set_max`]). The
     /// running sum stays.
     #[inline(always)]
     pub fn set_max(&mut self, end: usize)
@@ -542,7 +542,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     /// If the window has no value, the iterator has nothing left, and
     /// stands where [`shift`](Self::shift) leaves it then.
     #[inline(always)]
-    pub fn shift_next(&mut self, range: Range<usize>) -> (r: Option<VerifiedPrefixedValue<'a, V>>)
+    pub fn shift_next(&mut self, range: Range<usize>) -> (r: Option<PrefixedValue<'a, V>>)
         requires
             range.start >= old(self).pos(),
         ensures
@@ -582,12 +582,12 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
 
     /// The next run: the value the iterator gives next, and how many
     /// times it comes before another value does or the iterator has no
-    /// more ([`VerifiedIter::next_run`]). The iterator moves past the
+    /// more ([`Iter::next_run`]). The iterator moves past the
     /// whole run. The sums given are those of the run's last value:
     /// `total()` is the running sum through the run, and `prefix()` the
     /// sum before its last value.
     #[inline(always)]
-    pub fn next_run(&mut self) -> (r: Option<Run<VerifiedPrefixedValue<'a, V>>>)
+    pub fn next_run(&mut self) -> (r: Option<Run<PrefixedValue<'a, V>>>)
         ensures
             final(self).column() == old(self).column(),
             final(self).source() == old(self).source(),
@@ -620,10 +620,10 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 
     /// An iterator of the runs the iterator has left to give, without
-    /// their sums ([`VerifiedIter::runs`]): what
-    /// [`splice_runs`](VerifiedColumn::splice_runs) takes.
+    /// their sums ([`Iter::runs`]): what
+    /// [`splice_runs`](Column::splice_runs) takes.
     #[inline(always)]
-    pub fn runs(self) -> (r: VerifiedRuns<'a, V, C, SumIndex>)
+    pub fn runs(self) -> (r: Runs<'a, V, C, SumIndex>)
         ensures
             r.iter() == self.plain(),
     {
@@ -636,7 +636,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     /// values before it are then given; if there are not that many,
     /// none is left.
     #[inline(always)]
-    pub fn delta_nth(&mut self, n: usize) -> (r: Option<VerifiedPrefixSeek<'a, V>>)
+    pub fn delta_nth(&mut self, n: usize) -> (r: Option<PrefixSeek<'a, V>>)
         ensures
             n < old(self).rest().len() ==> {
                 &&& r matches Some(seek)
@@ -670,14 +670,14 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
 
     /// Where the iterator stands, where its window ends and where its
     /// running sum counts from, to keep without the borrow of the
-    /// column: [`VerifiedPrefixIterState::try_resume`] gives an iterator
+    /// column: [`PrefixIterState::try_resume`] gives an iterator
     /// from it.
     ///
     /// The state fits the column the iterator reads: resumed on that
     /// column, as it is, it gives an iterator that stands where this one
     /// does, with the same values left and the same running sum.
     #[inline(always)]
-    pub fn suspend(&self) -> (s: VerifiedPrefixIterState<V>)
+    pub fn suspend(&self) -> (s: PrefixIterState<V>)
         ensures
             s.pos() == self.pos(),
             s.end_pos() == self.end_pos(),
@@ -694,7 +694,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
 
 /// Reading on until the running sum is past a limit: for sums that are
 /// counts, which no value takes down.
-impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> where V::Sum: VCount {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> where V::Sum: UnsignedPrefix {
     /// Move on to the first of the values left with which the values
     /// given from here on add up to more than `n`, and past it: it is
     /// given with its sums, where it is, and what the values passed
@@ -710,7 +710,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> where V
     /// ([`PrefixIter`](crate::PrefixIter)'s leaves the window of such
     /// an iterator as it is.)
     #[inline(always)]
-    pub fn advance_prefix(&mut self, n: V::Sum) -> (r: Option<VerifiedPrefixSeek<'a, V>>)
+    pub fn advance_prefix(&mut self, n: V::Sum) -> (r: Option<PrefixSeek<'a, V>>)
         ensures
             final(self).column() == old(self).column(),
             final(self).source() == old(self).source(),
@@ -748,14 +748,14 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> where V
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, V: VSummed + VValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> vstd::std_specs::iter::IteratorSpecImpl for PrefixIter<'a, V, C> {
     /// The iterator keeps to what Verus asks of an iterator: `next` gives
     /// `remaining()`, one value after another, and then `None`.
     open spec fn obeys_prophetic_iter_laws(&self) -> bool {
         true
     }
 
-    open spec fn remaining(&self) -> Seq<VerifiedPrefixedValue<'a, V>> {
+    open spec fn remaining(&self) -> Seq<PrefixedValue<'a, V>> {
         self.items()
     }
 
@@ -767,7 +767,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecI
         Some(self.items().len())
     }
 
-    open spec fn peek(&self, index: int) -> Option<VerifiedPrefixedValue<'a, V>> {
+    open spec fn peek(&self, index: int) -> Option<PrefixedValue<'a, V>> {
         if 0 <= index < self.items().len() {
             Some(self.items()[index])
         } else {
@@ -776,13 +776,13 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecI
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> Iterator for VerifiedPrefixIter<'a, V, C> {
-    type Item = VerifiedPrefixedValue<'a, V>;
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> Iterator for PrefixIter<'a, V, C> {
+    type Item = PrefixedValue<'a, V>;
 
     /// The next value, if one is left, with the running sum through it.
     /// The sum before it is the iterator's running sum as it was.
     #[inline(always)]
-    fn next(&mut self) -> (r: Option<VerifiedPrefixedValue<'a, V>>)
+    fn next(&mut self) -> (r: Option<PrefixedValue<'a, V>>)
         ensures
             match r {
                 Some(pv) => {
@@ -821,7 +821,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> Iterator for VerifiedPrefixIter<'a, 
     /// passed over add up to, and within a slab a whole run is passed
     /// over at once.
     #[inline(always)]
-    fn nth(&mut self, n: usize) -> (r: Option<VerifiedPrefixedValue<'a, V>>)
+    fn nth(&mut self, n: usize) -> (r: Option<PrefixedValue<'a, V>>)
         ensures
             n < old(self).rest().len() ==> {
                 &&& r == Some(old(self).items()[n as int])
@@ -863,13 +863,13 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> Iterator for VerifiedPrefixIter<'a, 
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, V: VSummed + VValue<C>, C: VCodec> vstd::std_specs::iter::ExactSizeIteratorSpecImpl for VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> vstd::std_specs::iter::ExactSizeIteratorSpecImpl for PrefixIter<'a, V, C> {
     open spec fn exact_len(&self) -> usize {
         self.items().len() as usize
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> ExactSizeIterator for VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> ExactSizeIterator for PrefixIter<'a, V, C> {
     /// How many values are left.
     #[inline]
     fn len(&self) -> (len: usize)
@@ -881,7 +881,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> ExactSizeIterator for VerifiedPrefix
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> Clone for VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> Clone for PrefixIter<'a, V, C> {
     /// An iterator of its own that stands where this one does, with the
     /// same values left and the same running sum.
     #[inline(always)]
@@ -900,7 +900,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> Clone for VerifiedPrefixIter<'a, V, 
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> Default for VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> Default for PrefixIter<'a, V, C> {
     /// An iterator with nothing to give.
     #[inline(always)]
     fn default() -> (r: Self)
@@ -919,25 +919,25 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> Default for VerifiedPrefixIter<'a, V
 }
 
 // ── A place to come back to ─────────────────────────────────────────────────
-/// Where a [`VerifiedPrefixIter`] stood, where its window ended and
+/// Where a [`PrefixIter`] stood, where its window ended and
 /// where its running sum counted from, kept without the borrow of the
-/// column: [`VerifiedPrefixIter::suspend`] gives it, and
+/// column: [`PrefixIter::suspend`] gives it, and
 /// [`try_resume`](Self::try_resume) an iterator from it.
 ///
-/// It holds a [`VerifiedIterState`] (`plain()`) and `base_pos()`. The
+/// It holds a [`IterState`] (`plain()`) and `base_pos()`. The
 /// sums themselves are not kept: `try_resume` asks the column for them.
-pub struct VerifiedPrefixIterState<V: VSummed> {
-    inner: VerifiedIterState,
+pub struct PrefixIterState<V: PrefixValue> {
+    inner: IterState,
     /// Where the running sum counts from.
     base_at: usize,
     _phantom: PhantomData<V>,
 }
 
-impl<V: VSummed> VerifiedPrefixIterState<V> {
+impl<V: PrefixValue> PrefixIterState<V> {
     /// The state without where the sum counts from: that of a
-    /// [`VerifiedIter`] standing where the iterator stood, with its
+    /// [`Iter`] standing where the iterator stood, with its
     /// window.
-    pub closed spec fn plain(&self) -> VerifiedIterState {
+    pub closed spec fn plain(&self) -> IterState {
         self.inner
     }
 
@@ -952,7 +952,7 @@ impl<V: VSummed> VerifiedPrefixIterState<V> {
     }
 
     /// The count of edits of the column the state was taken of
-    /// (`VerifiedColumn::edits`).
+    /// (`Column::edits`).
     pub open spec fn edits(&self) -> usize {
         self.plain().edits()
     }
@@ -963,16 +963,16 @@ impl<V: VSummed> VerifiedPrefixIterState<V> {
     }
 
     /// The state is a place in `column` as it is
-    /// ([`VerifiedIterState`]'s `fits`):
+    /// ([`IterState`]'s `fits`):
     /// [`try_resume`](Self::try_resume) gives an iterator exactly then.
-    pub open spec fn fits<C: VCodec>(&self, column: &VerifiedColumn<V, C, SumIndex>) -> bool where V: VValue<C> {
+    pub open spec fn fits<C: Codec>(&self, column: &Column<V, C, SumIndex>) -> bool where V: ColumnValueRef<C> {
         self.plain().fits(column)
     }
 
     /// A state fits only a column that counts the edits it does: one
     /// edited since the state was taken is refused
-    /// ([`VerifiedIterState`]'s `lemma_fits`).
-    pub proof fn lemma_fits<C: VCodec>(&self, column: &VerifiedColumn<V, C, SumIndex>) where V: VValue<C>
+    /// ([`IterState`]'s `lemma_fits`).
+    pub proof fn lemma_fits<C: Codec>(&self, column: &Column<V, C, SumIndex>) where V: ColumnValueRef<C>
         requires
             self.fits(column),
         ensures
@@ -993,7 +993,7 @@ impl<V: VSummed> VerifiedPrefixIterState<V> {
     /// stood, with its window, and whose running sum counts from where
     /// that one's did, if the state fits the column (`fits`); an error
     /// ([`PackError::InvalidResume`]) if it does not
-    /// ([`VerifiedIterState::try_resume`]).
+    /// ([`IterState::try_resume`]).
     ///
     /// The iterator given is one of `column` whatever column the state
     /// was taken of, and its running sum is `column`'s: what the values
@@ -1004,10 +1004,10 @@ impl<V: VSummed> VerifiedPrefixIterState<V> {
     /// edit's panic left `column` without its parts and the state would
     /// fit it.
     #[inline(always)]
-    pub fn try_resume<'a, C: VCodec>(&self, column: &'a VerifiedColumn<V, C, SumIndex>) -> (r: Result<
-        VerifiedPrefixIter<'a, V, C>,
+    pub fn try_resume<'a, C: Codec>(&self, column: &'a Column<V, C, SumIndex>) -> (r: Result<
+        PrefixIter<'a, V, C>,
         PackError,
-    >) where V: VValue<C>
+    >) where V: ColumnValueRef<C>
         ensures
             r is Ok <==> self.fits(column),
             r is Ok ==> self.edits() == column.edits(),
@@ -1027,12 +1027,12 @@ impl<V: VSummed> VerifiedPrefixIterState<V> {
 
 // ── The column's ────────────────────────────────────────────────────────────
 /// A prefix column's values with their running sums.
-impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
+impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Column<V, C, SumIndex> {
     /// An iterator over the values that keeps their running sum: each
     /// value comes with what the values through it add up to, and what
     /// those before it do.
     #[inline(always)]
-    pub fn prefix_iter(&self) -> (it: VerifiedPrefixIter<'_, V, C>)
+    pub fn prefix_iter(&self) -> (it: PrefixIter<'_, V, C>)
         ensures
             it.rest() == self@,
             it.column() == self@,
@@ -1051,7 +1051,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
     /// to. The index gives that; the values before `start` are not all
     /// read.
     #[inline(always)]
-    pub fn prefix_iter_range(&self, start: usize, end: usize) -> (it: VerifiedPrefixIter<'_, V, C>)
+    pub fn prefix_iter_range(&self, start: usize, end: usize) -> (it: PrefixIter<'_, V, C>)
         requires
             start <= end <= self@.len(),
         ensures
@@ -1069,7 +1069,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
     /// The value at `index` with what the values through it add up to,
     /// and what those before it do; `None` if `index` is past the end.
     #[inline(always)]
-    pub fn get_prefixed(&self, index: usize) -> (r: Option<VerifiedPrefixedValue<'_, V>>)
+    pub fn get_prefixed(&self, index: usize) -> (r: Option<PrefixedValue<'_, V>>)
         ensures
             index < self@.len() ==> {
                 &&& r matches Some(pv)
@@ -1088,7 +1088,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
     /// values `from..to` before it add up to (`delta`); `None` if `to`
     /// is past the end. `from` is to be `to` at most.
     #[inline(always)]
-    pub fn delta(&self, from: usize, to: usize) -> (r: Option<VerifiedPrefixSeek<'_, V>>)
+    pub fn delta(&self, from: usize, to: usize) -> (r: Option<PrefixSeek<'_, V>>)
         requires
             from <= to,
         ensures
@@ -1107,23 +1107,23 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
     }
 }
 
-// ── Repositioning (`VShiftable`) ───────────────────────────────────────────
+// ── Repositioning (`Shiftable`) ───────────────────────────────────────────
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
     /// The items the iterator ranges over: at each place of the column,
     /// the value there with the running sum through it (from
     /// `base_pos()`).
-    pub closed spec fn prefixed(&self) -> Seq<VerifiedPrefixedValue<'a, V>> {
+    pub closed spec fn prefixed(&self) -> Seq<PrefixedValue<'a, V>> {
         let o = vals_of::<V::X>(self.inner.slabs@);
-        Seq::new(o.len(), |p: int| VerifiedPrefixedValue { value: o[p], total: V::Sum::of_int(self.sum_to(p + 1)) })
+        Seq::new(o.len(), |p: int| PrefixedValue { value: o[p], total: V::Sum::of_int(self.sum_to(p + 1)) })
     }
 }
 
 /// The iterator repositioned as any of the verified ones is: its model
 /// is each value of the column with the running sum through it, each an
 /// item.
-impl<'a, V: VSummed + VValue<C>, C: VCodec> VShiftable for VerifiedPrefixIter<'a, V, C> {
-    closed spec fn shift_vals(&self) -> Seq<VerifiedPrefixedValue<'a, V>> {
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> Shiftable for PrefixIter<'a, V, C> {
+    closed spec fn shift_vals(&self) -> Seq<PrefixedValue<'a, V>> {
         self.prefixed()
     }
 
@@ -1135,15 +1135,15 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VShiftable for VerifiedPrefixIter<'a
         self.inner.it.pos + self.inner.it.items_left
     }
 
-    closed spec fn shift_left(&self) -> Seq<VerifiedPrefixedValue<'a, V>> {
+    closed spec fn shift_left(&self) -> Seq<PrefixedValue<'a, V>> {
         self.items()
     }
 
-    closed spec fn shift_items(&self) -> Seq<VerifiedPrefixedValue<'a, V>> {
+    closed spec fn shift_items(&self) -> Seq<PrefixedValue<'a, V>> {
         self.items()
     }
 
-    open spec fn shift_spans(x: VerifiedPrefixedValue<'a, V>) -> Seq<VerifiedPrefixedValue<'a, V>> {
+    open spec fn shift_spans(x: PrefixedValue<'a, V>) -> Seq<PrefixedValue<'a, V>> {
         seq![x]
     }
 
@@ -1155,16 +1155,16 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VShiftable for VerifiedPrefixIter<'a
         self.lemma_shift_impl()
     }
 
-    proof fn lemma_shift_unit(x: VerifiedPrefixedValue<'a, V>) {
+    proof fn lemma_shift_unit(x: PrefixedValue<'a, V>) {
     }
 
     #[inline(always)]
-    fn shift_step(&mut self) -> (r: Option<VerifiedPrefixedValue<'a, V>>) {
+    fn shift_step(&mut self) -> (r: Option<PrefixedValue<'a, V>>) {
         self.shift_step_impl()
     }
 
     #[inline(always)]
-    fn shift_nth(&mut self, n: usize) -> (r: Option<VerifiedPrefixedValue<'a, V>>) {
+    fn shift_nth(&mut self, n: usize) -> (r: Option<PrefixedValue<'a, V>>) {
         self.shift_nth_impl(n)
     }
 
@@ -1199,7 +1199,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VShiftable for VerifiedPrefixIter<'a
     }
 
     #[inline(always)]
-    fn seek_to(&mut self, at: usize) -> (r: Option<VerifiedPrefixedValue<'a, V>>) {
+    fn seek_to(&mut self, at: usize) -> (r: Option<PrefixedValue<'a, V>>) {
         self.seek_to_impl(at)
     }
 
@@ -1209,13 +1209,13 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VShiftable for VerifiedPrefixIter<'a
     }
 
     #[inline(always)]
-    fn shift_next(&mut self, range: Range<usize>) -> (r: Option<VerifiedPrefixedValue<'a, V>>) {
+    fn shift_next(&mut self, range: Range<usize>) -> (r: Option<PrefixedValue<'a, V>>) {
         self.shift_next_v_shiftable_impl(range)
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
-    /// The iterator's repositioning model ([`VShiftable`]) in the terms
+impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
+    /// The iterator's repositioning model ([`Shiftable`]) in the terms
     /// of its own specification: at each place of the column, its value
     /// and what the values come to through it; it stands at `pos()`;
     /// what it has left is `items()`, each item a value.
@@ -1236,10 +1236,10 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 
     /// A lookahead: the iterator wrapped so that the item it gives next
-    /// can be looked at first ([`VerifiedUnshift::peek`]), as the old
+    /// can be looked at first ([`Unshift::peek`]), as the old
     /// API's `Shiftable::unshift` gives.
     #[inline(always)]
-    pub fn unshift(self) -> (r: VerifiedUnshift<Self>)
+    pub fn unshift(self) -> (r: Unshift<Self>)
         ensures
             r.unshift_vals() == self.prefixed(),
             r.unshift_left() == self.items(),
@@ -1257,7 +1257,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     ///
     /// When it comes to a range that starts before where it stands.
     #[inline(always)]
-    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: Ranges<'r, Self>)
         ensures
             r.ranges_vals() == self.prefixed(),
             r.ranges_left() == windows(self.prefixed(), ranges@),

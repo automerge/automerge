@@ -114,7 +114,7 @@ pub(super) fn read_i64(data: &[u8]) -> (r: Result<(usize, i64), DecodeError>)
     }
 }
 
-impl VCodec for Bijou64 {
+impl Codec for Bijou64 {
     open spec fn enc_u(n: u64) -> Seq<u8> {
         spec_encode(n as nat)
     }

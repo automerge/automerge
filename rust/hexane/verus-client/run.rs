@@ -2,9 +2,8 @@
 //! `requires`, and the client's own run-time work (loading, saving,
 //! unwrapping) must not panic.
 use hexane::verified::{
-    AccIndex, Get, LenIndex, SumIndex, VCodec, VDeltaValue, VIndex, VValue, VerifiedAccColumn,
-    VerifiedAccIter, VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn,
-    VerifiedEncoder, VerifiedEncoderState, VerifiedPrefixColumn,
+    AccColumn, AccIndex, AccIter, AccValue, Codec, Column, ColumnValueRef, Decoder, DeltaColumn,
+    DeltaValue, Encoder, EncoderState, Get, LenIndex, PrefixColumn, SumIndex, VIndex,
 };
 use hexane::{DeltaRun, Leb128, Run};
 use verus_client::{Action, Board, Flags, Mark, Meta, Step};
@@ -28,7 +27,7 @@ fn runs() {
     let plain: Vec<Action> = acts.iter().flatten().copied().collect();
     verus_client::round_trip_action(&plain, &acts);
     verus_client::edit_and_read(Action::Make, Action::Increment);
-    let mut c = VerifiedColumn::<Option<Action>>::new();
+    let mut c = Column::<Option<Action>>::new();
     c.splice(0, 0, &acts);
     let bytes = c.save();
 
@@ -39,7 +38,7 @@ fn runs() {
     verus_client::load_then_save::<u64, Leb128, LenIndex>(&[0x7f]);
     verus_client::load_then_save::<bool, Leb128, LenIndex>(&[3, 2]);
     for b in [&bytes[..], &[0x7f], &[3, 2], &[]] {
-        let plain = VerifiedColumn::<u64>::load(b).ok().map(|c| c.to_vec());
+        let plain = Column::<u64>::load(b).ok().map(|c| c.to_vec());
         let of_a_kind = verus_client::load_as_a_kind::<u64, Leb128, LenIndex>(b);
         assert_eq!(of_a_kind.map(|c| c.to_vec()), plain);
         assert_eq!(
@@ -114,28 +113,28 @@ fn runs() {
     verus_client::load_then_validate::<Option<Action>, Leb128, LenIndex>(&bytes);
     verus_client::load_then_validate::<u64, Leb128, LenIndex>(&[0x7f]);
 
-    let mut col = VerifiedColumn::<u64>::new();
+    let mut col = Column::<u64>::new();
     col.splice(0, 0, &v);
     verus_client::remap_as_it_is(&mut col);
     assert_eq!(col.to_vec(), v);
     verus_client::double_the_small(&mut col);
     assert!(col.to_vec().iter().zip(&v).all(|(a, b)| *a == 2 * *b));
-    let mut a = VerifiedColumn::<Action>::new();
+    let mut a = Column::<Action>::new();
     a.splice(0, 0, &plain);
-    let mut n = VerifiedColumn::<Option<Action>>::new();
+    let mut n = Column::<Option<Action>>::new();
     n.splice(0, 0, &acts);
     verus_client::step_the_actions(&mut a, &mut n);
     assert_eq!((a.len(), n.len()), (plain.len(), acts.len()));
-    let mut b = VerifiedColumn::<Vec<u8>>::new();
+    let mut b = Column::<Vec<u8>>::new();
     b.splice(0, 0, &vec![&b"ab"[..], b"", b"ab"]);
-    let mut ob = VerifiedColumn::<Option<Vec<u8>>>::new();
+    let mut ob = Column::<Option<Vec<u8>>>::new();
     ob.splice(0, 0, &vec![Some(&b"a"[..]), None]);
     verus_client::longer_and_emptied(&mut b, &mut ob, b'!');
     assert_eq!(b.to_vec(), vec![&b"ab!"[..], b"!", b"ab!"]);
     assert_eq!(ob.to_vec(), vec![Some(&b""[..]), None]);
-    let mut flags = VerifiedColumn::<bool>::new();
+    let mut flags = Column::<bool>::new();
     flags.splice(0, 0, &vec![true, false, false]);
-    let mut nums = VerifiedColumn::<i64>::new();
+    let mut nums = Column::<i64>::new();
     nums.splice(0, 0, &vec![-5, 3, i64::MAX]);
     verus_client::turned_and_raised(&mut flags, &mut nums, 0);
     assert_eq!(flags.to_vec(), vec![false, true, true]);
@@ -144,7 +143,7 @@ fn runs() {
         .iter()
         .zip([-5, 3, i64::MAX])
         .all(|(a, b)| *a >= b && *a >= 0));
-    let mut o = VerifiedColumn::<Option<u64>>::new();
+    let mut o = Column::<Option<u64>>::new();
     o.splice(0, 0, &vec![Some(1), None, Some(u64::MAX - 1)]);
     verus_client::one_more(&mut o);
     assert_eq!(o.to_vec(), vec![Some(2), None, Some(u64::MAX)]);
@@ -153,25 +152,25 @@ fn runs() {
 #[test]
 fn iterators() {
     let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
-    let mut col = VerifiedColumn::<u64>::new();
+    let mut col = Column::<u64>::new();
     col.splice(0, 0, &v);
-    let mut b = VerifiedColumn::<Vec<u8>>::new();
+    let mut b = Column::<Vec<u8>>::new();
     b.splice(0, 0, &vec![&b"ab"[..], b"", b"", b"ab"]);
-    let mut ten = VerifiedColumn::<u64>::new();
+    let mut ten = Column::<u64>::new();
     ten.splice(0, 0, &(0..10).collect::<Vec<u64>>());
 
     assert_eq!(verus_client::read_in_a_loop(&col), v);
-    let mut small = VerifiedColumn::<u32>::new();
+    let mut small = Column::<u32>::new();
     small.splice(0, 0, &vec![1, 5, 3]);
     assert!(verus_client::all_below(&small, 6) && !verus_client::all_below(&small, 5));
     assert!(verus_client::agree(&col, &col.clone()));
-    let mut five = VerifiedColumn::<i64>::new();
+    let mut five = Column::<i64>::new();
     five.splice(0, 0, &vec![-2, -1, 0, 1, 2]);
     verus_client::every_other(&five);
     assert_eq!(verus_client::the_third(&col), Some(0));
     assert_eq!(verus_client::the_third(&b), Some(&b""[..]));
     assert_eq!(verus_client::the_greatest(&col), 333);
-    let mut three = VerifiedColumn::<u64>::new();
+    let mut three = Column::<u64>::new();
     three.splice(0, 0, &vec![4, 4, 5]);
     verus_client::two_readers(&three);
     assert_eq!(verus_client::in_the_range(&col, 10, 20), v[10..20]);
@@ -189,10 +188,7 @@ fn iterators() {
         verus_client::the_first_run(&col),
         Some(Run { count: 3, value: 0 })
     );
-    assert_eq!(
-        verus_client::the_first_run(&VerifiedColumn::<u64>::new()),
-        None
-    );
+    assert_eq!(verus_client::the_first_run(&Column::<u64>::new()), None);
     verus_client::runs_in_a_window::<u64, Leb128, LenIndex>(1, 2);
     verus_client::runs_in_a_window::<Option<Vec<u8>>, Leb128, LenIndex>(None, Some(b""));
     let runs = verus_client::in_runs(&col);
@@ -224,7 +220,7 @@ fn iterators() {
         verus_client::copied_by_runs::<_, _, _, LenIndex>(&b).to_vec(),
         b.to_vec()
     );
-    let mut flags = VerifiedColumn::<bool>::new();
+    let mut flags = Column::<bool>::new();
     flags.splice(0, 0, &vec![true, true, false]);
     verus_client::run_by_run(&flags);
     let first = Some(Run {
@@ -250,9 +246,9 @@ fn iterators() {
 #[test]
 fn searches() {
     let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
-    let mut col = VerifiedColumn::<u64>::new();
+    let mut col = Column::<u64>::new();
     col.splice(0, 0, &v);
-    let mut b = VerifiedColumn::<Vec<u8>>::new();
+    let mut b = Column::<Vec<u8>>::new();
     b.splice(0, 0, &vec![&b"ab"[..], b"", b"", b"ab"]);
 
     assert_eq!(verus_client::told_by_a_scan(col.iter(), 7), Some(21));
@@ -298,9 +294,9 @@ fn searches() {
 #[test]
 fn suspended() {
     let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
-    let mut col = VerifiedColumn::<u64>::new();
+    let mut col = Column::<u64>::new();
     col.splice(0, 0, &v);
-    let mut flags = VerifiedColumn::<bool>::new();
+    let mut flags = Column::<bool>::new();
     flags.splice(0, 0, &vec![true, true, false]);
 
     let it = col.iter_range(5, 50);
@@ -317,7 +313,7 @@ fn suspended() {
     assert_eq!(s.try_resume(&col).unwrap().len(), 27);
     assert_eq!(t.try_resume(&col).unwrap().len(), 1000);
     assert!(!verus_client::of_no_column(&col));
-    assert!(verus_client::of_no_column(&VerifiedColumn::<u64>::new()));
+    assert!(verus_client::of_no_column(&Column::<u64>::new()));
     for which in 0..10 {
         let mut it = col.iter_range(5, 50);
         verus_client::reads_the_same_column(&mut it, which, 20, 6);
@@ -327,7 +323,7 @@ fn suspended() {
     assert!(s.try_resume(&col).is_ok());
 
     // a state of one column on another that was made the same way
-    let (mut a, mut b) = (VerifiedColumn::<u64>::new(), VerifiedColumn::<u64>::new());
+    let (mut a, mut b) = (Column::<u64>::new(), Column::<u64>::new());
     a.splice(0, 0, &vec![9, 8, 7]);
     b.splice(0, 0, &vec![4, 5, 6]);
     let s = a.iter_range(1, 3).suspend();
@@ -360,7 +356,7 @@ fn encoders() {
     let numbers = verus_client::told_by_an_encoders_save(a);
     assert_eq!(numbers, verus_client::encode_numbers());
     assert_eq!(
-        VerifiedColumn::<u64>::load(&numbers).unwrap().to_vec(),
+        Column::<u64>::load(&numbers).unwrap().to_vec(),
         vec![7, 7, 7, 9, 1, 2, 3]
     );
     let mut out = vec![0xaa, 0xbb];
@@ -368,7 +364,7 @@ fn encoders() {
     assert_eq!(out, vec![0xaa, 0xbb]);
 
     // and with byte strings that may be null, and with flags
-    let mut s = VerifiedEncoder::<Option<Vec<u8>>>::new();
+    let mut s = Encoder::<Option<Vec<u8>>>::new();
     verus_client::told_by_an_append(&mut s, Some(&b"ab"[..]));
     verus_client::told_by_an_append_n(&mut s, None, 3);
     verus_client::told_by_an_owned(&mut s, Some(b"c".to_vec()));
@@ -377,18 +373,18 @@ fn encoders() {
     assert_eq!(verus_client::told_by_the_count(&s), (9, false));
     let r = verus_client::told_by_an_encoders_save_to(s, &mut out);
     assert_eq!((r.start, r.end), (2, out.len()));
-    let strings = VerifiedColumn::<Option<Vec<u8>>>::load(&out[r]).unwrap();
+    let strings = Column::<Option<Vec<u8>>>::load(&out[r]).unwrap();
     let c = Some(&b"c"[..]);
     assert_eq!(
         strings.to_vec(),
         vec![Some(&b"ab"[..]), None, None, None, c, c, c, Some(b""), None]
     );
-    let mut f = VerifiedEncoder::<bool>::default();
+    let mut f = Encoder::<bool>::default();
     verus_client::told_by_an_append_n(&mut f, true, 70_000);
     verus_client::told_by_an_owned(&mut f, false);
     verus_client::told_by_owned_n(&mut f, true, 2);
     assert_eq!(verus_client::told_by_the_count(&f), (70_003, false));
-    let flags = VerifiedColumn::<bool>::load(&verus_client::told_by_an_encoders_save(f)).unwrap();
+    let flags = Column::<bool>::load(&verus_client::told_by_an_encoders_save(f)).unwrap();
     assert_eq!(
         (flags.len(), flags.get(70_000), flags.get(70_002)),
         (70_003, Some(false), Some(true))
@@ -396,7 +392,7 @@ fn encoders() {
 
     // an encoder and a column agree, whichever way the values come
     let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
-    let mut col = VerifiedColumn::<u64>::new();
+    let mut col = Column::<u64>::new();
     col.splice(0, 0, &v);
     assert_eq!(
         verus_client::encoded_as_saved::<u64, Leb128>(&v),
@@ -404,7 +400,7 @@ fn encoders() {
     );
     assert_eq!(
         verus_client::encoded_as_saved::<u64, Leb128>(&vec![]),
-        VerifiedColumn::<u64>::new().save()
+        Column::<u64>::new().save()
     );
     verus_client::encoder_or_column::<u64, Leb128>(&v);
     verus_client::encoder_or_column::<Vec<u8>, Leb128>(&vec![&b"ab"[..], b"", b"ab"]);
@@ -426,8 +422,8 @@ fn encoders() {
     assert_eq!(verus_client::reencoded(&col), col.save());
     assert_eq!(verus_client::reencoded(&strings), strings.save());
     assert_eq!(
-        verus_client::reencoded(&VerifiedColumn::<bool>::new()),
-        VerifiedColumn::<bool>::new().save()
+        verus_client::reencoded(&Column::<bool>::new()),
+        Column::<bool>::new().save()
     );
 
     // run by run
@@ -440,7 +436,7 @@ fn encoders() {
         },
     ];
     let by_runs =
-        VerifiedColumn::<u64>::load(&verus_client::encoded_by_runs::<u64, Leb128>(&runs)).unwrap();
+        Column::<u64>::load(&verus_client::encoded_by_runs::<u64, Leb128>(&runs)).unwrap();
     assert_eq!(
         (by_runs.len(), by_runs.get(0), by_runs.get(70_002)),
         (70_003, Some(9), Some(9))
@@ -456,34 +452,24 @@ fn encoders() {
         },
     ];
     let by_runs =
-        VerifiedColumn::<Vec<u8>>::load(&verus_client::encoded_by_runs::<Vec<u8>, Leb128>(&runs))
-            .unwrap();
+        Column::<Vec<u8>>::load(&verus_client::encoded_by_runs::<Vec<u8>, Leb128>(&runs)).unwrap();
     assert_eq!(by_runs.to_vec(), vec![&b"x"[..], b"x", b""]);
 
     // the worked examples
     let (x, y) = verus_client::encode_strings(b"ab", b"c".to_vec(), Vec::new());
     assert_eq!(
-        VerifiedColumn::<Vec<u8>>::load(&x).unwrap().to_vec(),
+        Column::<Vec<u8>>::load(&x).unwrap().to_vec(),
         vec![&b"ab"[..], b"c", b"ab", b"ab"]
     );
-    let y = VerifiedColumn::<Option<Vec<u8>>>::load(&y).unwrap();
+    let y = Column::<Option<Vec<u8>>>::load(&y).unwrap();
     assert_eq!(y.to_vec(), vec![Some(&b"ab"[..]), None, None, Some(b"")]);
-    let (mut n, mut f) = (
-        VerifiedEncoder::<u64>::new(),
-        VerifiedEncoder::<bool>::new(),
-    );
+    let (mut n, mut f) = (Encoder::<u64>::new(), Encoder::<bool>::new());
     for i in 0..100 {
         verus_client::log_both(&mut n, &mut f, i / 7, i % 3 == 0);
     }
     assert_eq!((n.len(), f.len()), (100, 100));
-    assert_eq!(
-        VerifiedColumn::<u64>::load(&n.save()).unwrap().get(99),
-        Some(14)
-    );
-    assert_eq!(
-        VerifiedColumn::<bool>::load(&f.save()).unwrap().get(99),
-        Some(true)
-    );
+    assert_eq!(Column::<u64>::load(&n.save()).unwrap().get(99), Some(14));
+    assert_eq!(Column::<bool>::load(&f.save()).unwrap().get(99), Some(true));
 
     // a writer of rows, and where it says its columns are
     let mut rows = verus_client::Rows::new();
@@ -497,9 +483,9 @@ fn encoders() {
         (3, w.ids.end, w.names.end, out.len())
     );
     assert_eq!(&out[..3], &[1, 2, 3]);
-    let ids = VerifiedColumn::<u64>::load(&out[w.ids]).unwrap();
-    let names = VerifiedColumn::<Vec<u8>>::load(&out[w.names]).unwrap();
-    let flags = VerifiedColumn::<bool>::load(&out[w.flags]).unwrap();
+    let ids = Column::<u64>::load(&out[w.ids]).unwrap();
+    let names = Column::<Vec<u8>>::load(&out[w.names]).unwrap();
+    let flags = Column::<bool>::load(&out[w.flags]).unwrap();
     assert_eq!((ids.len(), names.len(), flags.len()), (300, 300, 300));
     assert_eq!(
         (ids.get(299), names.get(299), flags.get(296)),
@@ -528,7 +514,7 @@ fn budgets() {
     let r = verus_client::told_by_an_encoders_save_to_unless(a, &mut out, 7);
     assert_eq!((r.start, r.end), (1, out.len()));
     assert_eq!(
-        VerifiedColumn::<u64>::load(&out[r]).unwrap().to_vec(),
+        Column::<u64>::load(&out[r]).unwrap().to_vec(),
         vec![7, 7, 7, 7, 8, 9, 9, 9, 1, 2]
     );
     let held = out.clone();
@@ -560,18 +546,18 @@ fn budgets() {
     );
 
     // what the range tells
-    let mut e = VerifiedEncoder::<bool>::with_max_segments(2);
+    let mut e = Encoder::<bool>::with_max_segments(2);
     e.append_n(true, 5);
     let mut out = vec![1];
     assert_eq!(verus_client::read_from_the_range(e, &mut out, true), 1..1);
     assert_eq!(out, vec![1]);
-    let mut e = VerifiedEncoder::<bool>::new();
+    let mut e = Encoder::<bool>::new();
     e.append(true);
     e.append(false);
     let r = verus_client::read_from_the_range(e, &mut out, true);
     assert_eq!(r.start, 1);
     assert_eq!(
-        VerifiedColumn::<bool>::load(&out[r]).unwrap().to_vec(),
+        Column::<bool>::load(&out[r]).unwrap().to_vec(),
         vec![true, false]
     );
 
@@ -583,10 +569,7 @@ fn budgets() {
         let mut out = vec![3];
         let r = verus_client::others_take_bytes(with, &mut out);
         assert_eq!(out[0], 3);
-        assert_eq!(
-            VerifiedColumn::<u64>::load(&out[r]).unwrap().to_vec(),
-            vec![0, 5]
-        );
+        assert_eq!(Column::<u64>::load(&out[r]).unwrap().to_vec(), vec![0, 5]);
     }
     let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
     for with in [None, Some(2), Some(3), Some(16)] {
@@ -600,7 +583,7 @@ fn budgets() {
         verus_client::encoded_into_column::<Option<Vec<u8>>, Leb128>(&names, Some(2)).to_vec(),
         names
     );
-    let mut col = VerifiedColumn::<u64>::new();
+    let mut col = Column::<u64>::new();
     col.splice(0, 0, &v);
     assert_eq!(
         verus_client::one_column_three_ways::<u64, Leb128>(&v, 2),
@@ -608,10 +591,7 @@ fn budgets() {
     );
     let flags = vec![true, false, false];
     let saved = verus_client::one_column_three_ways::<bool, Leb128>(&flags, 6);
-    assert_eq!(
-        VerifiedColumn::<bool>::load(&saved).unwrap().to_vec(),
-        flags
-    );
+    assert_eq!(Column::<bool>::load(&saved).unwrap().to_vec(), flags);
     let mut out = vec![4];
     for with in [None, Some(2), Some(7)] {
         let r = verus_client::nothing_given_nothing_written::<u64, Leb128>(with, &mut out, 9);
@@ -622,7 +602,7 @@ fn budgets() {
     assert_eq!(out, vec![4]);
     let (x, y) = verus_client::a_budget_saves_the_same(b"ab", 70_000);
     assert_eq!(x, y);
-    let c = VerifiedColumn::<Option<Vec<u8>>>::load(&x).unwrap();
+    let c = Column::<Option<Vec<u8>>>::load(&x).unwrap();
     assert_eq!(
         (c.len(), c.get(0), c.get(70_000)),
         (70_001, Some(Some(&b"ab"[..])), Some(None))
@@ -633,15 +613,15 @@ fn budgets() {
 fn remaps() {
     let numbers = |max: Option<usize>, vs: &[u64]| {
         let mut e = match max {
-            Some(max) => VerifiedEncoder::<u64>::with_max_segments(max),
-            None => VerifiedEncoder::new(),
+            Some(max) => Encoder::<u64>::with_max_segments(max),
+            None => Encoder::new(),
         };
         for v in vs {
             e.append(*v);
         }
         e
     };
-    let loaded = |bytes: &[u8]| VerifiedColumn::<u64>::load(bytes).unwrap().to_vec();
+    let loaded = |bytes: &[u8]| Column::<u64>::load(bytes).unwrap().to_vec();
 
     // each `told_by` client
     let mut out = vec![0xaa];
@@ -657,7 +637,7 @@ fn remaps() {
     let r = verus_client::told_by_a_remapping_save_unless(e, &mut out, 7, |v: u64| v / 2 * 7);
     assert_eq!(r.start, held.len());
     assert_eq!(loaded(&out[r]), vec![0, 0, 7]);
-    let mut names = VerifiedEncoder::<Option<Vec<u8>>>::new();
+    let mut names = Encoder::<Option<Vec<u8>>>::new();
     names.append(Some(b"ab"));
     names.append(None);
     names.append_n(Some(b""), 3);
@@ -669,14 +649,14 @@ fn remaps() {
         })
     };
     let r = verus_client::read_from_the_remapped_range(names, &mut out, None, longer);
-    let col = VerifiedColumn::<Option<Vec<u8>>>::load(&out[r]).unwrap();
+    let col = Column::<Option<Vec<u8>>>::load(&out[r]).unwrap();
     let one = Some(&b"!"[..]);
     assert_eq!(col.to_vec(), vec![Some(&b"ab!"[..]), None, one, one, one]);
 
     // the worked examples
     let mut out = vec![5];
     let r = verus_client::saved_as_it_is(numbers(Some(2), &[4, 4, 9]), &mut out);
-    let mut col = VerifiedColumn::<u64>::new();
+    let mut col = Column::<u64>::new();
     col.splice(0, 0, &[4, 4, 9]);
     assert_eq!(out[r], col.save()[..]);
 
@@ -688,7 +668,7 @@ fn remaps() {
         assert_eq!(out[..2], [1, 2]);
     }
 
-    let mut acts = VerifiedEncoder::<Action>::with_max_segments(4);
+    let mut acts = Encoder::<Action>::with_max_segments(4);
     acts.append(Action::Make);
     acts.append_n(Action::Increment, 2);
     acts.append(Action::Set);
@@ -697,20 +677,20 @@ fn remaps() {
     // an action is saved as its number: Set, Make, Make, Delete
     assert_eq!(loaded(&out[r]), vec![1, 0, 0, 3]);
 
-    let mut flags = VerifiedEncoder::<bool>::with_max_segments(2);
+    let mut flags = Encoder::<bool>::with_max_segments(2);
     flags.append_n(true, 3);
     flags.append(false);
-    let mut names = VerifiedEncoder::<Vec<u8>>::new();
+    let mut names = Encoder::<Vec<u8>>::new();
     names.append(b"a");
     names.append(b"");
     let mut out = vec![9];
     let (p, q) = verus_client::turned_and_longer(flags, names, b'z', &mut out);
     assert_eq!(
-        VerifiedColumn::<bool>::load(&out[p]).unwrap().to_vec(),
+        Column::<bool>::load(&out[p]).unwrap().to_vec(),
         vec![false, false, false, true]
     );
     assert_eq!(
-        VerifiedColumn::<Vec<u8>>::load(&out[q]).unwrap().to_vec(),
+        Column::<Vec<u8>>::load(&out[q]).unwrap().to_vec(),
         vec![&b"az"[..], b"z"]
     );
 
@@ -718,7 +698,7 @@ fn remaps() {
     for with in [None, Some(2), Some(9)] {
         verus_client::zeroed_takes_no_bytes(numbers(with, &[5, 5, 6, 0, 7]), &mut out);
     }
-    let mut names = VerifiedEncoder::<Option<Vec<u8>>>::with_max_segments(2);
+    let mut names = Encoder::<Option<Vec<u8>>>::with_max_segments(2);
     names.append(Some(b"ab"));
     names.append(None);
     names.append(Some(b"c"));
@@ -753,7 +733,7 @@ fn states() {
     assert_eq!(buf, held);
 
     // and with byte strings that may be null, and with flags
-    let mut s = VerifiedEncoderState::<Option<Vec<u8>>>::new();
+    let mut s = EncoderState::<Option<Vec<u8>>>::new();
     let at = buf.len();
     verus_client::told_by_a_states_append(&mut s, &mut buf, Some(&b"ab"[..]));
     verus_client::told_by_a_states_append_n(&mut s, &mut buf, None, 3);
@@ -769,13 +749,13 @@ fn states() {
     assert!(!verus_client::told_by_a_single_run(&s, &buf, None));
     verus_client::told_by_a_finish(s, &mut buf);
     assert_eq!(&buf[..at], &held[..]);
-    let strings = VerifiedColumn::<Option<Vec<u8>>>::load(&buf[at..]).unwrap();
+    let strings = Column::<Option<Vec<u8>>>::load(&buf[at..]).unwrap();
     let c = Some(&b"c"[..]);
     assert_eq!(
         strings.to_vec(),
         vec![Some(&b"ab"[..]), None, None, None, c, c, c, Some(b""), None]
     );
-    let mut f = VerifiedEncoderState::<bool>::default();
+    let mut f = EncoderState::<bool>::default();
     let mut buf = vec![];
     verus_client::told_by_a_states_append_n(&mut f, &mut buf, true, 70_000);
     assert!(verus_client::told_by_a_single_run(&f, &buf, true));
@@ -786,7 +766,7 @@ fn states() {
     );
     assert!(!verus_client::told_by_a_single_run(&f, &buf, true));
     verus_client::told_by_a_finish(f, &mut buf);
-    let flags = VerifiedColumn::<bool>::load(&buf).unwrap();
+    let flags = Column::<bool>::load(&buf).unwrap();
     assert_eq!(
         (flags.len(), flags.get(70_000), flags.get(70_002)),
         (70_003, Some(false), Some(true))
@@ -794,7 +774,7 @@ fn states() {
 
     // a state, an encoder, a column and `encode` agree
     let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
-    let mut col = VerifiedColumn::<u64>::new();
+    let mut col = Column::<u64>::new();
     col.splice(0, 0, &v);
     let mut out = vec![9, 9, 9];
     assert_eq!(
@@ -813,9 +793,7 @@ fn states() {
     let names = vec![Some(&b"ab"[..]), None, Some(b"")];
     let saved = verus_client::one_encoding_four_ways::<Option<Vec<u8>>, Leb128>(names.clone());
     assert_eq!(
-        VerifiedColumn::<Option<Vec<u8>>>::load(&saved)
-            .unwrap()
-            .to_vec(),
+        Column::<Option<Vec<u8>>>::load(&saved).unwrap().to_vec(),
         names
     );
     assert_eq!(
@@ -844,14 +822,14 @@ fn states() {
     let mut out = vec![1];
     let mid = verus_client::strings_streamed(b"ab", b"c".to_vec(), b"".to_vec(), &mut out);
     assert_eq!(out[0], 1);
-    let x = VerifiedColumn::<Vec<u8>>::load(&out[1..mid]).unwrap();
+    let x = Column::<Vec<u8>>::load(&out[1..mid]).unwrap();
     assert_eq!(x.to_vec(), vec![&b"ab"[..], b"c", b"ab", b"ab"]);
-    let y = VerifiedColumn::<Option<Vec<u8>>>::load(&out[mid..]).unwrap();
+    let y = Column::<Option<Vec<u8>>>::load(&out[mid..]).unwrap();
     assert_eq!(y.to_vec(), vec![Some(&b"ab"[..]), None, None, Some(b"")]);
     let mut out = vec![2, 2];
     verus_client::a_single_run(&mut out);
     assert_eq!(
-        VerifiedColumn::<u64>::load(&out[2..]).unwrap().to_vec(),
+        Column::<u64>::load(&out[2..]).unwrap().to_vec(),
         vec![7, 7, 7, 7, 8]
     );
     let mut log = verus_client::Log::new(vec![5]);
@@ -860,7 +838,7 @@ fn states() {
     }
     let out = log.finish();
     assert_eq!(out[0], 5);
-    let back = VerifiedColumn::<u64>::load(&out[1..]).unwrap().to_vec();
+    let back = Column::<u64>::load(&out[1..]).unwrap().to_vec();
     assert_eq!(back, (0..300).map(|x| x / 7).collect::<Vec<u64>>());
     assert_eq!(
         verus_client::logged(vec![1, 2, 3]).unwrap().to_vec(),
@@ -899,7 +877,7 @@ fn states() {
 fn statics() {
     // each `told_by` client
     let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
-    let mut col = VerifiedColumn::<u64>::new();
+    let mut col = Column::<u64>::new();
     col.splice(0, 0, &v);
     assert_eq!(
         verus_client::told_by_an_encode::<u64, Leb128>(v.clone()),
@@ -915,9 +893,7 @@ fn statics() {
     let names = vec![Some(&b"ab"[..]), None, Some(b"")];
     let r = verus_client::told_by_an_encode_to::<Option<Vec<u8>>, Leb128>(&mut out, names.clone());
     assert_eq!(
-        VerifiedColumn::<Option<Vec<u8>>>::load(&out[r])
-            .unwrap()
-            .to_vec(),
+        Column::<Option<Vec<u8>>>::load(&out[r]).unwrap().to_vec(),
         names
     );
     let held = out.clone();
@@ -938,7 +914,7 @@ fn statics() {
     );
     assert_eq!((r.start, r.end), (held.len(), out.len()));
     assert_eq!(
-        VerifiedColumn::<bool>::load(&out[r]).unwrap().to_vec(),
+        Column::<bool>::load(&out[r]).unwrap().to_vec(),
         vec![true, false]
     );
 
@@ -950,11 +926,8 @@ fn statics() {
         (&out[..2], x.start, x.end, y.end),
         (&[8, 8][..], 2, y.start, out.len())
     );
-    assert_eq!(VerifiedColumn::<u64>::load(&out[x]).unwrap().to_vec(), v);
-    assert_eq!(
-        VerifiedColumn::<bool>::load(&out[y]).unwrap().to_vec(),
-        flags
-    );
+    assert_eq!(Column::<u64>::load(&out[x]).unwrap().to_vec(), v);
+    assert_eq!(Column::<bool>::load(&out[y]).unwrap().to_vec(), flags);
     let mut out = vec![3];
     verus_client::all_the_one_leave_the_buffer::<u64, Leb128>(vec![0; 70_000], 0, &mut out);
     verus_client::all_the_one_leave_the_buffer::<Vec<u8>, Leb128>(vec![b"ab"; 5], b"ab", &mut out);
@@ -962,10 +935,7 @@ fn statics() {
     assert_eq!(out, vec![3]);
     let r = verus_client::another_is_written(&mut out);
     assert_eq!(out[0], 3);
-    assert_eq!(
-        VerifiedColumn::<u64>::load(&out[r]).unwrap().to_vec(),
-        vec![0, 5]
-    );
+    assert_eq!(Column::<u64>::load(&out[r]).unwrap().to_vec(), vec![0, 5]);
     let mut out = vec![1];
     assert_eq!(
         verus_client::read_from_the_encoded_range::<bool, Leb128>(vec![true; 5], &mut out, true),
@@ -979,7 +949,7 @@ fn statics() {
     );
     assert_eq!(r.start, 1);
     assert_eq!(
-        VerifiedColumn::<bool>::load(&out[r]).unwrap().to_vec(),
+        Column::<bool>::load(&out[r]).unwrap().to_vec(),
         vec![true, false]
     );
 }
@@ -989,18 +959,18 @@ fn strings() {
     let words = vec!["pear", "", "apple", "apple", "größer", "日本語", "🦀"];
     verus_client::round_trip_text(&words);
     verus_client::text_in_text_out("größer", "");
-    let mut col = VerifiedColumn::<String>::new();
+    let mut col = Column::<String>::new();
     col.splice(0, 0, &words);
     assert!(verus_client::the_string_itself(&mut col, "日本語"));
     assert_eq!(col.len(), 8);
 
     let bytes = verus_client::fruit();
-    let back = VerifiedColumn::<String>::load(&bytes).unwrap();
+    let back = Column::<String>::load(&bytes).unwrap();
     assert_eq!(back.to_vec(), vec!["apple", "pear", "", "pear"]);
     let long = "x".repeat(1001);
     assert_eq!(verus_client::saved_if_short(&long), None);
     let short = verus_client::saved_if_short(&long[..1000]).unwrap();
-    let back = VerifiedColumn::<String>::load(&short).unwrap();
+    let back = Column::<String>::load(&short).unwrap();
     assert_eq!(back.to_vec(), vec![&long[..1000]]);
 
     // the order is that of the bytes, which is `str`'s own
@@ -1016,7 +986,7 @@ fn strings() {
             assert_eq!(later, *std::cmp::max(a, b));
         }
     }
-    let mut sorted = VerifiedColumn::<String>::new();
+    let mut sorted = Column::<String>::new();
     for w in &words {
         verus_client::insert_in_order(&mut sorted, w);
     }
@@ -1051,7 +1021,7 @@ fn strings() {
     );
 
     let bytes = verus_client::encode_text("ab", "çd".to_string());
-    let back = VerifiedColumn::<String>::load(&bytes).unwrap();
+    let back = Column::<String>::load(&bytes).unwrap();
     assert_eq!(back.to_vec(), vec!["ab", "çd", "ab", "ab"]);
     let mut buf = vec![9u8];
     verus_client::text_streamed("ab", "çd".to_string(), &mut buf);
@@ -1060,8 +1030,8 @@ fn strings() {
     verus_client::load_text(&bytes);
     // one string of one byte that is not UTF-8: it does not load
     verus_client::load_text(&[0x7f, 1, 0xff]);
-    assert!(VerifiedColumn::<String>::load(&[0x7f, 1, 0xff]).is_err());
-    assert!(VerifiedColumn::<Vec<u8>>::load(&[0x7f, 1, 0xff]).is_ok());
+    assert!(Column::<String>::load(&[0x7f, 1, 0xff]).is_err());
+    assert!(Column::<Vec<u8>>::load(&[0x7f, 1, 0xff]).is_ok());
 
     // the clients that are for every value type, of strings
     verus_client::round_trip::<String, Leb128, LenIndex>(&words);
@@ -1090,7 +1060,7 @@ fn strings() {
     verus_client::load_then_validate::<String, Leb128, LenIndex>(&bytes);
     verus_client::runs_in_a_window::<String, Leb128, LenIndex>("", "é");
     assert_eq!(verus_client::the_third(&col), Some("apple!"));
-    let mut enc = VerifiedEncoder::<String>::new();
+    let mut enc = Encoder::<String>::new();
     verus_client::told_by_an_append(&mut enc, "ab");
     verus_client::told_by_an_owned(&mut enc, "çd".to_string());
     verus_client::told_by_an_append_n(&mut enc, "ab", 2);
@@ -1123,7 +1093,7 @@ fn strings_that_may_be_null() {
             assert_eq!(later, *std::cmp::max(a, b));
         }
     }
-    let mut sorted = VerifiedColumn::<Option<String>>::new();
+    let mut sorted = Column::<Option<String>>::new();
     for w in &words {
         verus_client::insert_in_order(&mut sorted, *w);
     }
@@ -1131,7 +1101,7 @@ fn strings_that_may_be_null() {
     expect.sort();
     assert_eq!(sorted.to_vec(), expect);
 
-    let mut col = VerifiedColumn::<Option<String>>::new();
+    let mut col = Column::<Option<String>>::new();
     col.splice(0, 0, &words);
     verus_client::opt_exclaimed(&mut col);
     assert_eq!(
@@ -1157,7 +1127,7 @@ fn strings_that_may_be_null() {
     );
 
     let bytes = verus_client::encode_opt_text("ab", "çd".to_string());
-    let back = VerifiedColumn::<Option<String>>::load(&bytes).unwrap();
+    let back = Column::<Option<String>>::load(&bytes).unwrap();
     assert_eq!(
         back.to_vec(),
         vec![Some("ab"), None, Some("çd"), None, None]
@@ -1166,8 +1136,8 @@ fn strings_that_may_be_null() {
     // a null, then one string of one byte that is not UTF-8: it does not
     // load
     verus_client::load_opt_text(&[0, 1, 0x7f, 1, 0xff]);
-    assert!(VerifiedColumn::<Option<String>>::load(&[0, 1, 0x7f, 1, 0xff]).is_err());
-    assert!(VerifiedColumn::<Option<Vec<u8>>>::load(&[0, 1, 0x7f, 1, 0xff]).is_ok());
+    assert!(Column::<Option<String>>::load(&[0, 1, 0x7f, 1, 0xff]).is_err());
+    assert!(Column::<Option<Vec<u8>>>::load(&[0, 1, 0x7f, 1, 0xff]).is_ok());
 
     // the clients that are for every value type, of strings that may be
     // null
@@ -1197,7 +1167,7 @@ fn strings_that_may_be_null() {
     verus_client::slabs_and_validation::<Option<String>, Leb128, LenIndex>(&words);
     verus_client::load_then_validate::<Option<String>, Leb128, LenIndex>(&bytes);
     verus_client::runs_in_a_window::<Option<String>, Leb128, LenIndex>(None, Some("é"));
-    let mut enc = VerifiedEncoder::<Option<String>>::new();
+    let mut enc = Encoder::<Option<String>>::new();
     verus_client::told_by_an_append(&mut enc, Some("ab"));
     verus_client::told_by_an_append(&mut enc, None);
     verus_client::told_by_an_owned(&mut enc, Some("çd".to_string()));
@@ -1208,21 +1178,21 @@ fn strings_that_may_be_null() {
 #[test]
 fn edits() {
     let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
-    let mut col = VerifiedColumn::<u64>::new();
+    let mut col = Column::<u64>::new();
     col.splice(0, 0, &v);
     assert!(!verus_client::ended_by_a_push(&mut col, 7));
     assert_eq!(col.len(), 1001);
-    let mut none = VerifiedColumn::<Option<Vec<u8>>>::new();
+    let mut none = Column::<Option<Vec<u8>>>::new();
     assert!(!verus_client::ended_by_a_push(&mut none, None));
 
     for which in 0..12 {
-        let mut col = VerifiedColumn::<u64>::new();
+        let mut col = Column::<u64>::new();
         col.splice(0, 0, &v);
         let runs = vec![Run { count: 2, value: 0 }];
         let ended = !verus_client::ended_by_each_edit(&mut col, 0, vec![0], runs, which);
         assert!(ended, "{which}");
         // a column of byte strings, in slabs of few values
-        let mut col = VerifiedColumn::<Vec<u8>>::with_max_segments(4);
+        let mut col = Column::<Vec<u8>>::with_max_segments(4);
         col.splice(0, 0, &vec![&b"ab"[..]; 40]);
         let runs = vec![Run {
             count: 2,
@@ -1235,7 +1205,7 @@ fn edits() {
     let s = col.iter_range(3, 9).suspend();
     verus_client::no_edits(&mut col, 5, &[]);
     assert_eq!(s.try_resume(&col).unwrap().len(), 6);
-    let mut empty = VerifiedColumn::<bool>::new();
+    let mut empty = Column::<bool>::new();
     verus_client::cleared(&mut empty);
     verus_client::cleared(&mut col);
     assert!(s.try_resume(&col).is_err());
@@ -1288,10 +1258,10 @@ fn edits() {
 #[test]
 fn decoders() {
     let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
-    let mut col = VerifiedColumn::<u64>::new();
+    let mut col = Column::<u64>::new();
     col.splice(0, 0, &v);
     let bytes = col.save();
-    let all = verus_client::read_all(VerifiedDecoder::<u64>::new(&bytes));
+    let all = verus_client::read_all(Decoder::<u64>::new(&bytes));
     assert_eq!(all, v);
     assert_eq!(verus_client::decode_all::<u64, Leb128>(&bytes), v);
     assert!(verus_client::decoded_as_held(&col));
@@ -1306,7 +1276,7 @@ fn decoders() {
     assert_eq!(verus_client::the_sixth(&bytes), Some(1));
     assert_eq!(verus_client::the_sixth(&[]), None);
     assert_eq!(verus_client::recoded_by_runs::<u64, Leb128>(&bytes), bytes);
-    let mut dec = VerifiedDecoder::<u64>::new(&bytes);
+    let mut dec = Decoder::<u64>::new(&bytes);
     for _ in 0..200 {
         assert!(verus_client::runs_differ(&mut dec));
     }
@@ -1317,7 +1287,7 @@ fn decoders() {
 
     // strings, and byte strings that may be null
     let words = vec!["", "apple", "apple", "größer", "pear", "日本語"];
-    let mut text = VerifiedColumn::<String>::new();
+    let mut text = Column::<String>::new();
     text.splice(0, 0, &words);
     let text_bytes = text.save();
     assert_eq!(verus_client::first_text(&text_bytes), Some(""));
@@ -1332,11 +1302,11 @@ fn decoders() {
         assert!(verus_client::scanned_as_searched(&text, x), "{x}");
     }
     let blobs = vec![None, None, Some(&b"ab"[..]), Some(b""), None];
-    let mut blob = VerifiedColumn::<Option<Vec<u8>>>::new();
+    let mut blob = Column::<Option<Vec<u8>>>::new();
     blob.splice(0, 0, &blobs);
     let blob_bytes = blob.save();
     assert_eq!(verus_client::first_bytes(&blob_bytes), Some(None));
-    let mut some = VerifiedColumn::<Option<Vec<u8>>>::new();
+    let mut some = Column::<Option<Vec<u8>>>::new();
     some.push(Some(b"ab"));
     let some_bytes = some.save();
     let first = verus_client::first_bytes(&some_bytes);
@@ -1349,7 +1319,7 @@ fn decoders() {
 
     // a scan of numbers in order
     let sorted: Vec<u32> = (0..1000).map(|i| i / 3 * 2).collect();
-    let mut scol = VerifiedColumn::<u32>::new();
+    let mut scol = Column::<u32>::new();
     scol.splice(0, 0, &sorted);
     let sbytes = scol.save();
     assert_eq!(verus_client::find_decoded(&sbytes, 0), (0, 3));
@@ -1384,7 +1354,7 @@ fn decoders() {
     assert_eq!(verus_client::told_by_a_decoded_run(&mut dec), None);
     let found = verus_client::told_by_a_decoders_scan(&mut dec, 6, 100);
     assert_eq!(found, (0, 0));
-    let whole = VerifiedDecoder::<u64>::new(&bytes);
+    let whole = Decoder::<u64>::new(&bytes);
     assert_eq!(verus_client::told_by_a_decoders_loop(whole), Some(333));
     assert_eq!(verus_client::told_by_a_decoders_loop(dec), None);
 }
@@ -1392,7 +1362,7 @@ fn decoders() {
 #[test]
 fn sums() {
     let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
-    let plain = VerifiedColumn::<u64>::from_values(&v);
+    let plain = Column::<u64>::from_values(&v);
     let bytes = plain.save();
     // the clients of a column of any kind, of prefix columns
     verus_client::round_trip::<u32, Leb128, SumIndex>(&vec![1, 2, 2, u32::MAX]);
@@ -1407,12 +1377,12 @@ fn sums() {
     verus_client::collect_then_extend::<u64, Leb128, SumIndex>(vec![1, 1, 2], vec![3], vec![4, 4]);
     verus_client::slabs_and_validation::<u64, Leb128, SumIndex>(&(0..10_000).collect());
     verus_client::runs_in_a_window::<u64, Leb128, SumIndex>(1, 2);
-    let col: VerifiedPrefixColumn<u64> = verus_client::copied_by_runs(&plain);
+    let col: PrefixColumn<u64> = verus_client::copied_by_runs(&plain);
     assert_eq!(col.to_vec(), v);
     assert_eq!(verus_client::read_in_a_loop(&col), v);
     assert_eq!(verus_client::in_runs(&col).len(), 334);
     assert_eq!(verus_client::count_by_runs(&col, 10, 500), 490);
-    let back: VerifiedColumn<u64> = verus_client::copied_by_runs(&col);
+    let back: Column<u64> = verus_client::copied_by_runs(&col);
     assert_eq!(back.to_vec(), v);
     // loads
     let loaded = verus_client::load_with_sums::<u64, Leb128>(&bytes).unwrap();
@@ -1421,11 +1391,11 @@ fn sums() {
     assert!(verus_client::load_short_sums::<u64, Leb128>(&bytes).is_some());
     assert!(verus_client::load_short_sums::<bool, Leb128>(&[3, 2]).is_some());
     let wide = vec![Some(i64::MIN), None, Some(i64::MAX)];
-    let signed = VerifiedColumn::<Option<i64>>::from_values(&wide).save();
+    let signed = Column::<Option<i64>>::from_values(&wide).save();
     let (a, b) = verus_client::load_wide_sums(&bytes, &signed);
     assert_eq!(a.unwrap().to_vec(), v);
     assert_eq!(b.unwrap().to_vec(), wide);
-    let small = VerifiedColumn::<u32>::from_values(&[u32::MAX, 0, 7]).save();
+    let small = Column::<u32>::from_values(&[u32::MAX, 0, 7]).save();
     assert_eq!(
         verus_client::load_small_sums(&small).unwrap().to_vec(),
         vec![u32::MAX, 0, 7]
@@ -1434,7 +1404,7 @@ fn sums() {
     let mut col = loaded;
     verus_client::push_within_the_sums(&mut col, u64::MAX);
     assert_eq!((col.len(), col.get(1000)), (1001, Some(u64::MAX)));
-    let mut flags = VerifiedPrefixColumn::<bool>::new();
+    let mut flags = PrefixColumn::<bool>::new();
     verus_client::push_within_the_sums(&mut flags, true);
     assert_eq!(flags.to_vec(), vec![true]);
     // saved as a plain column of the values
@@ -1455,7 +1425,7 @@ fn a_fill_past_the_sums() {
 #[test]
 #[should_panic(expected = "prefix sum overflows")]
 fn a_push_past_the_sums() {
-    let mut col = VerifiedPrefixColumn::<u32>::fill((1 << 32) + 1, u32::MAX);
+    let mut col = PrefixColumn::<u32>::fill((1 << 32) + 1, u32::MAX);
     verus_client::a_push_past_the_sums(&mut col, 1);
 }
 
@@ -1463,11 +1433,11 @@ fn a_push_past_the_sums() {
 #[test]
 fn sums_refused() {
     // more than a `u32` column's sums hold: no prefix column, a plain one
-    let long = VerifiedColumn::<u32>::fill(1 << 33, u32::MAX).save();
+    let long = Column::<u32>::fill(1 << 33, u32::MAX).save();
     assert!(verus_client::load_with_sums::<u32, Leb128>(&long).is_none());
     assert!(verus_client::load_plain::<u32, Leb128>(&long).is_some());
     // the most they hold
-    let most = VerifiedColumn::<u32>::fill((1 << 32) + 1, u32::MAX).save();
+    let most = Column::<u32>::fill((1 << 32) + 1, u32::MAX).save();
     let mut col = verus_client::load_small_sums(&most).unwrap();
     verus_client::push_within_the_sums(&mut col, 0);
     assert_eq!(col.len(), (1 << 32) + 2);
@@ -1477,13 +1447,13 @@ fn sums_refused() {
 #[test]
 #[should_panic(expected = "prefix sum overflows")]
 fn sums_of_a_plain_column_past_the_type() {
-    verus_client::summed_up(&VerifiedColumn::<u32>::fill(1 << 33, u32::MAX));
+    verus_client::summed_up(&Column::<u32>::fill(1 << 33, u32::MAX));
 }
 
 #[test]
 fn sums_read() {
     let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
-    let col = VerifiedPrefixColumn::<u64>::from_values(&v);
+    let col = PrefixColumn::<u64>::from_values(&v);
     let before = |i: usize| v[..i].iter().map(|x| u128::from(*x)).sum::<u128>();
     let all = before(1000);
     for i in [0, 1, 500, 999, 1000] {
@@ -1501,10 +1471,10 @@ fn sums_read() {
         );
     }
     assert_eq!(verus_client::sums_past_the_end(&col), (all, all, all, 0));
-    let none = VerifiedPrefixColumn::<Option<i64>>::new();
+    let none = PrefixColumn::<Option<i64>>::new();
     assert_eq!(verus_client::sums_past_the_end(&none), (0, 0, 0, 0));
     // signed values
-    let signed = VerifiedPrefixColumn::<i64>::from_values(&[4, -9, i64::MIN, 2]);
+    let signed = PrefixColumn::<i64>::from_values(&[4, -9, i64::MIN, 2]);
     assert_eq!(verus_client::the_sum_before(&signed, 2), -5);
     let (a, b, range) = verus_client::the_sum_of_a_range(&signed, 1, 3);
     assert_eq!(
@@ -1516,7 +1486,7 @@ fn sums_read() {
         -9 + i128::from(i64::MIN)
     );
     assert_eq!(verus_client::a_range_by_its_ends(&signed, 2, 2), 0);
-    let wide = VerifiedPrefixColumn::<i64>::from_values(&[i64::MIN, i64::MAX, i64::MAX]);
+    let wide = PrefixColumn::<i64>::from_values(&[i64::MIN, i64::MAX, i64::MAX]);
     assert_eq!(
         verus_client::a_range_by_its_ends(&wide, 0, 1),
         i128::from(i64::MIN)
@@ -1532,7 +1502,7 @@ fn sums_read() {
         (all, all + 77)
     );
     assert_eq!(col.len(), 1001);
-    let mut flags = VerifiedPrefixColumn::<bool>::from_values(&[true, false, true]);
+    let mut flags = PrefixColumn::<bool>::from_values(&[true, false, true]);
     assert_eq!(verus_client::a_sum_after_a_push(&mut flags, true), (2, 3));
     assert_eq!(verus_client::a_sum_after_a_push(&mut flags, false), (3, 3));
 }
@@ -1540,7 +1510,7 @@ fn sums_read() {
 #[test]
 fn sums_searched() {
     let v: Vec<u64> = vec![3, 0, 4, 4, 10];
-    let col = VerifiedPrefixColumn::<u64>::from_values(&v);
+    let col = PrefixColumn::<u64>::from_values(&v);
     let places: Vec<Option<usize>> = [0, 1, 3, 4, 7, 8, 21, 22]
         .into_iter()
         .map(|t| verus_client::the_place_of_a_sum(&col, t))
@@ -1563,14 +1533,14 @@ fn sums_searched() {
     assert_eq!(verus_client::a_sum_and_its_place(&col, 5), Some((3, 7)));
     assert_eq!(verus_client::a_sum_and_its_place(&col, 21), Some((11, 21)));
     assert_eq!(verus_client::a_sum_and_its_place(&col, 22), None);
-    let small = VerifiedPrefixColumn::<Option<u32>>::from_values(&[None, Some(u32::MAX), Some(1)]);
+    let small = PrefixColumn::<Option<u32>>::from_values(&[None, Some(u32::MAX), Some(1)]);
     assert_eq!(verus_client::the_place_of_a_sum(&small, 1), Some(2));
     assert_eq!(verus_client::the_place_of_a_sum(&small, 1 << 32), Some(3));
     assert_eq!(
         verus_client::the_place_of_a_sum(&small, (1 << 32) + 1),
         None
     );
-    let none = VerifiedPrefixColumn::<u32>::new();
+    let none = PrefixColumn::<u32>::new();
     assert_eq!(verus_client::the_place_of_a_sum(&none, 0), Some(0));
     assert_eq!(verus_client::the_place_of_a_sum(&none, 1), None);
     assert_eq!(verus_client::the_two_places(&none, 0), (0, 0));
@@ -1580,7 +1550,7 @@ fn sums_searched() {
     assert_eq!(verus_client::the_two_places(&col, 22), (6, 5));
     // the flags that are set, in order
     let flags: Vec<bool> = (0..3000).map(|i| i % 7 == 2 || i % 11 == 0).collect();
-    let col = VerifiedPrefixColumn::<bool>::from_values(&flags);
+    let col = PrefixColumn::<bool>::from_values(&flags);
     let set: Vec<usize> = (0..flags.len()).filter(|i| flags[*i]).collect();
     for (k, place) in set.iter().enumerate() {
         assert_eq!(verus_client::the_kth_true(&col, k), Some(*place));
@@ -1592,12 +1562,12 @@ fn sums_searched() {
 #[test]
 fn sums_read_in_step() {
     let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
-    let col = VerifiedPrefixColumn::<u64>::from_values(&v);
+    let col = PrefixColumn::<u64>::from_values(&v);
     let before = |i: usize| v[..i].iter().map(|x| u128::from(*x)).sum::<u128>();
     // each running sum, of the column and of a range
     let sums = verus_client::running_sums(&col);
     assert_eq!(sums, (1..=1000).map(before).collect::<Vec<_>>());
-    assert!(verus_client::running_sums(&VerifiedPrefixColumn::<Option<i64>>::new()).is_empty());
+    assert!(verus_client::running_sums(&PrefixColumn::<Option<i64>>::new()).is_empty());
     for (a, b) in [(0, 0), (0, 1000), (3, 700), (999, 1000), (1000, 1000)] {
         let want: Vec<(u64, u128)> = (a..b).map(|i| (v[i], before(i))).collect();
         assert_eq!(verus_client::sums_in_a_range(&col, a, b), want);
@@ -1643,7 +1613,7 @@ fn sums_read_in_step() {
         assert_eq!(verus_client::first_over(&col, limit), first);
     }
     // signed values, nulls and flags
-    let signed = VerifiedPrefixColumn::<i64>::from_values(&[4, -9, i64::MIN, 2]);
+    let signed = PrefixColumn::<i64>::from_values(&[4, -9, i64::MIN, 2]);
     let least = i128::from(i64::MIN);
     assert_eq!(
         verus_client::running_sums(&signed),
@@ -1657,7 +1627,7 @@ fn sums_read_in_step() {
         verus_client::summed_by_moving(&signed, 1, 3),
         (-9 + least, -9 + least)
     );
-    let small = VerifiedPrefixColumn::<Option<u32>>::from_values(&[None, Some(u32::MAX), Some(1)]);
+    let small = PrefixColumn::<Option<u32>>::from_values(&[None, Some(u32::MAX), Some(1)]);
     assert_eq!(
         verus_client::running_sums(&small),
         [0, u64::from(u32::MAX), 1 << 32]
@@ -1666,7 +1636,7 @@ fn sums_read_in_step() {
         verus_client::a_value_with_its_sums(&small, 2),
         (u64::from(u32::MAX), Some(1), 1 << 32)
     );
-    let flags = VerifiedPrefixColumn::<bool>::from_values(&[true, false, true]);
+    let flags = PrefixColumn::<bool>::from_values(&[true, false, true]);
     assert_eq!(verus_client::running_sums(&flags), [1, 1, 2]);
     assert_eq!(verus_client::two_skips(&flags, 0, 2), (1, 2));
 }
@@ -1674,9 +1644,9 @@ fn sums_read_in_step() {
 #[test]
 fn sums_kept_by_each_move() {
     let v: Vec<u64> = (0..1000).map(|i| i % 13).collect();
-    let col = VerifiedPrefixColumn::<u64>::from_values(&v);
+    let col = PrefixColumn::<u64>::from_values(&v);
     let before = |i: usize| v[..i].iter().map(|x| u128::from(*x)).sum::<u128>();
-    verus_client::moved_with_sums(&VerifiedPrefixColumn::<u64>::from_values(&v[..10]));
+    verus_client::moved_with_sums(&PrefixColumn::<u64>::from_values(&v[..10]));
 
     let mut it = verus_client::told_by_a_prefix_iter(&col);
     assert_eq!(verus_client::told_of_the_running_sum(&it), 0);
@@ -1751,7 +1721,7 @@ fn sums_kept_by_each_move() {
     );
     verus_client::told_of_what_is_left(&it);
     // an iterator of a column of nothing
-    let none = VerifiedPrefixColumn::<Option<i64>>::new();
+    let none = PrefixColumn::<Option<i64>>::new();
     let mut it = verus_client::told_by_a_prefix_iter(&none);
     assert!(verus_client::told_by_a_prefixed_next(&mut it).is_none());
     assert_eq!(verus_client::told_of_the_running_sum(&it), 0);
@@ -1764,10 +1734,10 @@ fn sums_kept_by_each_move() {
 #[test]
 fn sums_read_by_runs() {
     let v: Vec<u64> = (0..1000).map(|i| i / 7).collect();
-    let col = VerifiedPrefixColumn::<u64>::from_values(&v);
+    let col = PrefixColumn::<u64>::from_values(&v);
     let before = |i: usize| v[..i].iter().map(|x| u128::from(*x)).sum::<u128>();
     assert_eq!(verus_client::summed_by_runs(&col), (before(1000), 1000));
-    let none = VerifiedPrefixColumn::<Option<i64>>::new();
+    let none = PrefixColumn::<Option<i64>>::new();
     assert_eq!(verus_client::summed_by_runs(&none), (0, 0));
     // run by run, in a window that starts and ends within runs
     let mut it = col.prefix_iter_range(5, 20);
@@ -1801,23 +1771,23 @@ fn sums_read_by_runs() {
         assert_eq!(copy.to_vec(), v[a..b]);
     }
     // signed values and flags
-    let signed = VerifiedPrefixColumn::<i64>::from_values(&[-4, -4, -4, 9]);
+    let signed = PrefixColumn::<i64>::from_values(&[-4, -4, -4, 9]);
     assert_eq!(verus_client::summed_by_runs(&signed), (-3, 4));
     let mut it = signed.prefix_iter();
     assert_eq!(
         verus_client::a_run_with_its_sums(&mut it),
         Some((3, -4, -12))
     );
-    let flags = VerifiedPrefixColumn::<bool>::from_values(&[true, true, false]);
+    let flags = PrefixColumn::<bool>::from_values(&[true, true, false]);
     assert_eq!(verus_client::summed_by_runs(&flags), (2, 3));
 }
 
 #[test]
 fn sums_sought() {
     let v: Vec<u64> = (0..1000).map(|i| i % 13).collect();
-    let col = VerifiedPrefixColumn::<u64>::from_values(&v);
+    let col = PrefixColumn::<u64>::from_values(&v);
     let before = |i: usize| v[..i].iter().map(|x| u128::from(*x)).sum::<u128>();
-    verus_client::found_with_sums(&VerifiedPrefixColumn::<u64>::from_values(&v[..10]));
+    verus_client::found_with_sums(&PrefixColumn::<u64>::from_values(&v[..10]));
     // the first sum past a limit, by the index and by reading on
     for limit in [0, 1, 2, 3, 1000, before(1000) - 1, before(1000), u128::MAX] {
         let first = (0..1000).find(|i| before(i + 1) > limit);
@@ -1830,7 +1800,7 @@ fn sums_sought() {
             (first, first)
         );
     }
-    let flags = VerifiedPrefixColumn::<bool>::from_values(&[false, true, false, true]);
+    let flags = PrefixColumn::<bool>::from_values(&[false, true, false, true]);
     assert_eq!(verus_client::found_by_its_sum(&flags, 0), Some((1, true)));
     assert_eq!(verus_client::found_by_its_sum(&flags, 1), Some((3, true)));
     assert_eq!(verus_client::found_by_its_sum(&flags, 2), None);
@@ -1871,7 +1841,7 @@ fn sums_sought() {
 #[test]
 fn sums_stopped_and_started() {
     let v: Vec<u64> = (0..1000).map(|i| i % 13).collect();
-    let mut col = VerifiedPrefixColumn::<u64>::from_values(&v);
+    let mut col = PrefixColumn::<u64>::from_values(&v);
     let before = |i: usize| v[..i].iter().map(|x| u128::from(*x)).sum::<u128>();
     for (a, m, b) in [
         (0, 0, 0),
@@ -1936,13 +1906,13 @@ fn the_clients_own_sums() {
     assert_eq!(verus_client::lengths_added_up(v[5], v[6], v[7]), (11, 18));
     assert_eq!(verus_client::a_null_has_no_length(v[5], v[12]), 17);
 
-    let col = VerifiedPrefixColumn::<Meta>::from_values(&v);
+    let col = PrefixColumn::<Meta>::from_values(&v);
     let nulls: Vec<Option<Meta>> = v
         .iter()
         .enumerate()
         .map(|(i, m)| if i % 3 == 0 { None } else { Some(*m) })
         .collect();
-    let nullable = VerifiedPrefixColumn::<Option<Meta>>::from_values(&nulls);
+    let nullable = PrefixColumn::<Option<Meta>>::from_values(&nulls);
     let kept = (0..1000)
         .filter(|i| i % 3 != 0)
         .map(|i| lens[i])
@@ -1967,7 +1937,7 @@ fn the_clients_own_sums() {
     assert_eq!(loaded.len(), 1000);
     assert_eq!(loaded.get_prefix(1000), before(1000));
     let longest = verus_client::a_meta(9, (1 << 60) - 1);
-    let mut plain = VerifiedColumn::<Meta>::fill(16, longest);
+    let mut plain = Column::<Meta>::fill(16, longest);
     let sixteen = verus_client::load_lengths(&plain.save()).unwrap();
     assert_eq!(sixteen.get_prefix(16), u64::MAX - 15);
     plain.push(verus_client::a_meta(0, 15));
@@ -1981,7 +1951,7 @@ fn the_clients_own_sums() {
 #[should_panic(expected = "prefix sum overflows")]
 fn a_length_past_the_sums() {
     let longest = verus_client::a_meta(9, (1 << 60) - 1);
-    let mut col = VerifiedPrefixColumn::<Meta>::fill(16, longest);
+    let mut col = PrefixColumn::<Meta>::fill(16, longest);
     col.push(verus_client::a_meta(0, 15));
     verus_client::a_length_past_the_sums(&mut col, verus_client::a_meta(3, 1));
 }
@@ -2021,9 +1991,9 @@ fn accumulators() {
     // seven marks of a kind at a time, and five equal steps
     let marks: Vec<Mark> = (0..1000).map(|i| Mark(i / 7 % 5 * 13)).collect();
     let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
-    let col = VerifiedAccColumn::<Mark>::from_values(&marks);
-    let board = VerifiedAccColumn::<Step>::from_values(&steps);
-    let plain = VerifiedColumn::<Mark>::from_values(&marks);
+    let col = AccColumn::<Mark>::from_values(&marks);
+    let board = AccColumn::<Step>::from_values(&steps);
+    let plain = Column::<Mark>::from_values(&marks);
     let bytes = plain.save();
 
     // the clients of a column of any kind, of accumulator columns
@@ -2106,7 +2076,7 @@ fn accumulators() {
     let cut = &bytes[..bytes.len() - 1];
     for b in [cut, &[], &[1], &[0x7f], &[2, 5, 2, 5]] {
         let as_one = verus_client::load_as_an_acc::<Mark, Leb128>(b);
-        assert_eq!(as_one.is_some(), VerifiedColumn::<Mark>::load(b).is_ok());
+        assert_eq!(as_one.is_some(), Column::<Mark>::load(b).is_ok());
     }
     assert!(verus_client::load_as_an_acc::<Mark, Leb128>(&[1]).is_none());
     let up = verus_client::added_up(&plain);
@@ -2126,8 +2096,8 @@ fn accumulators() {
 fn accumulators_by_runs() {
     let marks: Vec<Mark> = (0..1000).map(|i| Mark(i / 7 % 5 * 13)).collect();
     let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
-    let col = VerifiedAccColumn::<Mark>::from_values(&marks);
-    let board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let col = AccColumn::<Mark>::from_values(&marks);
+    let board = AccColumn::<Step>::from_values(&steps);
     let by_runs = verus_client::added_by_runs::<Mark, Leb128>(&col);
     assert_eq!(by_runs.0, flags_of(&marks));
     let by_runs = verus_client::added_by_runs::<Step, Leb128>(&board);
@@ -2136,11 +2106,11 @@ fn accumulators_by_runs() {
     // long runs: a mark an odd number of times over is open, and a step
     // is taken one time after another
     for n in [0, 1, 2, 4_000, 100_001] {
-        let long = VerifiedAccColumn::<Mark>::fill(n, Mark(9));
+        let long = AccColumn::<Mark>::fill(n, Mark(9));
         let by_runs = verus_client::added_by_runs::<Mark, Leb128>(&long);
         assert_eq!(by_runs.0, if n % 2 == 1 { 1 << 9 } else { 0 });
         let same = vec![a_step(4); n];
-        let long = VerifiedAccColumn::<Step>::from_values(&same);
+        let long = AccColumn::<Step>::from_values(&same);
         let by_runs = verus_client::added_by_runs::<Step, Leb128>(&long);
         assert_eq!(lamps(by_runs), board_of(&same));
     }
@@ -2189,19 +2159,19 @@ fn accumulators_by_runs() {
 
 /// A mark an accumulator column's iterator gives, with the kinds open
 /// before it and through it.
-fn mark_with_sums(pv: &VerifiedAccValue<'_, Mark>) -> (u64, u64, u64) {
+fn mark_with_sums(pv: &AccValue<'_, Mark>) -> (u64, u64, u64) {
     (pv.prefix().0, pv.value.0, pv.total().0)
 }
 
 /// A step an accumulator column's iterator gives, with the board before
 /// it and through it.
-fn step_with_sums(pv: &VerifiedAccValue<'_, Step>) -> ((u64, bool), u64, (u64, bool)) {
+fn step_with_sums(pv: &AccValue<'_, Step>) -> ((u64, bool), u64, (u64, bool)) {
     (lamps(pv.prefix()), pv.value.0, lamps(pv.total()))
 }
 
 /// Where an iterator over steps stands, where its window ends, and the
 /// board of the steps it has passed.
-fn stands(it: &VerifiedAccIter<'_, Step>) -> (usize, usize, (u64, bool)) {
+fn stands(it: &AccIter<'_, Step>) -> (usize, usize, (u64, bool)) {
     (it.pos(), it.end_pos(), lamps(it.total()))
 }
 
@@ -2209,8 +2179,8 @@ fn stands(it: &VerifiedAccIter<'_, Step>) -> (usize, usize, (u64, bool)) {
 fn accumulators_read_in_step() {
     let marks: Vec<Mark> = (0..1000).map(|i| Mark(i / 7 % 5 * 13)).collect();
     let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
-    let col = VerifiedAccColumn::<Mark>::from_values(&marks);
-    let board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let col = AccColumn::<Mark>::from_values(&marks);
+    let board = AccColumn::<Step>::from_values(&steps);
     let open = |i: usize| flags_of(&marks[..i]);
     let lit = |i: usize| board_of(&steps[..i]);
     // each running sum, of the column and of a range
@@ -2220,7 +2190,7 @@ fn accumulators_read_in_step() {
     let sums = verus_client::running_accs(&board);
     let sums: Vec<(u64, bool)> = sums.into_iter().map(lamps).collect();
     assert_eq!(sums, (1..=1000).map(lit).collect::<Vec<_>>());
-    assert!(verus_client::running_accs(&VerifiedAccColumn::<Option<Mark>>::new()).is_empty());
+    assert!(verus_client::running_accs(&AccColumn::<Option<Mark>>::new()).is_empty());
     for (a, b) in [(0, 0), (0, 1000), (3, 700), (999, 1000), (1000, 1000)] {
         let got: Vec<(u64, (u64, bool))> = verus_client::accs_in_a_range(&board, a, b)
             .into_iter()
@@ -2275,7 +2245,7 @@ fn accumulators_read_in_step() {
         ((0x2_0000_0001, true), (3, true))
     );
     // nulls, which add nothing
-    let nullable = VerifiedAccColumn::<Option<Mark>>::from_values(&[
+    let nullable = AccColumn::<Option<Mark>>::from_values(&[
         None,
         Some(Mark(3)),
         None,
@@ -2292,9 +2262,9 @@ fn accumulators_read_in_step() {
 #[test]
 fn accumulators_kept_by_each_move() {
     let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
-    let board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let board = AccColumn::<Step>::from_values(&steps);
     let lit = |i: usize| board_of(&steps[..i]);
-    verus_client::moved_with_accs(&VerifiedAccColumn::<Step>::from_values(&steps[..10]));
+    verus_client::moved_with_accs(&AccColumn::<Step>::from_values(&steps[..10]));
 
     let mut it = verus_client::told_by_an_acc_iter(&board);
     let sum = verus_client::told_of_the_running_acc(&it);
@@ -2362,7 +2332,7 @@ fn accumulators_kept_by_each_move() {
     assert_eq!(stands(&it), (1000, 1000, since(1000)));
     verus_client::told_of_the_accs_left(&it);
     // an iterator of a column of nothing
-    let none = VerifiedAccColumn::<Option<Mark>>::new();
+    let none = AccColumn::<Option<Mark>>::new();
     let mut it = verus_client::told_by_an_acc_iter(&none);
     assert!(verus_client::told_by_an_acc_next(&mut it).is_none());
     assert_eq!(verus_client::told_of_the_running_acc(&it).0, 0);
@@ -2376,15 +2346,15 @@ fn accumulators_kept_by_each_move() {
 fn accumulators_read_by_runs() {
     let marks: Vec<Mark> = (0..1000).map(|i| Mark(i / 7 % 5 * 13)).collect();
     let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
-    let col = VerifiedAccColumn::<Mark>::from_values(&marks);
-    let board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let col = AccColumn::<Mark>::from_values(&marks);
+    let board = AccColumn::<Step>::from_values(&steps);
     let open = |i: usize| flags_of(&marks[..i]);
     let lit = |i: usize| board_of(&steps[..i]);
     let (sum, count) = verus_client::added_by_run_moves(&col);
     assert_eq!((sum.0, count), (open(1000), 1000));
     let (sum, count) = verus_client::added_by_run_moves(&board);
     assert_eq!((lamps(sum), count), (lit(1000), 1000));
-    let none = VerifiedAccColumn::<Option<Mark>>::new();
+    let none = AccColumn::<Option<Mark>>::new();
     let (sum, count) = verus_client::added_by_run_moves(&none);
     assert_eq!((sum.0, count), (0, 0));
     // run by run, in a window that starts and ends within runs
@@ -2427,9 +2397,9 @@ fn accumulators_read_by_runs() {
 fn accumulators_sought() {
     let marks: Vec<Mark> = (0..10).map(|i| Mark(i / 7 % 5 * 13)).collect();
     let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
-    let board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let board = AccColumn::<Step>::from_values(&steps);
     let lit = |i: usize| board_of(&steps[..i]);
-    verus_client::found_with_accs(&VerifiedAccColumn::<Mark>::from_values(&marks));
+    verus_client::found_with_accs(&AccColumn::<Mark>::from_values(&marks));
     // by count, with what is passed over
     let mut it = board.prefix_iter_range(100, 900);
     let seek = verus_client::told_by_an_acc_delta_nth(&mut it, 10).unwrap();
@@ -2461,7 +2431,7 @@ fn accumulators_sought() {
 #[test]
 fn accumulators_stopped_and_started() {
     let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
-    let mut board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let mut board = AccColumn::<Step>::from_values(&steps);
     for (a, m, b) in [
         (0, 0, 0),
         (0, 500, 1000),
@@ -2508,9 +2478,9 @@ fn the_clients_own_accumulators() {
         .map(|i| (i % 3 != 0).then_some(marks[i]))
         .collect();
     let there: Vec<Mark> = some.iter().flatten().copied().collect();
-    let col = VerifiedAccColumn::<Mark>::from_values(&marks);
-    let nullable = VerifiedAccColumn::<Option<Mark>>::from_values(&some);
-    let board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let col = AccColumn::<Mark>::from_values(&marks);
+    let nullable = AccColumn::<Option<Mark>>::from_values(&some);
+    let board = AccColumn::<Step>::from_values(&steps);
     let (sums, (open, count), (moved, asked)) =
         verus_client::accs_of_the_clients_own(&col, &nullable, &board, 123, 987);
     let sums: Vec<u64> = sums.iter().map(|f| f.0).collect();
@@ -2524,7 +2494,7 @@ fn the_clients_own_accumulators() {
 #[test]
 fn delta_columns() {
     let values: Vec<u64> = vec![3, 4, 5, 5, 1 << 40, 7];
-    let mut col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    let mut col: DeltaColumn<u64> = verus_client::delta_built(&values);
     assert_eq!(verus_client::delta_values(&col), values);
     assert_eq!(verus_client::delta_len(&col), 6);
     verus_client::delta_set(&mut col, 1, 9);
@@ -2545,7 +2515,7 @@ fn delta_columns() {
 
 #[test]
 fn delta_simple_edits() {
-    let mut col: VerifiedDeltaColumn<i64> = verus_client::delta_small_slabs(&[5, 6, 7, -9, -9, 40]);
+    let mut col: DeltaColumn<i64> = verus_client::delta_small_slabs(&[5, 6, 7, -9, -9, 40]);
     assert_eq!(verus_client::delta_push_pop(&mut col, 41), Some(41));
     verus_client::delta_insert_remove(&mut col, 3, 1 << 50);
     assert_eq!(verus_client::delta_inserted(&mut col, 0, 4, 1), Some(5));
@@ -2562,7 +2532,7 @@ fn delta_simple_edits() {
     assert_eq!(verus_client::delta_values(&other), vec![4, -9, -9, 8]);
     assert_eq!(verus_client::delta_values(&col), vec![4, -9, -9]);
 
-    let mut to: VerifiedDeltaColumn<i64> = verus_client::delta_default();
+    let mut to: DeltaColumn<i64> = verus_client::delta_default();
     verus_client::delta_move_last(&mut col, &mut to);
     verus_client::delta_move_last(&mut col, &mut to);
     assert_eq!(verus_client::delta_values(&to), vec![-9, -9]);
@@ -2579,7 +2549,7 @@ fn delta_simple_edits() {
 
 #[test]
 fn delta_saved_and_loaded() {
-    let col: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[5, 6, 7, -9, -9, 40]);
+    let col: DeltaColumn<i64> = verus_client::delta_built(&[5, 6, 7, -9, -9, 40]);
     let bytes = verus_client::delta_saved(&col);
     let back = verus_client::delta_save_then_load(&col).unwrap();
     assert_eq!(verus_client::delta_values(&back), vec![5, 6, 7, -9, -9, 40]);
@@ -2597,7 +2567,7 @@ fn delta_saved_and_loaded() {
     let mut out = vec![9u8];
     let r = verus_client::delta_saved_after(&col, &mut out);
     assert_eq!(out[r], bytes[..]);
-    let other: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[1, 1]);
+    let other: DeltaColumn<i64> = verus_client::delta_built(&[1, 1]);
     let second = verus_client::delta_saved_in_one_buffer(&col, &other).unwrap();
     assert_eq!(verus_client::delta_values(&second), vec![1, 1]);
 
@@ -2613,7 +2583,7 @@ fn delta_saved_and_loaded() {
 
     // a column with a negative number is none of `u64`s
     assert_eq!(verus_client::delta_loaded_fits(&bytes, 0), None);
-    let small: VerifiedDeltaColumn<u64> = verus_client::delta_built(&[4, 2]);
+    let small: DeltaColumn<u64> = verus_client::delta_built(&[4, 2]);
     let small = verus_client::delta_saved(&small);
     assert_eq!(verus_client::delta_loaded_fits(&small, 1), Some(2));
     let edited = verus_client::delta_loaded_edits::<i64, Leb128>(&bytes).unwrap();
@@ -2626,16 +2596,16 @@ fn delta_saved_and_loaded() {
 #[test]
 fn delta_runs_and_fills() {
     use hexane::DeltaRun;
-    let mut col: VerifiedDeltaColumn<u32> = verus_client::delta_built(&[1, 2]);
+    let mut col: DeltaColumn<u32> = verus_client::delta_built(&[1, 2]);
     verus_client::delta_run_of_three(&mut col);
     assert_eq!(verus_client::delta_values(&col), vec![1, 2, 12, 14, 16]);
-    let mut col: VerifiedDeltaColumn<i32> = verus_client::delta_built(&[7]);
+    let mut col: DeltaColumn<i32> = verus_client::delta_built(&[7]);
     verus_client::delta_run_falls(&mut col);
     assert_eq!(verus_client::delta_values(&col), vec![-5, -10, 7]);
 
     // a run of `u32`s that falls below 0 is refused, and one that stops
     // short of it is taken
-    let mut col: VerifiedDeltaColumn<u32> = verus_client::delta_built(&[1, 2]);
+    let mut col: DeltaColumn<u32> = verus_client::delta_built(&[1, 2]);
     let low = DeltaRun {
         prefix: 5,
         delta: Some(-3),
@@ -2650,8 +2620,7 @@ fn delta_runs_and_fills() {
     assert!(verus_client::delta_run_checked(&mut col, 1, run));
     assert_eq!(verus_client::delta_values(&col), vec![1, 3, 1, 2]);
 
-    let mut col: VerifiedDeltaColumn<Option<u64>> =
-        verus_client::delta_built(&[Some(1), None, Some(9)]);
+    let mut col: DeltaColumn<Option<u64>> = verus_client::delta_built(&[Some(1), None, Some(9)]);
     let a = DeltaRun {
         prefix: 100,
         delta: Some(0),
@@ -2668,10 +2637,10 @@ fn delta_runs_and_fills() {
     verus_client::delta_no_runs(&mut col, 2, -7, Some(3));
     assert_eq!(verus_client::delta_values(&col), values);
 
-    let mut col: VerifiedDeltaColumn<Option<i64>> = verus_client::delta_built(&[Some(4)]);
+    let mut col: DeltaColumn<Option<i64>> = verus_client::delta_built(&[Some(4)]);
     verus_client::delta_null_run(&mut col, 99);
     assert_eq!(verus_client::delta_values(&col), vec![None, None, Some(4)]);
-    let mut col: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[-5]);
+    let mut col: DeltaColumn<i64> = verus_client::delta_built(&[-5]);
     let over = DeltaRun {
         prefix: i64::MAX,
         delta: Some(1),
@@ -2711,18 +2680,18 @@ fn delta_runs_and_fills() {
 
 #[test]
 fn delta_iterators() {
-    use hexane::verified::VerifiedDeltaIter;
+    use hexane::verified::DeltaIter;
     let values: [u64; 10] = [1, 2, 2, 5, 9, 9, 12, 20, 21, 30];
-    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    let col: DeltaColumn<u64> = verus_client::delta_built(&values);
     assert_eq!(verus_client::delta_read_in_a_loop(&col), values);
     assert!(verus_client::delta_ascending(&col));
-    let falls: VerifiedDeltaColumn<u64> = verus_client::delta_built(&[1, 4, 3]);
+    let falls: DeltaColumn<u64> = verus_client::delta_built(&[1, 4, 3]);
     assert!(!verus_client::delta_ascending(&falls));
     let copy = verus_client::delta_copied_by_iter(&col);
     assert_eq!(verus_client::delta_values(&copy), values);
     assert_eq!(verus_client::delta_the_third(&col), Some(2));
     assert_eq!(verus_client::delta_the_third(&falls), Some(3));
-    let short: VerifiedDeltaColumn<Option<i32>> = verus_client::delta_built(&[None, Some(-4)]);
+    let short: DeltaColumn<Option<i32>> = verus_client::delta_built(&[None, Some(-4)]);
     assert_eq!(verus_client::delta_the_third(&short), None);
     assert_eq!(
         verus_client::delta_read_in_a_loop(&short),
@@ -2744,8 +2713,8 @@ fn delta_iterators() {
     verus_client::delta_told_by_the_call(&col);
     verus_client::delta_two_readers(&falls);
 
-    let a: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 7, -20]);
-    let b: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 8, -20]);
+    let a: DeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 7, -20]);
+    let b: DeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 8, -20]);
     assert!(verus_client::delta_agree(&a, &a));
     assert!(!verus_client::delta_agree(&a, &b));
     verus_client::delta_every_other(&a);
@@ -2778,7 +2747,7 @@ fn delta_iterators() {
     assert_eq!(it.by_ref().collect::<Vec<u64>>(), vec![2, 5, 9]);
     let it = verus_client::delta_told_by_into_iter(&col);
     assert_eq!(it.len(), 10);
-    let mut none: VerifiedDeltaIter<'_, u64> = verus_client::delta_told_by_an_iters_default();
+    let mut none: DeltaIter<'_, u64> = verus_client::delta_told_by_an_iters_default();
     assert_eq!(none.next(), None);
 }
 
@@ -2791,7 +2760,7 @@ fn delta_runs_and_states() {
         count,
     };
     let values: [u64; 4] = [5, 7, 9, 9];
-    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    let col: DeltaColumn<u64> = verus_client::delta_built(&values);
     assert_eq!(
         verus_client::delta_in_runs(&col),
         vec![run(0, Some(5), 1), run(5, Some(2), 2), run(9, Some(0), 1)]
@@ -2800,17 +2769,17 @@ fn delta_runs_and_states() {
     assert_eq!(verus_client::delta_values(&copy), values);
     let copy = verus_client::delta_copied_run_by_run(&col);
     assert_eq!(verus_client::delta_values(&copy), values);
-    let mut dst: VerifiedDeltaColumn<u64> = verus_client::delta_built(&[1, 100]);
+    let mut dst: DeltaColumn<u64> = verus_client::delta_built(&[1, 100]);
     verus_client::delta_moved_by_runs(&col, 1, 3, &mut dst, 1);
     assert_eq!(verus_client::delta_values(&dst), [1, 7, 9, 100]);
     verus_client::delta_runs_of_four(&col);
-    let nulls: VerifiedDeltaColumn<Option<u32>> = verus_client::delta_built(&[None, None, Some(3)]);
+    let nulls: DeltaColumn<Option<u32>> = verus_client::delta_built(&[None, None, Some(3)]);
     verus_client::delta_nulls_in_a_run(&nulls);
     assert_eq!(
         verus_client::delta_in_runs(&nulls),
         vec![run(0, None, 2), run(0, Some(3), 1)]
     );
-    let signed: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 7, -20]);
+    let signed: DeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 7, -20]);
     assert_eq!(
         verus_client::delta_the_number_before(&signed, 0),
         Some(run(0, Some(-3), 1))
@@ -2835,7 +2804,7 @@ fn delta_runs_and_states() {
     let it = verus_client::delta_resumed(&col, 1, 3).unwrap();
     assert_eq!(it.collect::<Vec<u64>>(), vec![7, 9]);
     verus_client::delta_resumed_at_the_end(&col, 1, 3);
-    let mut edited: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    let mut edited: DeltaColumn<u64> = verus_client::delta_built(&values);
     assert!(!verus_client::delta_ended_by_an_edit(&mut edited, 12));
     assert!(!verus_client::delta_ended_by_many(&mut edited, 12, 3));
     assert_eq!(
@@ -2877,7 +2846,7 @@ fn delta_scans_and_searches() {
     use std::ops::Bound;
     // values in no order: scans
     let values: [u64; 7] = [5, 3, 9, 3, 12, 3, 7];
-    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    let col: DeltaColumn<u64> = verus_client::delta_built(&values);
     assert_eq!(verus_client::delta_first_place_in(&col, 3, 0, 7), Some(1));
     assert_eq!(verus_client::delta_first_place_in(&col, 3, 2, 7), Some(3));
     assert_eq!(verus_client::delta_first_place_in(&col, 3, 6, 7), None);
@@ -2892,32 +2861,32 @@ fn delta_scans_and_searches() {
         verus_client::delta_first_in_bounds(&col, 13, u64::MAX),
         None
     );
-    let signed: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 7, -20]);
+    let signed: DeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 7, -20]);
     assert_eq!(verus_client::delta_first_at_least(&signed, 1), Some((2, 7)));
     assert_eq!(verus_client::delta_first_at_least(&signed, 8), None);
-    let small: VerifiedDeltaColumn<i32> = verus_client::delta_built(&[4, -1, 6, 5]);
+    let small: DeltaColumn<i32> = verus_client::delta_built(&[4, -1, 6, 5]);
     assert_eq!(
         verus_client::delta_first_between(&small, 4, 6),
         Some((2, 6))
     );
     assert_eq!(verus_client::delta_first_between(&small, 6, 4), None);
-    let nullable: VerifiedDeltaColumn<Option<u32>> =
+    let nullable: DeltaColumn<Option<u32>> =
         verus_client::delta_built(&[None, Some(8), None, Some(2)]);
     assert_eq!(verus_client::delta_first_below(&nullable, 5), Some((3, 2)));
     assert_eq!(verus_client::delta_first_below(&nullable, 0), None);
-    let numbers: VerifiedDeltaColumn<Option<i64>> =
+    let numbers: DeltaColumn<Option<i64>> =
         verus_client::delta_built(&[None, None, Some(-4), None]);
     assert_eq!(verus_client::delta_first_null(&numbers), Some(0));
     assert_eq!(
         verus_client::delta_any_number(&numbers),
         Some((2, Some(-4)))
     );
-    let big: VerifiedDeltaColumn<Option<u64>> = verus_client::delta_built(&[None, Some(1), None]);
+    let big: DeltaColumn<Option<u64>> = verus_client::delta_built(&[None, Some(1), None]);
     assert_eq!(verus_client::delta_null_in_no_bounds(&big), None);
 
     // values in order: searches
     let sorted: [u64; 7] = [1, 3, 3, 3, 7, 9, 9];
-    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&sorted);
+    let col: DeltaColumn<u64> = verus_client::delta_built(&sorted);
     assert_eq!(verus_client::delta_seek_then_read(&col, 3), 1..4);
     assert_eq!(verus_client::delta_seek_then_read(&col, 4), 4..4);
     assert_eq!(verus_client::delta_seek_then_read(&col, 0), 0..0);
@@ -2931,7 +2900,7 @@ fn delta_scans_and_searches() {
     assert_eq!(it.next(), Some(7));
     assert_eq!(verus_client::delta_find_in_the_rest(&mut it, 2), 5..5);
     assert_eq!(it.next(), Some(9));
-    let first: VerifiedDeltaColumn<Option<u64>> =
+    let first: DeltaColumn<Option<u64>> =
         verus_client::delta_built(&[None, None, None, Some(0), Some(6)]);
     assert_eq!(verus_client::delta_seek_nulls_first(&first), 0..3);
     let mut it = col.iter();
@@ -2955,7 +2924,7 @@ fn delta_scans_and_searches() {
     );
 
     // each call by itself
-    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    let col: DeltaColumn<u64> = verus_client::delta_built(&values);
     let mut it = col.iter();
     assert_eq!(
         verus_client::delta_told_by_scan_to_value(&mut it, 3),
@@ -2976,7 +2945,7 @@ fn delta_scans_and_searches() {
     );
     assert_eq!(verus_client::delta_told_by_scan_to_range(&mut it, ..), None);
     assert_eq!(verus_client::delta_told_by_scan_to_value(&mut it, 3), None);
-    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&sorted);
+    let col: DeltaColumn<u64> = verus_client::delta_built(&sorted);
     let mut it = col.iter();
     assert_eq!(
         verus_client::delta_told_by_seek_to_value(&mut it, 9, 0..usize::MAX),
@@ -2995,9 +2964,9 @@ fn delta_scans_and_searches() {
 
 #[test]
 fn delta_finds() {
-    use hexane::verified::VerifiedFindByRange;
+    use hexane::verified::FindByRange;
     let values: [u64; 7] = [5, 3, 9, 3, 12, 3, 7];
-    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    let col: DeltaColumn<u64> = verus_client::delta_built(&values);
     assert_eq!(verus_client::delta_found_all(&col, 3), [1, 3, 5]);
     assert!(verus_client::delta_found_all(&col, 4).is_empty());
     assert_eq!(verus_client::delta_found_between(&col, 5, 12), [0, 2, 6]);
@@ -3006,14 +2975,13 @@ fn delta_finds() {
     assert_eq!(verus_client::delta_found_twice(&col, 12), (Some(4), None));
     assert_eq!(verus_client::delta_found_twice(&col, 0), (None, None));
     assert_eq!(verus_client::delta_find_unfitting(&col), None);
-    let small: VerifiedDeltaColumn<Option<i32>> =
+    let small: DeltaColumn<Option<i32>> =
         verus_client::delta_built(&[None, Some(8), None, Some(2), Some(-1)]);
     assert_eq!(verus_client::delta_found_at_most(&small, 5), Some(3));
     assert_eq!(verus_client::delta_found_at_most(&small, -2), None);
-    let nullable: VerifiedDeltaColumn<Option<u64>> =
-        verus_client::delta_built(&[None, Some(1), None]);
+    let nullable: DeltaColumn<Option<u64>> = verus_client::delta_built(&[None, Some(1), None]);
     assert_eq!(verus_client::delta_find_null(&nullable), (None, None));
-    let signed: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 7, -20]);
+    let signed: DeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 7, -20]);
     assert_eq!(verus_client::delta_find_first_number(&signed, 7), Some(2));
     assert_eq!(verus_client::delta_find_first_number(&signed, 8), None);
     assert_eq!(verus_client::delta_find_nothing(), None);
@@ -3026,15 +2994,15 @@ fn delta_finds() {
     assert_eq!(finder.collect::<Vec<_>>(), [3, 5]);
     assert_eq!(verus_client::delta_told_by_find_first(&col, 9), Some(2));
     assert_eq!(verus_client::delta_told_by_find_first(&col, 8), None);
-    let mut none: VerifiedFindByRange<'static, u64> = verus_client::delta_told_by_find_default();
+    let mut none: FindByRange<'static, u64> = verus_client::delta_told_by_find_default();
     assert_eq!(none.next(), None);
 }
 
 #[test]
 fn delta_encoders() {
-    use hexane::verified::{VerifiedDeltaEncoder, VerifiedDeltaEncoderState};
+    use hexane::verified::{DeltaEncoder, DeltaEncoderState};
     let input: Vec<Option<i64>> = vec![Some(4), Some(4), None, Some(-9), Some(i64::MAX - 20)];
-    let col: VerifiedDeltaColumn<Option<i64>> = verus_client::delta_built(&input);
+    let col: DeltaColumn<Option<i64>> = verus_client::delta_built(&input);
     let bytes = col.save();
 
     // one encoding, whichever way it is made
@@ -3074,7 +3042,7 @@ fn delta_encoders() {
 
     // any iterator of a type whose every value fits; and one of numbers
     // that may not, checked as they are given
-    let small: VerifiedDeltaColumn<u32> = verus_client::delta_built(&[3, 4, 5]);
+    let small: DeltaColumn<u32> = verus_client::delta_built(&[3, 4, 5]);
     assert_eq!(
         verus_client::delta_encode_any_iterator([3u32, 4, 5].into_iter()),
         small.save()
@@ -3082,11 +3050,11 @@ fn delta_encoders() {
     let misfit = vec![Some(1), None, Some(u64::MAX)];
     assert_eq!(verus_client::delta_encode_checked(&misfit), None);
     let fit = vec![Some(1), None, Some(i64::MAX as u64)];
-    let wide: VerifiedDeltaColumn<Option<u64>> = verus_client::delta_built(&fit);
+    let wide: DeltaColumn<Option<u64>> = verus_client::delta_built(&fit);
     assert_eq!(verus_client::delta_encode_checked(&fit), Some(wide.save()));
 
     // each call of the encoder by itself
-    let (mut enc, other): (VerifiedDeltaEncoder<'_, Option<i64>>, _) =
+    let (mut enc, other): (DeltaEncoder<'_, Option<i64>>, _) =
         verus_client::delta_told_by_a_new_encoder();
     assert_eq!(
         verus_client::delta_told_by_an_encoders_count(&other),
@@ -3103,25 +3071,25 @@ fn delta_encoders() {
     let mut out = vec![1];
     let r = verus_client::delta_told_by_an_encoders_save_to(enc, &mut out);
     assert_eq!((r.clone(), &out[r]), (1..1 + bytes.len(), &bytes[..]));
-    let mut ones = VerifiedDeltaEncoder::<i64>::new();
+    let mut ones = DeltaEncoder::<i64>::new();
     ones.append_n(1, 5);
     let r = verus_client::delta_told_by_an_encoders_save_to_unless(ones, &mut out, 1);
     assert_eq!(
         (r, out.len()),
         (1 + bytes.len()..1 + bytes.len(), 1 + bytes.len())
     );
-    let mut ones = VerifiedDeltaEncoder::<u64>::new();
+    let mut ones = DeltaEncoder::<u64>::new();
     ones.append_n(1, 5);
     let mut out = vec![];
     verus_client::delta_unless_a_misfit(ones, &mut out, u64::MAX);
-    assert_eq!(out, VerifiedDeltaEncoder::<u64>::encode([1; 5]));
-    let mut far = VerifiedDeltaEncoder::<i64>::new();
+    assert_eq!(out, DeltaEncoder::<u64>::encode([1; 5]));
+    let mut far = DeltaEncoder::<i64>::new();
     far.extend([i64::MIN, -1]);
     let saved = verus_client::delta_saved_within_a_span(far, 0, 1);
-    assert_eq!(saved, VerifiedDeltaEncoder::<i64>::encode([i64::MIN, -1]));
+    assert_eq!(saved, DeltaEncoder::<i64>::encode([i64::MIN, -1]));
 
     // and of the state that writes into its caller's buffer
-    let (mut state, other): (VerifiedDeltaEncoderState<'_, Option<i64>>, _) =
+    let (mut state, other): (DeltaEncoderState<'_, Option<i64>>, _) =
         verus_client::delta_told_by_a_new_state();
     let mut buf = vec![9];
     assert_eq!(
@@ -3153,8 +3121,8 @@ fn delta_encoders() {
     // two states into one buffer, and a state's word on its one value
     let mut buf = vec![1];
     let mid = verus_client::delta_two_streamed(&mut buf);
-    let first: VerifiedDeltaColumn<u32> = verus_client::delta_built(&[7, 7, 9]);
-    let second: VerifiedDeltaColumn<Option<i64>> =
+    let first: DeltaColumn<u32> = verus_client::delta_built(&[7, 7, 9]);
+    let second: DeltaColumn<Option<i64>> =
         verus_client::delta_built(&[Some(-5), None, None, Some(i64::MIN)]);
     assert_eq!(buf[1..mid], first.save()[..]);
     assert_eq!(buf[mid..], second.save()[..]);
@@ -3174,18 +3142,18 @@ fn delta_encoder_stops_at_a_span_too_wide() {
 
 #[test]
 fn delta_decoders() {
-    use hexane::verified::VerifiedDeltaDecoder;
+    use hexane::verified::DeltaDecoder;
     fn run(count: usize, value: Option<i64>) -> Option<Run<Option<i64>>> {
         Some(Run { count, value })
     }
     // the differences are 4, 4, 4, two nulls, -21 and `i64::MAX - 11`
     let last = i64::MAX - 20;
     let input = vec![Some(4), Some(8), Some(12), None, None, Some(-9), Some(last)];
-    let col: VerifiedDeltaColumn<Option<i64>> = verus_client::delta_built(&input);
+    let col: DeltaColumn<Option<i64>> = verus_client::delta_built(&input);
     let bytes = col.save();
 
     // the values of a saved column, whichever way they are read
-    let dec = VerifiedDeltaDecoder::<Option<i64>>::new(&bytes);
+    let dec = DeltaDecoder::<Option<i64>>::new(&bytes);
     assert_eq!(verus_client::delta_read_all(dec), input);
     assert_eq!(
         verus_client::delta_decode_all::<Option<i64>, Leb128>(&bytes),
@@ -3210,8 +3178,7 @@ fn delta_decoders() {
     assert!(verus_client::delta_decoded_or_loaded::<i64, Leb128>(&bytes).is_none());
 
     // each call of the decoder by itself
-    let mut dec: VerifiedDeltaDecoder<'_, Option<i64>> =
-        verus_client::delta_told_by_a_decoder(&bytes);
+    let mut dec: DeltaDecoder<'_, Option<i64>> = verus_client::delta_told_by_a_decoder(&bytes);
     assert!(verus_client::delta_told_by_a_checked_decoder::<u32, Leb128>(&bytes).is_err());
     let mut other =
         verus_client::delta_told_by_a_checked_decoder::<Option<i64>, Leb128>(&bytes).unwrap();
@@ -3263,9 +3230,9 @@ fn delta_decoders() {
     assert_eq!(verus_client::delta_run_then_next(&mut other, 9), None);
 
     // a decoder's first run, given to a column
-    let first: VerifiedDeltaColumn<Option<i64>> = verus_client::delta_first_run_rebuilt(&bytes);
+    let first: DeltaColumn<Option<i64>> = verus_client::delta_first_run_rebuilt(&bytes);
     assert_eq!(first.to_vec(), input[..3]);
-    let none: VerifiedDeltaColumn<u32> = verus_client::delta_first_run_rebuilt(&[]);
+    let none: DeltaColumn<u32> = verus_client::delta_first_run_rebuilt(&[]);
     assert!(none.to_vec().is_empty());
 }
 
@@ -3487,7 +3454,7 @@ fn bijou64() {
         Some(Action::Set),
         Some(Action::Set),
     ];
-    let bytes = bijou::VerifiedColumn::<u64>::from_values(&input).save();
+    let bytes = bijou::Column::<u64>::from_values(&input).save();
     verus_client::columns_with_bijou64(
         &input,
         &nullable,
@@ -3497,17 +3464,17 @@ fn bijou64() {
         nullable.clone(),
         &bytes,
     );
-    let acts = bijou::VerifiedColumn::<Option<Action>>::from_values(&actions).save();
+    let acts = bijou::Column::<Option<Action>>::from_values(&actions).save();
     verus_client::columns_with_bijou64(&vec![], &vec![], &vec![], &vec![], vec![], vec![], &acts);
     verus_client::strings_with_bijou64(&vec![&b"ab"[..], b"", b"ab"], &vec!["é", "", "x"]);
 
-    let sums = bijou::VerifiedPrefixColumn::<u64>::from_values(&[3, 0, 4]).save();
+    let sums = bijou::PrefixColumn::<u64>::from_values(&[3, 0, 4]).save();
     verus_client::sums_with_bijou64(&sums, 3);
     verus_client::sums_with_bijou64(&[0xf9, 0x00], 0);
 
     let values: Vec<i64> = vec![10, 11, 12, -500, i64::MAX >> 2];
     let some = vec![Some(5u32), None, Some(u32::MAX), Some(0)];
-    let saved = bijou::VerifiedDeltaColumn::<i64>::from_values(&values).save();
+    let saved = bijou::DeltaColumn::<i64>::from_values(&values).save();
     verus_client::deltas_with_bijou64(&values, &some, values.clone(), &saved);
     verus_client::deltas_with_bijou64(&vec![], &vec![], vec![], &[0xff; 9]);
 
@@ -3519,14 +3486,14 @@ fn bijou64() {
     assert_eq!(leb.to_vec(), col.to_vec());
     assert_ne!(leb_bytes, bytes);
 
-    let old = VerifiedColumn::<Option<i64>>::from_values(&nullable);
+    let old = Column::<Option<i64>>::from_values(&nullable);
     let new = verus_client::from_one_codec_to_the_other(&old);
     assert_eq!(new.to_vec(), nullable);
     assert_eq!(
         new.save(),
-        bijou::VerifiedColumn::<Option<i64>>::from_values(&nullable).save()
+        bijou::Column::<Option<i64>>::from_values(&nullable).save()
     );
-    let old = VerifiedDeltaColumn::<i64>::from_values(&values);
+    let old = DeltaColumn::<i64>::from_values(&values);
     let new = verus_client::deltas_from_one_codec_to_the_other(&old);
     assert_eq!(new.to_vec(), values);
     assert_eq!(new.save(), saved);
@@ -3542,7 +3509,7 @@ fn bijou64() {
 
 /// A value as the cursor's clients take it, and as these tests compare
 /// it.
-trait Lent<C: VCodec>: VValue<C> + Clone {
+trait Lent<C: Codec>: ColumnValueRef<C> + Clone {
     type Seen: Clone + PartialEq + std::fmt::Debug;
 
     fn lend(&self) -> Get<'_, Self>;
@@ -3550,7 +3517,7 @@ trait Lent<C: VCodec>: VValue<C> + Clone {
     fn seen(v: Get<'_, Self>) -> Self::Seen;
 }
 
-impl<C: VCodec> Lent<C> for u64 {
+impl<C: Codec> Lent<C> for u64 {
     type Seen = u64;
 
     fn lend(&self) -> u64 {
@@ -3562,7 +3529,7 @@ impl<C: VCodec> Lent<C> for u64 {
     }
 }
 
-impl<C: VCodec> Lent<C> for Option<i64> {
+impl<C: Codec> Lent<C> for Option<i64> {
     type Seen = Option<i64>;
 
     fn lend(&self) -> Option<i64> {
@@ -3574,7 +3541,7 @@ impl<C: VCodec> Lent<C> for Option<i64> {
     }
 }
 
-impl<C: VCodec> Lent<C> for bool {
+impl<C: Codec> Lent<C> for bool {
     type Seen = bool;
 
     fn lend(&self) -> bool {
@@ -3586,7 +3553,7 @@ impl<C: VCodec> Lent<C> for bool {
     }
 }
 
-impl<C: VCodec> Lent<C> for Vec<u8> {
+impl<C: Codec> Lent<C> for Vec<u8> {
     type Seen = Vec<u8>;
 
     fn lend(&self) -> &[u8] {
@@ -3598,7 +3565,7 @@ impl<C: VCodec> Lent<C> for Vec<u8> {
     }
 }
 
-impl<C: VCodec> Lent<C> for String {
+impl<C: Codec> Lent<C> for String {
     type Seen = String;
 
     fn lend(&self) -> &str {
@@ -3610,7 +3577,7 @@ impl<C: VCodec> Lent<C> for String {
     }
 }
 
-impl<C: VCodec> Lent<C> for Mark {
+impl<C: Codec> Lent<C> for Mark {
     type Seen = u64;
 
     fn lend(&self) -> Mark {
@@ -3623,18 +3590,18 @@ impl<C: VCodec> Lent<C> for Mark {
 }
 
 /// What a column holds.
-fn seen<V: Lent<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>) -> Vec<V::Seen> {
+fn seen<V: Lent<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>) -> Vec<V::Seen> {
     col.to_vec().into_iter().map(V::seen).collect()
 }
 
 /// The cursor's clients for every kind of column, on a column of
 /// `model`, which has four values or more, with two values of the
 /// caller's.
-fn cursor_clients<V: Lent<C>, C: VCodec, K: VIndex<V, C>>(model: &[V], x: &V, y: &V) {
+fn cursor_clients<V: Lent<C>, C: Codec, K: VIndex<V, C>>(model: &[V], x: &V, y: &V) {
     let n = model.len();
     assert!(n >= 4);
     let lent: Vec<Get<'_, V>> = model.iter().map(V::lend).collect();
-    let fresh = || VerifiedColumn::<V, C, K>::from_values(&lent);
+    let fresh = || Column::<V, C, K>::from_values(&lent);
     let was: Vec<V::Seen> = model.iter().map(|v| V::seen(v.lend())).collect();
     let (sx, sy) = (V::seen(x.lend()), V::seen(y.lend()));
 
@@ -3848,7 +3815,7 @@ fn edit_cursors() {
 
     let lent: Vec<&[u8]> = bytes.iter().map(|b| &b[..]).collect();
     for at in 0..=bytes.len() {
-        let mut col = VerifiedColumn::<Vec<u8>>::from_values(&lent);
+        let mut col = Column::<Vec<u8>>::from_values(&lent);
         let taken = verus_client::bytes_taken_out(&mut col, at);
         assert_eq!(taken.as_ref(), bytes.get(at));
         let mut want = lent.clone();
@@ -3860,7 +3827,7 @@ fn edit_cursors() {
 
     let flags = [true, true, false, false, true];
     for at in 0..flags.len() {
-        let mut col = VerifiedColumn::<bool>::from_values(&flags);
+        let mut col = Column::<bool>::from_values(&flags);
         verus_client::flag_turned(&mut col, at);
         let mut want = flags;
         want[at] = !want[at];
@@ -3868,7 +3835,7 @@ fn edit_cursors() {
     }
 
     for values in [vec![], vec![0], many.clone(), vec![u64::MAX - 1, 0, 0]] {
-        let mut col = VerifiedColumn::<u64>::from_values(&values);
+        let mut col = Column::<u64>::from_values(&values);
         verus_client::each_one_more(&mut col);
         let want: Vec<u64> = values.iter().map(|v| v + 1).collect();
         assert_eq!(col.to_vec(), want);
@@ -3881,7 +3848,7 @@ fn edit_cursors() {
         many.iter().map(|&v| (v % 3 != 0).then_some(v)).collect(),
         many.iter().map(|&v| Some(v)).collect(),
     ] {
-        let mut col = VerifiedColumn::<Option<u64>>::from_values(&values);
+        let mut col = Column::<Option<u64>>::from_values(&values);
         verus_client::absent_ones_dropped(&mut col);
         let want: Vec<Option<u64>> = values.iter().copied().filter(Option::is_some).collect();
         assert_eq!(col.to_vec(), want);
@@ -3893,12 +3860,12 @@ fn edit_cursors() {
         (vec![3, 0, 4], 3, 0),
         (many.clone(), 500, 77),
     ] {
-        let mut col = VerifiedPrefixColumn::<u64>::from_values(&values);
+        let mut col = PrefixColumn::<u64>::from_values(&values);
         verus_client::sums_after_a_cursor(&mut col, at, v);
         let mut want = values.clone();
         want.insert(at, v);
         assert_eq!(col.to_vec(), want);
-        let again = VerifiedPrefixColumn::<u64>::from_values(&want);
+        let again = PrefixColumn::<u64>::from_values(&want);
         for i in [0, at, at + 1, want.len()] {
             assert_eq!(col.get_prefix(i), again.get_prefix(i));
         }
@@ -3935,14 +3902,14 @@ fn edit_cursors_with_bijou64() {
 
 /// The delta cursor's clients, on a column of `model`, which has six
 /// values or more, with two values of the caller's.
-fn delta_cursor_clients<T: VDeltaValue<C> + PartialEq + std::fmt::Debug, C: VCodec>(
+fn delta_cursor_clients<T: DeltaValue<C> + PartialEq + std::fmt::Debug, C: Codec>(
     model: &[T],
     x: T,
     y: T,
 ) {
     let n = model.len();
     assert!(n >= 6);
-    let fresh = || VerifiedDeltaColumn::<T, C>::from_values(model);
+    let fresh = || DeltaColumn::<T, C>::from_values(model);
     let was = model.to_vec();
 
     for (at, del) in [(0, 0), (1, 2), (n, 0), (0, n), (n - 1, 1)] {
@@ -4076,22 +4043,16 @@ fn delta_edit_cursors() {
 
     assert_eq!(verus_client::delta_edit_as_documented(), [10, 25, 40, 45]);
 
-    let mut col = VerifiedDeltaColumn::<u32>::from_values(&[1, 2]);
+    let mut col = DeltaColumn::<u32>::from_values(&[1, 2]);
     verus_client::delta_runs_by_a_cursor(&mut col, 1);
     assert_eq!(col.to_vec(), [1, 12, 14, 16, 7, 9, 2]);
 
-    let mut col = VerifiedDeltaColumn::<i64>::from_values(&[-5, 0, 0, 1 << 50, -(1 << 50)]);
+    let mut col = DeltaColumn::<i64>::from_values(&[-5, 0, 0, 1 << 50, -(1 << 50)]);
     verus_client::delta_each_one_later(&mut col);
     assert_eq!(col.to_vec(), [-4, 1, 1, (1 << 50) + 1, -(1 << 50) + 1]);
 
-    let mut col = VerifiedDeltaColumn::<Option<i32>>::from_values(&[
-        None,
-        Some(3),
-        None,
-        None,
-        Some(-1),
-        None,
-    ]);
+    let mut col =
+        DeltaColumn::<Option<i32>>::from_values(&[None, Some(3), None, None, Some(-1), None]);
     verus_client::delta_nulls_dropped(&mut col);
     assert_eq!(col.to_vec(), [Some(3), Some(-1)]);
 
@@ -4109,12 +4070,12 @@ fn delta_edit_cursors() {
             count: 1,
         },
     ];
-    let mut col = VerifiedDeltaColumn::<Option<u32>>::from_values(&[Some(1)]);
+    let mut col = DeltaColumn::<Option<u32>>::from_values(&[Some(1)]);
     assert!(verus_client::delta_checked_runs_by_a_cursor(
         &mut col, 0, &runs
     ));
     assert_eq!(col.to_vec(), [Some(9), Some(8), None, Some(1)]);
-    let mut col = VerifiedDeltaColumn::<u32>::from_values(&[1]);
+    let mut col = DeltaColumn::<u32>::from_values(&[1]);
     assert!(!verus_client::delta_checked_runs_by_a_cursor(
         &mut col, 0, &runs
     ));
@@ -4140,8 +4101,8 @@ fn copies() {
     let dst: Vec<u64> = vec![1, 2, 3, 4, 5];
     let src: Vec<u64> = vec![7, 8, 9];
 
-    let mut col = VerifiedColumn::<u64>::from_values(&dst);
-    verus_client::copied_onto_the_end(&mut col, VerifiedColumn::<u64>::from_values(&src));
+    let mut col = Column::<u64>::from_values(&dst);
+    verus_client::copied_onto_the_end(&mut col, Column::<u64>::from_values(&src));
     assert_eq!(col.to_vec(), [1, 2, 3, 4, 5, 7, 8, 9]);
 
     for (at, del, start, end, want) in [
@@ -4150,24 +4111,24 @@ fn copies() {
         (0, 0, 2, 1, vec![1, 2, 3, 4, 5]),
         (2, 3, 3, 3, vec![1, 2]),
     ] {
-        let mut col = VerifiedColumn::<u64>::from_values(&dst);
-        let from = VerifiedColumn::<u64>::from_values(&src);
+        let mut col = Column::<u64>::from_values(&dst);
+        let from = Column::<u64>::from_values(&src);
         verus_client::copied_in_place(&mut col, from, at, del, start, end);
         assert_eq!(col.to_vec(), want);
     }
 
-    let mut col = VerifiedColumn::<u64>::from_values(&dst);
-    let from = VerifiedColumn::<u64>::from_values(&src);
+    let mut col = Column::<u64>::from_values(&dst);
+    let from = Column::<u64>::from_values(&src);
     verus_client::copied_at_two_places(&mut col, from, 1, 3, 0, 1, 3);
     assert_eq!(col.to_vec(), [1, 7, 2, 3, 8, 9, 5]);
 
-    let mut col = VerifiedColumn::<u64>::from_values(&dst);
-    let from = VerifiedColumn::<u64>::from_values(&src);
+    let mut col = Column::<u64>::from_values(&dst);
+    let from = Column::<u64>::from_values(&src);
     verus_client::copied_nothing(&mut col, from, 2);
     assert_eq!(col.to_vec(), dst);
 
-    let mut col = VerifiedColumn::<u64>::from_values(&dst);
-    let from = VerifiedColumn::<u64>::from_values(&src);
+    let mut col = Column::<u64>::from_values(&dst);
+    let from = Column::<u64>::from_values(&src);
     let splices = [
         hexane::Splice {
             pos: 0,
@@ -4185,8 +4146,8 @@ fn copies() {
 
     assert_eq!(verus_client::numbers_copied(), [1, 8, 9, 3, 10]);
 
-    let mut col = VerifiedPrefixColumn::<u64>::from_values(&dst);
-    let from = VerifiedPrefixColumn::<u64>::from_values(&src);
+    let mut col = PrefixColumn::<u64>::from_values(&dst);
+    let from = PrefixColumn::<u64>::from_values(&src);
     verus_client::sums_after_a_copy(&mut col, from, 2);
     assert_eq!(col.to_vec(), [1, 2, 7, 8, 9, 3, 4, 5]);
     assert_eq!(col.get_total(7), 39);
@@ -4199,11 +4160,8 @@ fn delta_copies() {
     let dst: Vec<i64> = vec![10, 20, 30, 40];
     let src: Vec<i64> = vec![-1, -2, -3];
 
-    let mut col = VerifiedDeltaColumn::<i64>::from_values(&dst);
-    verus_client::delta_copied_onto_the_end(
-        &mut col,
-        VerifiedDeltaColumn::<i64>::from_values(&src),
-    );
+    let mut col = DeltaColumn::<i64>::from_values(&dst);
+    verus_client::delta_copied_onto_the_end(&mut col, DeltaColumn::<i64>::from_values(&src));
     assert_eq!(col.to_vec(), [10, 20, 30, 40, -1, -2, -3]);
 
     for (at, del, start, end, want) in [
@@ -4212,14 +4170,14 @@ fn delta_copies() {
         (0, 0, 2, 1, vec![10, 20, 30, 40]),
         (2, 2, 3, 3, vec![10, 20]),
     ] {
-        let mut col = VerifiedDeltaColumn::<i64>::from_values(&dst);
-        let from = VerifiedDeltaColumn::<i64>::from_values(&src);
+        let mut col = DeltaColumn::<i64>::from_values(&dst);
+        let from = DeltaColumn::<i64>::from_values(&src);
         verus_client::delta_copied_in_place(&mut col, from, at, del, start, end);
         assert_eq!(col.to_vec(), want);
     }
 
-    let mut col = VerifiedDeltaColumn::<Option<u32>>::from_values(&[Some(1), None, Some(3)]);
-    let from = VerifiedDeltaColumn::<Option<u32>>::from_values(&[None, Some(9)]);
+    let mut col = DeltaColumn::<Option<u32>>::from_values(&[Some(1), None, Some(3)]);
+    let from = DeltaColumn::<Option<u32>>::from_values(&[None, Some(9)]);
     let splices = [hexane::Splice {
         pos: 1,
         delete: 1,
@@ -4231,17 +4189,17 @@ fn delta_copies() {
     assert_eq!(verus_client::timestamps_copied(), [100, 6, 7, 300]);
 }
 
-// ── Repositioning an iterator: VShiftable, Unshift, Ranges ──────────────────
+// ── Repositioning an iterator: Shiftable, Unshift, Ranges ──────────────────
 
 #[test]
 fn repositioned() {
     let numbers: Vec<u64> = (1..=8).collect();
-    let col = VerifiedColumn::<u64>::from_values(&numbers);
+    let col = Column::<u64>::from_values(&numbers);
     let ranges = [1..3, 5..7, 7..7, 9..12];
     assert_eq!(verus_client::kept_over_ranges(&col, &ranges), [2, 3, 6, 7]);
     assert_eq!(verus_client::numbers_of_ranges(), [2, 3, 6, 7]);
     assert_eq!(verus_client::peeked_then_given(&col), (Some(1), Some(1)));
-    let empty = VerifiedColumn::<u64>::new();
+    let empty = Column::<u64>::new();
     assert_eq!(verus_client::peeked_then_given(&empty), (None, None));
     assert_eq!(verus_client::unshifted_to(&col, 0, 2), Some(1));
     assert_eq!(verus_client::unshifted_to(&col, 4, 9), Some(5));
@@ -4281,7 +4239,7 @@ fn repositioned() {
 
 #[test]
 fn repositioned_others() {
-    let col = VerifiedDeltaColumn::<i64>::from_values(&[10, 20, 30, 40, 50]);
+    let col = DeltaColumn::<i64>::from_values(&[10, 20, 30, 40, 50]);
     assert_eq!(
         verus_client::delta_kept_over_ranges(&col, &[1..3, 4..9]),
         [20, 30, 50]
@@ -4300,7 +4258,7 @@ fn repositioned_others() {
     assert_eq!(u.next(), Some(10));
     assert_eq!(r.collect::<Vec<_>>(), [20, 30]);
 
-    let p = VerifiedPrefixColumn::<u64>::from_values(&[1, 2, 3, 4]);
+    let p = PrefixColumn::<u64>::from_values(&[1, 2, 3, 4]);
     for f in [
         verus_client::prefix_first_by_lookahead,
         verus_client::prefix_first_over_ranges,
@@ -4319,7 +4277,7 @@ fn repositioned_others() {
     assert_eq!(r.map(|pv| pv.total()).collect::<Vec<_>>(), [3]);
 
     let marks: Vec<Mark> = (0..20).map(|i| Mark(i % 3 * 13)).collect();
-    let acc = VerifiedAccColumn::<Mark>::from_values(&marks);
+    let acc = AccColumn::<Mark>::from_values(&marks);
     for f in [
         verus_client::acc_first_by_lookahead,
         verus_client::acc_first_over_ranges,
@@ -4349,7 +4307,7 @@ fn repositioned_others() {
 
 #[test]
 fn repositioned_runs() {
-    let col = VerifiedColumn::<u64>::from_values(&[7, 7, 7, 8, 8, 9]);
+    let col = Column::<u64>::from_values(&[7, 7, 7, 8, 8, 9]);
     let r = verus_client::run_at_range(&col, 1, 5).unwrap();
     assert_eq!((r.count, r.value), (2, 7));
     assert!(verus_client::run_at_range(&col, 6, 9).is_none());
@@ -4375,7 +4333,7 @@ fn repositioned_runs() {
 
 #[test]
 fn repositioned_delta_runs() {
-    let col = VerifiedDeltaColumn::<i64>::from_values(&[10, 20, 30, 40, 41, 42, 50]);
+    let col = DeltaColumn::<i64>::from_values(&[10, 20, 30, 40, 41, 42, 50]);
     let r = verus_client::delta_run_at_range(&col, 1, 9).unwrap();
     assert_eq!((r.prefix, r.delta, r.count), (10, Some(10), 3));
     assert!(verus_client::delta_run_at_range(&col, 7, 9).is_none());
@@ -4400,7 +4358,7 @@ fn repositioned_delta_runs() {
 
 #[test]
 fn loaded_by_runs() {
-    let col = VerifiedColumn::<u64>::from_values(&[3, 3, 4, 5, 5, 5]);
+    let col = Column::<u64>::from_values(&[3, 3, 4, 5, 5, 5]);
     let bytes = col.save();
     let (run, c) = verus_client::first_run_and_column::<u64, Leb128>(&bytes).unwrap();
     assert_eq!(run.map(|r| (r.count, r.value)), Some((2, 3)));
@@ -4445,11 +4403,11 @@ fn a_clients_own_encoding() {
     verus_client::find_tag(0, 2);
     // a literal run of one `Int`, then a run of two `Str`s: the tags'
     // own bytes
-    let c = VerifiedColumn::<Tag>::from_values(&[Tag::Int, Tag::Str, Tag::Str]);
+    let c = Column::<Tag>::from_values(&[Tag::Int, Tag::Str, Tag::Str]);
     assert_eq!(c.save(), [0x7f, 0x00, 0x02, 0xff]);
     // a byte that is no tag's
-    assert!(VerifiedColumn::<Tag>::load(&[0x7f, 0x01]).is_err());
-    assert!(VerifiedColumn::<Tag>::load(&[0x7f, 0x00]).is_ok());
+    assert!(Column::<Tag>::load(&[0x7f, 0x01]).is_err());
+    assert!(Column::<Tag>::load(&[0x7f, 0x00]).is_ok());
 }
 
 // ── A client's own codec ───────────────────────────────────────────────────
@@ -4465,12 +4423,12 @@ fn a_clients_own_codec() {
     verus_client::round_trip_fixed8(&nums, &nullable, &flags);
     // a literal run of two (a header of -2), then the numbers, eight
     // bytes each
-    let c = VerifiedColumn::<u64, Fixed8>::from_values(&[5, 6]);
+    let c = Column::<u64, Fixed8>::from_values(&[5, 6]);
     let mut want = (-2i64).to_le_bytes().to_vec();
     want.extend(5u64.to_le_bytes());
     want.extend(6u64.to_le_bytes());
     assert_eq!(c.save(), want);
-    assert!(VerifiedColumn::<u64, Fixed8>::load(&want[..20]).is_err());
+    assert!(Column::<u64, Fixed8>::load(&want[..20]).is_err());
 }
 
 // ── A plain column with a Fenwick index ────────────────────────────────────

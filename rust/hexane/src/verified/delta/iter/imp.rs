@@ -48,13 +48,13 @@ use crate::iter_core::{lemma_window_past, past, resumes, vals_of, window, Decode
 use crate::iter_core::{Decoders, ICore};
 #[cfg(verus_keep_ghost)]
 use crate::rle::writer::concat;
-use crate::verified::codec::VCodec;
+use crate::verified::codec::Codec;
 #[cfg(verus_keep_ghost)]
 use crate::verified::shift::{lemma_run_units, lemma_singles};
 #[cfg(verus_keep_ghost)]
 use crate::verified::{head_run, lemma_runs_of, runs_of, sorted};
-use crate::verified::{invalid_resume, VerifiedIterState};
-use crate::verified::{VShiftable, VerifiedRanges, VerifiedUnshift};
+use crate::verified::{invalid_resume, IterState};
+use crate::verified::{Ranges, Shiftable, Unshift};
 #[cfg(verus_keep_ghost)]
 use crate::window::windows;
 use crate::{DeltaRun, Leb128, PackError};
@@ -125,7 +125,7 @@ pub(in crate::verified::delta) proof fn lemma_kept_hit<'a, X: Decoders<'a>, B: D
     lemma_kept_rv::<X, B>(s, i);
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
     /// The iterator stands in the slabs of its column, in the column or
     /// at its end, with the sum of the differences before it; and
     /// every value the column keeps is one of the type's.
@@ -269,7 +269,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
         let mut it = self.it.dup();
         let mut running = self.running;
         let r = d_step::<DX<T, C>, DB<T, C>>(&mut it, self.slabs, self.ix, n, &mut running);
-        *self = VerifiedDeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
+        *self = DeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
         proof {
             let s = me.slabs@;
             let (p, e) = (me.it.pos as int, me.it.pos + me.it.items_left);
@@ -473,7 +473,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
         let mut it = self.it.dup();
         let mut running = self.running;
         let r = d_run::<DX<T, C>, DB<T, C>>(&mut it, self.slabs, &mut running);
-        *self = VerifiedDeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
+        *self = DeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
         match r {
             Some((prefix, run)) => {
                 let delta = <DB<T, C> as DeltaOps<DIt<'a, T, C>>>::to_opt(run.value);
@@ -525,14 +525,14 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
         }
     }
 
-    pub(super) fn runs_impl(self) -> (r: VerifiedDeltaRuns<'a, T, C>)
+    pub(super) fn runs_impl(self) -> (r: DeltaRuns<'a, T, C>)
         ensures
             r.iter() == self,
     {
-        VerifiedDeltaRuns(self)
+        DeltaRuns(self)
     }
 
-    pub(super) fn suspend_impl(&self) -> (s: VerifiedDeltaIterState)
+    pub(super) fn suspend_impl(&self) -> (s: DeltaIterState)
         ensures
             s.pos() == self.pos(),
             s.end_pos() == self.end_pos(),
@@ -550,8 +550,8 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
             Some(c) => c.counter(),
             None => 0,
         };
-        VerifiedDeltaIterState {
-            inner: VerifiedIterState { counter, num_slabs: self.slabs.len(), slab_idx, pos, items_left, slab_consumed },
+        DeltaIterState {
+            inner: IterState { counter, num_slabs: self.slabs.len(), slab_idx, pos, items_left, slab_consumed },
         }
     }
 
@@ -618,7 +618,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
         let mut it = self.it.dup();
         let mut running = self.running;
         let r = d_scan::<DX<T, C>, DB<T, C>>(&mut it, self.slabs, self.ix, &mut running, lo, hi);
-        *self = VerifiedDeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
+        *self = DeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
         proof {
             let s = me.slabs@;
             let (p, e) = (me.it.pos as int, me.it.pos + me.it.items_left);
@@ -683,7 +683,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
         let mut it = self.it.dup();
         let mut running = self.running;
         let r = d_scan_null::<DX<T, C>, DB<T, C>>(&mut it, self.slabs, self.ix, &mut running);
-        *self = VerifiedDeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
+        *self = DeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
         proof {
             let s = me.slabs@;
             let (p, e) = (me.it.pos as int, me.it.pos + me.it.items_left);
@@ -957,7 +957,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
                 let mut it = self.it.dup();
                 let mut running = self.running;
                 let r = d_seek::<DX<T, C>, DB<T, C>>(&mut it, self.slabs, self.ix, &mut running, t);
-                *self = VerifiedDeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
+                *self = DeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
                 proof {
                     self.lemma_window();
                     me.lemma_sought(target, r.0 as int, r.1 as int);
@@ -1051,7 +1051,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
 /// What a search of the column `c` from `here` to `t` found, said of
 /// the search's own values (`c.subrange(here, t)`), said of the
 /// column's places.
-pub(super) proof fn lemma_found_in_column<T: VDeltaValue<C>, C: VCodec>(c: Seq<T>, here: int, t: int, r0: int, r1: int, target: T)
+pub(super) proof fn lemma_found_in_column<T: DeltaValue<C>, C: Codec>(c: Seq<T>, here: int, t: int, r0: int, r1: int, target: T)
     requires
         0 <= here <= t <= c.len(),
         sorted::<T>(c.subrange(here, t)) ==> forall|j: int|
@@ -1080,7 +1080,7 @@ pub(super) proof fn lemma_found_in_column<T: VDeltaValue<C>, C: VCodec>(c: Seq<T
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
     #[inline]
     pub(super) fn next_impl(&mut self) -> (r: Option<T>)
         ensures
@@ -1116,7 +1116,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
         let mut it = self.it.dup();
         let mut running = self.running;
         let r = d_next::<DX<T, C>, DB<T, C>>(&mut it, self.slabs, &mut running);
-        *self = VerifiedDeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
+        *self = DeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
         proof {
             self.lemma_window();
         }
@@ -1199,7 +1199,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
     pub(super) fn clone_impl(&self) -> (r: Self)
         ensures
             r.rest() == self.rest(),
@@ -1211,7 +1211,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
         proof {
             use_type_invariant(self);
         }
-        VerifiedDeltaIter {
+        DeltaIter {
             it: self.it.dup(),
             slabs: self.slabs,
             running: self.running,
@@ -1221,7 +1221,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
     pub(super) fn default_impl() -> (r: Self)
         ensures
             r.rest().len() == 0,
@@ -1242,12 +1242,12 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
             assert(psum(dbefore::<DX<T, C>, DB<T, C>>(s, 0)) == 0);
             lemma_crop(0);
         }
-        VerifiedDeltaIter { it, slabs, running: 0, ix: None, col: None }
+        DeltaIter { it, slabs, running: 0, ix: None, col: None }
     }
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
-    pub(super) fn iter_impl(&self) -> (it: VerifiedDeltaIter<'_, T, C>)
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
+    pub(super) fn iter_impl(&self) -> (it: DeltaIter<'_, T, C>)
         ensures
             it.rest() == self@,
             it.column() == self@,
@@ -1270,7 +1270,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             // what the reader will give is what the column keeps
             lemma_dslabs_own::<DE<T, C>, DX<T, C>, DB<T, C>>(s);
         }
-        let r = VerifiedDeltaIter { it, slabs, running: 0, ix: Some(ix), col: Some(&self.core) };
+        let r = DeltaIter { it, slabs, running: 0, ix: Some(ix), col: Some(&self.core) };
         proof {
             r.lemma_window();
             assert(r.rest() =~= self@);
@@ -1278,7 +1278,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
         r
     }
 
-    pub(super) fn iter_range_impl(&self, start: usize, end: usize) -> (it: VerifiedDeltaIter<'_, T, C>)
+    pub(super) fn iter_range_impl(&self, start: usize, end: usize) -> (it: DeltaIter<'_, T, C>)
         requires
             start <= end <= self@.len(),
         ensures
@@ -1315,7 +1315,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaRuns<'a, T, C> {
     #[inline(always)]
     pub(super) fn next_impl(&mut self) -> (r: Option<DeltaRun>)
         ensures
@@ -1406,8 +1406,8 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
     }
 }
 
-impl VerifiedDeltaIterState {
-    pub(super) proof fn lemma_fits_impl<T: VDeltaValue<C>, C: VCodec>(&self, column: &VerifiedDeltaColumn<T, C>)
+impl DeltaIterState {
+    pub(super) proof fn lemma_fits_impl<T: DeltaValue<C>, C: Codec>(&self, column: &DeltaColumn<T, C>)
         requires
             self.fits(column),
         ensures
@@ -1415,8 +1415,8 @@ impl VerifiedDeltaIterState {
     {
     }
 
-    pub(super) fn try_resume_impl<'a, T: VDeltaValue<C>, C: VCodec>(&self, column: &'a VerifiedDeltaColumn<T, C>) -> (r: Result<
-        VerifiedDeltaIter<'a, T, C>,
+    pub(super) fn try_resume_impl<'a, T: DeltaValue<C>, C: Codec>(&self, column: &'a DeltaColumn<T, C>) -> (r: Result<
+        DeltaIter<'a, T, C>,
         PackError,
     >)
         ensures
@@ -1464,7 +1464,7 @@ impl VerifiedDeltaIterState {
             // what the reader will give is what the column keeps
             lemma_dslabs_own::<DE<T, C>, DX<T, C>, DB<T, C>>(column.core.slabs_spec());
         }
-        let r = VerifiedDeltaIter { it, slabs, running: before.running, ix: Some(ix), col: Some(&column.core) };
+        let r = DeltaIter { it, slabs, running: before.running, ix: Some(ix), col: Some(&column.core) };
         proof {
             r.lemma_window();
             assert(r.rest() =~= window(column@, self.pos() as int, self.end_pos() as int));
@@ -1473,7 +1473,7 @@ impl VerifiedDeltaIterState {
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
     pub(super) proof fn lemma_shift_impl(&self)
         ensures
             0 <= self.shift_at(),
@@ -1523,7 +1523,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
         proof {
             use_type_invariant(self);
         }
-        VerifiedDeltaIter { it: self.it.dup(), slabs: self.slabs, running: self.running, ix: self.ix, col: self.col }
+        DeltaIter { it: self.it.dup(), slabs: self.slabs, running: self.running, ix: self.ix, col: self.col }
     }
 
     #[inline(always)]
@@ -1561,7 +1561,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
     pub(super) proof fn lemma_shift_model_impl(&self)
         ensures
             self.shift_vals() == self.column(),
@@ -1573,25 +1573,25 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
     }
 
     #[inline(always)]
-    pub(super) fn unshift_impl(self) -> (r: VerifiedUnshift<Self>)
+    pub(super) fn unshift_impl(self) -> (r: Unshift<Self>)
         ensures
             r.unshift_vals() == self.column(),
             r.unshift_left() == self.rest(),
     {
-        VerifiedUnshift::new(self)
+        Unshift::new(self)
     }
 
     #[inline(always)]
-    pub(super) fn ranges_impl<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+    pub(super) fn ranges_impl<'r>(self, ranges: &'r [Range<usize>]) -> (r: Ranges<'r, Self>)
         ensures
             r.ranges_vals() == self.column(),
             r.ranges_left() == windows(self.column(), ranges@),
     {
-        VerifiedRanges::new(self, ranges)
+        Ranges::new(self, ranges)
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaRuns<'a, T, C> {
     /// The first run of what is left, and the values it stands for.
     pub(super) fn take_run(&mut self) -> (r: Option<DeltaRun>)
         ensures
@@ -1625,7 +1625,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaRuns<'a, T, C> {
     pub(super) proof fn lemma_shift_impl(&self)
         ensures
             0 <= self.shift_at(),
@@ -1723,12 +1723,12 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
                 &&& k >= o.len() ==> r is None && final(self).shift_left().len() == 0
             },
     {
-        let p = VShiftable::get_pos(&self.0);
+        let p = Shiftable::get_pos(&self.0);
         if at < p {
             return None;
         }
         // the runs' own move, whose model is said of the runs
-        VShiftable::advance_to(self, at);
+        Shiftable::advance_to(self, at);
         self.take_run()
     }
 
@@ -1750,12 +1750,12 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
                 &&& w.len() == 0 ==> r is None && final(self).shift_left().len() == 0
             }),
     {
-        VShiftable::shift(self, range);
+        Shiftable::shift(self, range);
         self.take_run()
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaRuns<'a, T, C> {
     pub(super) proof fn lemma_shift_model_impl(&self)
         ensures
             self.shift_vals() == delta_units(self.iter().column()),
@@ -1775,37 +1775,37 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
     }
 
     #[inline(always)]
-    pub(super) fn unshift_impl(self) -> (r: VerifiedUnshift<Self>)
+    pub(super) fn unshift_impl(self) -> (r: Unshift<Self>)
         ensures
             r.unshift_vals() == self.shift_vals(),
             r.unshift_left() == self.shift_items(),
     {
-        VerifiedUnshift::new(self)
+        Unshift::new(self)
     }
 
     #[inline(always)]
-    pub(super) fn ranges_impl<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+    pub(super) fn ranges_impl<'r>(self, ranges: &'r [Range<usize>]) -> (r: Ranges<'r, Self>)
         ensures
             r.ranges_vals() == self.shift_vals(),
             r.ranges_left() == windows(self.shift_vals(), ranges@),
     {
-        VerifiedRanges::new(self, ranges)
+        Ranges::new(self, ranges)
     }
 }
 
 } // verus!
 
-impl<T: VDeltaValue<C>, C: VCodec> std::fmt::Debug for VerifiedDeltaRuns<'_, T, C> {
+impl<T: DeltaValue<C>, C: Codec> std::fmt::Debug for DeltaRuns<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("VerifiedDeltaRuns").field(&self.0).finish()
+        f.debug_tuple("DeltaRuns").field(&self.0).finish()
     }
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> std::fmt::Debug for VerifiedDeltaIter<'_, T, C> {
+impl<T: DeltaValue<C>, C: Codec> std::fmt::Debug for DeltaIter<'_, T, C> {
     /// Where the iterator stands, the sum it keeps and how many values
     /// it has left, as `DeltaIter` prints itself.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedDeltaIter")
+        f.debug_struct("DeltaIter")
             .field("pos", &self.it.pos)
             .field("running", &self.running)
             .field("items_left", &self.len())

@@ -1,13 +1,13 @@
 //! Repositioning the verified iterators, as the old API's `Shiftable`
-//! repositions its own: the trait [`VShiftable`], and the adapters
-//! [`VerifiedUnshift`] (a lookahead) and [`VerifiedRanges`] (several
+//! repositions its own: the trait [`Shiftable`], and the adapters
+//! [`Unshift`] (a lookahead) and [`Ranges`] (several
 //! windows, one after another).
 //!
 //! The adapters are `window.rs`'s, which are proved against its model of
 //! an iterator (its traits `Stream` and `Window`). Every `Iterator` has
 //! that model by a trusted bridge, for the old API. A verified iterator
 //! is given it instead by a view of it that is no iterator
-//! (`ShiftView`), whose model is the iterator's `VShiftable`
+//! (`ShiftView`), whose model is the iterator's `Shiftable`
 //! specification, proved of each iterator here: nothing trusted stands
 //! between the adapters and the iterator.
 //!
@@ -20,7 +20,7 @@
 use super::runs_of;
 #[cfg(verus_keep_ghost)]
 use super::VGet;
-use super::{Get, VCodec, VIndex, VValue, VerifiedIter, VerifiedRuns};
+use super::{Codec, ColumnValueRef, Get, Iter, Runs, VIndex};
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{past, vals_of, window};
 #[cfg(verus_keep_ghost)]
@@ -49,8 +49,8 @@ verus! {
 /// and a client's own iterator may be, as it may implement `Shiftable`.
 /// Its laws are this trait's: a client checked by Verus proves them, and
 /// a client in plain Rust promises them, as it does an old API trait's
-/// documented contract. Hexane's adapters ([`VerifiedUnshift`],
-/// [`VerifiedRanges`]) are proved of any iterator that keeps them.
+/// documented contract. Hexane's adapters ([`Unshift`],
+/// [`Ranges`]) are proved of any iterator that keeps them.
 ///
 /// What a specification says of one: it ranges over values, one per
 /// position (`shift_vals`), as the items it gives; it stands at a
@@ -63,7 +63,7 @@ verus! {
 ///
 /// The moves only go forward: a window starting before the iterator
 /// starts where it stands.
-pub trait VShiftable: Iterator + Sized {
+pub trait Shiftable: Iterator + Sized {
     /// The values the iterator ranges over, one per position.
     spec fn shift_vals(&self) -> Seq<Self::Item>;
 
@@ -270,18 +270,18 @@ pub trait VShiftable: Iterator + Sized {
 
 /// A verified iterator with a lookahead, as the old API's
 /// [`Unshift`](crate::Unshift) is: the item it gives next can be looked
-/// at first ([`peek`](Self::peek)). [`VerifiedUnshift::new`] makes one
-/// of any [`VShiftable`] iterator, and [`VerifiedIter::unshift`] of a
+/// at first ([`peek`](Self::peek)). [`Unshift::new`] makes one
+/// of any [`Shiftable`] iterator, and [`Iter::unshift`] of a
 /// column's.
 ///
 /// What it has left to give is `unshift_left()`.
-pub struct VerifiedUnshift<I: VShiftable> {
+pub struct Unshift<I: Shiftable> {
     inner: ShiftView<I>,
     next: Option<I::Item>,
     hidden: bool,
 }
 
-impl<I: VShiftable> VerifiedUnshift<I> {
+impl<I: Shiftable> Unshift<I> {
     /// What it has left to give: its lookahead, then what its iterator
     /// has left.
     pub closed spec fn unshift_left(&self) -> Seq<I::Item> {
@@ -333,7 +333,7 @@ impl<I: VShiftable> VerifiedUnshift<I> {
 }
 
 #[cfg(verus_keep_ghost)]
-impl<I: VShiftable> vstd::std_specs::iter::IteratorSpecImpl for VerifiedUnshift<I> {
+impl<I: Shiftable> vstd::std_specs::iter::IteratorSpecImpl for Unshift<I> {
     /// It keeps to what Verus asks of an iterator: `next` gives
     /// `remaining()`, one item after another, and then `None`.
     open spec fn obeys_prophetic_iter_laws(&self) -> bool {
@@ -361,7 +361,7 @@ impl<I: VShiftable> vstd::std_specs::iter::IteratorSpecImpl for VerifiedUnshift<
     }
 }
 
-impl<I: VShiftable> Iterator for VerifiedUnshift<I> {
+impl<I: Shiftable> Iterator for Unshift<I> {
     type Item = I::Item;
 
     /// The lookahead, pulling the next one.
@@ -398,19 +398,19 @@ impl<I: VShiftable> Iterator for VerifiedUnshift<I> {
 
 /// The values of several windows of a verified iterator, one window
 /// after another, as the old API's [`Ranges`](crate::Ranges) gives them:
-/// [`VerifiedRanges::new`] makes one of any [`VShiftable`] iterator,
-/// and [`VerifiedIter::ranges`] of a column's.
+/// [`Ranges::new`] makes one of any [`Shiftable`] iterator,
+/// and [`Iter::ranges`] of a column's.
 ///
 /// What it has left to give is `ranges_left()`: what is left of the
 /// window it is in, then the values of each range it has not taken; an
 /// item stands for `I::shift_spans` of it.
-pub struct VerifiedRanges<'r, I: VShiftable> {
+pub struct Ranges<'r, I: Shiftable> {
     view: ShiftView<I>,
     ranges: &'r [Range<usize>],
     i: usize,
 }
 
-impl<'r, I: VShiftable> VerifiedRanges<'r, I> {
+impl<'r, I: Shiftable> Ranges<'r, I> {
     /// What it has left to give, value by value.
     pub closed spec fn ranges_left(&self) -> Seq<I::Item> {
         self.view.0.shift_left() + windows(self.view.0.shift_vals(), self.ranges@.skip(self.i as int))
@@ -441,7 +441,7 @@ impl<'r, I: VShiftable> VerifiedRanges<'r, I> {
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'r, I: VShiftable> vstd::std_specs::iter::IteratorSpecImpl for VerifiedRanges<'r, I> {
+impl<'r, I: Shiftable> vstd::std_specs::iter::IteratorSpecImpl for Ranges<'r, I> {
     /// Where each item stands for one value, it keeps to what Verus asks
     /// of an iterator: `next` gives `remaining()`, one item after
     /// another, and then `None`.
@@ -470,7 +470,7 @@ impl<'r, I: VShiftable> vstd::std_specs::iter::IteratorSpecImpl for VerifiedRang
     }
 }
 
-impl<'r, I: VShiftable> Iterator for VerifiedRanges<'r, I> {
+impl<'r, I: Shiftable> Iterator for Ranges<'r, I> {
     type Item = I::Item;
 
     /// The next item of the window, or of the next range with any.
@@ -514,7 +514,7 @@ pub proof fn lemma_singles<T>(xs: Seq<T>)
     imp::lemma_singles_impl::<T>(xs)
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedIter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Shiftable for Iter<'a, V, C, K> {
     closed spec fn shift_vals(&self) -> Seq<Get<'a, V>> {
         vals_of::<V::X>(self.slabs@)
     }
@@ -606,8 +606,8 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedIter<'
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
-    /// The iterator's repositioning model ([`VShiftable`]) in the terms
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
+    /// The iterator's repositioning model ([`Shiftable`]) in the terms
     /// of its own specification: the values it ranges over are its
     /// column's, as items; its position is `pos()`; what it has left is
     /// `items()`, each item a value.
@@ -623,10 +623,10 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     }
 
     /// A lookahead: the iterator wrapped so that the value it gives next
-    /// can be looked at first ([`VerifiedUnshift::peek`]), as the old
+    /// can be looked at first ([`Unshift::peek`]), as the old
     /// API's `Shiftable::unshift` gives.
     #[inline(always)]
-    pub fn unshift(self) -> (r: VerifiedUnshift<Self>)
+    pub fn unshift(self) -> (r: Unshift<Self>)
         ensures
             r.unshift_vals() == self.shift_vals(),
             r.unshift_left() == self.shift_items(),
@@ -644,7 +644,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     ///
     /// When it comes to a range that starts before where it stands.
     #[inline(always)]
-    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: Ranges<'r, Self>)
         ensures
             r.ranges_vals() == self.shift_vals(),
             r.ranges_left() == windows(self.shift_vals(), ranges@),
@@ -674,7 +674,7 @@ pub open spec fn units_of_runs<T>(rs: Seq<Run<T>>) -> Seq<Seq<Run<T>>> {
 /// The runs of a column, repositioned as its values are: the model is
 /// each value as a run of one, and an item, a run, stands for as many of
 /// those as it counts.
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedRuns<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Shiftable for Runs<'a, V, C, K> {
     closed spec fn shift_vals(&self) -> Seq<Run<Get<'a, V>>> {
         unit_runs(self.0.shift_vals())
     }
@@ -722,32 +722,32 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedRuns<'
 
     #[inline(always)]
     fn dup(&self) -> (r: Self) {
-        VerifiedRuns(VShiftable::dup(&self.0))
+        Runs(Shiftable::dup(&self.0))
     }
 
     #[inline(always)]
     fn get_pos(&self) -> (r: usize) {
-        VShiftable::get_pos(&self.0)
+        Shiftable::get_pos(&self.0)
     }
 
     #[inline(always)]
     fn get_max(&self) -> (r: usize) {
-        VShiftable::get_max(&self.0)
+        Shiftable::get_max(&self.0)
     }
 
     #[inline(always)]
     fn set_max(&mut self, end: usize) {
-        VShiftable::set_max(&mut self.0, end)
+        Shiftable::set_max(&mut self.0, end)
     }
 
     #[inline(always)]
     fn advance_to(&mut self, target: usize) {
-        VShiftable::advance_to(&mut self.0, target)
+        Shiftable::advance_to(&mut self.0, target)
     }
 
     #[inline(always)]
     fn advance_by(&mut self, amount: usize) {
-        VShiftable::advance_by(&mut self.0, amount)
+        Shiftable::advance_by(&mut self.0, amount)
     }
 
     #[inline(always)]
@@ -757,7 +757,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedRuns<'
 
     #[inline(always)]
     fn shift(&mut self, range: Range<usize>) {
-        VShiftable::shift(&mut self.0, range)
+        Shiftable::shift(&mut self.0, range)
     }
 
     #[inline(always)]
@@ -766,8 +766,8 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedRuns<'
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedRuns<'a, V, C, K> {
-    /// The iterator's repositioning model ([`VShiftable`]) in the terms
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Runs<'a, V, C, K> {
+    /// The iterator's repositioning model ([`Shiftable`]) in the terms
     /// of its own specification: the values it ranges over are its
     /// column's, each a run of one; it stands where its iterator of
     /// values does; its items are the runs of what that has left.
@@ -788,11 +788,11 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedRuns<'a, V, C, K> {
     }
 
     /// A lookahead: the runs wrapped so that the run they give next can
-    /// be looked at first ([`VerifiedUnshift::peek`]), as the old API's
+    /// be looked at first ([`Unshift::peek`]), as the old API's
     /// `Shiftable::unshift` gives. (It cannot be moved to a window: its
     /// items are not each one value.)
     #[inline(always)]
-    pub fn unshift(self) -> (r: VerifiedUnshift<Self>)
+    pub fn unshift(self) -> (r: Unshift<Self>)
         ensures
             r.unshift_vals() == self.shift_vals(),
             r.unshift_left() == self.shift_items(),
@@ -810,7 +810,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedRuns<'a, V, C, K> {
     ///
     /// When it comes to a range that starts before where it stands.
     #[inline(always)]
-    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: Ranges<'r, Self>)
         ensures
             r.ranges_vals() == self.shift_vals(),
             r.ranges_left() == windows(self.shift_vals(), ranges@),

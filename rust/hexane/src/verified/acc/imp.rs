@@ -380,7 +380,7 @@ pub struct AccModel<V, C>(PhantomData<(V, C)>);
 
 /// The values read of a slab add up to what those read of a copy of it
 /// do.
-pub(super) proof fn lemma_same_acc<V: VAccumulated + VValue<C>, C: VCodec>(
+pub(super) proof fn lemma_same_acc<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
     a: Slab<<V::E as Slabs>::Tail>,
     b: Slab<<V::E as Slabs>::Tail>,
 )
@@ -405,7 +405,7 @@ pub(super) proof fn lemma_same_acc<V: VAccumulated + VValue<C>, C: VCodec>(
     lemma_vacc::<V>(xb);
 }
 
-impl<V: VAccumulated + VValue<C>, C: VCodec> Weigh<V::E, AccWeight<V::Acc>> for AccModel<V, C> {
+impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Weigh<V::E, AccWeight<V::Acc>> for AccModel<V, C> {
     open spec fn wrel(w: AccWeight<V::Acc>, s: Slab<<V::E as Slabs>::Tail>) -> bool {
         w.len == s.len && w.acc == vsum::<Get<'static, V>, AccOf<V>>(<V::X as Decoders<'static>>::vals(s))
     }
@@ -457,7 +457,7 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> Weigh<V::E, AccWeight<V::Acc>> for 
 
 /// A clone of an accumulator column's slabs and index is an accumulator
 /// column of the same values.
-impl<V: VAccumulated + VValue<C>, C: VCodec> CopyWeigh<V::E, AccWeight<V::Acc>> for AccModel<V, C> {
+impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> CopyWeigh<V::E, AccWeight<V::Acc>> for AccModel<V, C> {
     proof fn lemma_copy_weight() {
     }
 
@@ -473,7 +473,7 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> CopyWeigh<V::E, AccWeight<V::Acc>> 
     }
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Accumulate<Get<'a, V>, AccWeight<V::Acc>> for AccModel<V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Accumulate<Get<'a, V>, AccWeight<V::Acc>> for AccModel<V, C> {
     open spec fn wvals(w: AccWeight<V::Acc>, vs: Seq<Get<'a, V>>) -> bool {
         w.len == vs.len() && w.acc == vsum::<Get<'a, V>, AccOf<V>>(vs)
     }
@@ -505,7 +505,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Accumulate<Get<'a, V>, AccWeigh
 
 /// A load computes each slab's weight, and refuses no column for what
 /// its values add up to.
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> LoadWeigh<'a, V::E, V::X, AccWeight<V::Acc>> for AccModel<V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> LoadWeigh<'a, V::E, V::X, AccWeight<V::Acc>> for AccModel<V, C> {
     open spec fn accumulates() -> bool {
         false
     }
@@ -542,7 +542,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> LoadWeigh<'a, V::E, V::X, AccWe
     }
 }
 
-impl<V: VAccumulated + VValue<C>, C: VCodec> Kind<V, C> for AccIndex {
+impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Kind<V, C> for AccIndex {
     type W = AccWeight<V::Acc>;
 
     type I = SlabBTree<AccWeight<V::Acc>>;
@@ -556,7 +556,7 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> Kind<V, C> for AccIndex {
     }
 }
 
-impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
+impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
     /// The index as the readers of the sums take it, with what they ask
     /// of it; none for a column an edit's panic left without its parts,
     /// which is empty.

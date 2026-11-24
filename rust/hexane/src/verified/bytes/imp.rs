@@ -35,7 +35,7 @@ verus! {
 
 /// A byte string is one to ten bytes longer on the wire than it is, and
 /// no two byte strings' bytes start the same string.
-pub(crate) proof fn lemma_enc_bytes<C: VCodec>(a: Seq<u8>, b: Seq<u8>, s: Seq<u8>, t: Seq<u8>)
+pub(crate) proof fn lemma_enc_bytes<C: Codec>(a: Seq<u8>, b: Seq<u8>, s: Seq<u8>, t: Seq<u8>)
     requires
         a.len() <= u64::MAX,
         b.len() <= u64::MAX,
@@ -58,7 +58,7 @@ pub(crate) proof fn lemma_enc_bytes<C: VCodec>(a: Seq<u8>, b: Seq<u8>, s: Seq<u8
 }
 
 /// Where no number starts `d`, no byte string does.
-pub(super) proof fn lemma_no_length<C: VCodec>(d: Seq<u8>)
+pub(super) proof fn lemma_no_length<C: Codec>(d: Seq<u8>)
     requires
         forall|v: u64| !(#[trigger] C::enc_u(v)).is_prefix_of(d),
     ensures
@@ -75,7 +75,7 @@ pub(super) proof fn lemma_no_length<C: VCodec>(d: Seq<u8>)
 
 /// A byte string at the front of `d`, where the number `n` is in `h`
 /// bytes: it is the `n` bytes after the number.
-pub(super) proof fn lemma_front_bytes<C: VCodec>(d: Seq<u8>, h: int, n: u64, b: Seq<u8>)
+pub(super) proof fn lemma_front_bytes<C: Codec>(d: Seq<u8>, h: int, n: u64, b: Seq<u8>)
     requires
         0 <= h <= d.len(),
         d.take(h) == C::enc_u(n),
@@ -101,7 +101,7 @@ pub(super) proof fn lemma_front_bytes<C: VCodec>(d: Seq<u8>, h: int, n: u64, b: 
 
 /// The number `n` in `h` bytes at the front of `d` and the `n` bytes
 /// after it are those bytes' byte string.
-pub(super) proof fn lemma_bytes_at<C: VCodec>(d: Seq<u8>, h: int, n: u64)
+pub(super) proof fn lemma_bytes_at<C: Codec>(d: Seq<u8>, h: int, n: u64)
     requires
         0 <= h,
         h + n <= d.len(),
@@ -137,7 +137,7 @@ pub(crate) proof fn lemma_slice_same(v: &[u8], w: &[u8])
 /// The byte string at the start of `data` and how many bytes it takes
 /// there, or an error where no byte string's bytes start `data`.
 #[inline(always)]
-pub(crate) fn try_read_bytes<C: VCodec>(data: &[u8]) -> (r: Result<(usize, &[u8]), PackError>)
+pub(crate) fn try_read_bytes<C: Codec>(data: &[u8]) -> (r: Result<(usize, &[u8]), PackError>)
     ensures
         match r {
             Ok((n, v)) => n <= data.len() && data@.take(n as int) == enc_bytes::<C>(v@),
@@ -197,7 +197,7 @@ pub(crate) fn try_read_bytes<C: VCodec>(data: &[u8]) -> (r: Result<(usize, &[u8]
 /// The byte string known to start `data`, and how many bytes it takes
 /// there.
 #[inline(always)]
-pub(crate) fn read_bytes<C: VCodec>(data: &[u8]) -> (r: (usize, &[u8]))
+pub(crate) fn read_bytes<C: Codec>(data: &[u8]) -> (r: (usize, &[u8]))
     requires
         exists|b: Seq<u8>| b.len() <= usize::MAX && (#[trigger] enc_bytes::<C>(b)).is_prefix_of(data@),
     ensures
@@ -236,7 +236,7 @@ pub(crate) fn read_bytes<C: VCodec>(data: &[u8]) -> (r: (usize, &[u8]))
 /// How many bytes the byte string that starts `data` takes there,
 /// without reading it.
 #[inline(always)]
-pub(crate) fn bytes_len<C: VCodec>(data: &[u8]) -> (r: Option<usize>)
+pub(crate) fn bytes_len<C: Codec>(data: &[u8]) -> (r: Option<usize>)
     ensures
         forall|b: Seq<u8>|
             b.len() <= usize::MAX && (#[trigger] enc_bytes::<C>(b)).is_prefix_of(data@) ==> r == Some(
@@ -272,7 +272,7 @@ pub(crate) fn bytes_len<C: VCodec>(data: &[u8]) -> (r: Option<usize>)
 
 /// Append the bytes of the byte string `v`; how many they are.
 #[inline(always)]
-pub(crate) fn put_bytes<C: VCodec>(v: &[u8], buf: &mut Vec<u8>) -> (n: usize)
+pub(crate) fn put_bytes<C: Codec>(v: &[u8], buf: &mut Vec<u8>) -> (n: usize)
     ensures
         final(buf)@ == old(buf)@ + enc_bytes::<C>(v@),
         n == enc_bytes::<C>(v@).len(),
@@ -817,7 +817,7 @@ pub struct VBytesOps<C>(PhantomData<C>);
 #[verifier::reject_recursive_types(C)]
 pub struct VBytesWrite<C>(PhantomData<C>);
 
-impl<'a, C: VCodec> RleOps<'a> for VBytesOps<C> {
+impl<'a, C: Codec> RleOps<'a> for VBytesOps<C> {
     type V = &'a [u8];
 
     open spec fn nullable() -> bool {
@@ -939,7 +939,7 @@ impl<'a, C: VCodec> RleOps<'a> for VBytesOps<C> {
     }
 }
 
-impl<'a, C: VCodec> WriteOps<'a> for VBytesWrite<C> {
+impl<'a, C: Codec> WriteOps<'a> for VBytesWrite<C> {
     type R = VBytesOps<C>;
 
     type Cow = BytesCow<'a>;
@@ -987,7 +987,7 @@ impl<'a, C: VCodec> WriteOps<'a> for VBytesWrite<C> {
     }
 }
 
-impl<'s, C: VCodec> Lift<'s> for VBytesWrite<C> {
+impl<'s, C: Codec> Lift<'s> for VBytesWrite<C> {
     type W = VBytesWrite<C>;
 
     /// The same bytes: a slice is its bytes, whatever it borrows from.
@@ -1011,7 +1011,7 @@ impl<'s, C: VCodec> Lift<'s> for VBytesWrite<C> {
     }
 }
 
-impl<C: VCodec> Plain for VBytesWrite<C> {
+impl<C: Codec> Plain for VBytesWrite<C> {
     proof fn lemma_plain(v: &'static [u8]) {
     }
 
@@ -1035,7 +1035,7 @@ pub struct VOptBytesOps<C>(PhantomData<C>);
 #[verifier::reject_recursive_types(C)]
 pub struct VOptBytesWrite<C>(PhantomData<C>);
 
-impl<'a, C: VCodec> RleOps<'a> for VOptBytesOps<C> {
+impl<'a, C: Codec> RleOps<'a> for VOptBytesOps<C> {
     type V = Option<&'a [u8]>;
 
     open spec fn nullable() -> bool {
@@ -1177,7 +1177,7 @@ impl<'a, C: VCodec> RleOps<'a> for VOptBytesOps<C> {
     }
 }
 
-impl<'a, C: VCodec> WriteOps<'a> for VOptBytesWrite<C> {
+impl<'a, C: Codec> WriteOps<'a> for VOptBytesWrite<C> {
     type R = VOptBytesOps<C>;
 
     type Cow = Option<BytesCow<'a>>;
@@ -1243,7 +1243,7 @@ impl<'a, C: VCodec> WriteOps<'a> for VOptBytesWrite<C> {
     }
 }
 
-impl<'s, C: VCodec> Lift<'s> for VOptBytesWrite<C> {
+impl<'s, C: Codec> Lift<'s> for VOptBytesWrite<C> {
     type W = VOptBytesWrite<C>;
 
     /// The same bytes, or the null.
@@ -1271,7 +1271,7 @@ impl<'s, C: VCodec> Lift<'s> for VOptBytesWrite<C> {
     }
 }
 
-impl<C: VCodec> Plain for VOptBytesWrite<C> {
+impl<C: Codec> Plain for VOptBytesWrite<C> {
     proof fn lemma_plain(v: Option<&'static [u8]>) {
     }
 
@@ -1304,7 +1304,7 @@ impl seal::SpecSeal for Option<Vec<u8>> {
 /// No header and no count of a column of byte strings is longer than ten
 /// bytes, and its values are at most ten bytes each more than they are
 /// long.
-pub(crate) proof fn lemma_bytes_sizes<C: VCodec>(vs: Seq<&'static [u8]>)
+pub(crate) proof fn lemma_bytes_sizes<C: Codec>(vs: Seq<&'static [u8]>)
     ensures
         heads_bound::<VBytesOps<C>>(10),
         encs::<VBytesOps<C>>(vs).len() <= 10 * vs.len() + total_len(<&'static [u8] as VGet>::svs(vs)),
@@ -1328,7 +1328,7 @@ pub(crate) proof fn lemma_bytes_sizes<C: VCodec>(vs: Seq<&'static [u8]>)
 
 /// The same, of a column of byte strings that may be null (a null counts
 /// as one byte here, though it is none in the column).
-pub(crate) proof fn lemma_opt_bytes_sizes<C: VCodec>(vs: Seq<Option<&'static [u8]>>)
+pub(crate) proof fn lemma_opt_bytes_sizes<C: Codec>(vs: Seq<Option<&'static [u8]>>)
     ensures
         heads_bound::<VOptBytesOps<C>>(10),
         encs::<VOptBytesOps<C>>(vs).len() <= 10 * vs.len() + total_len_opt(
@@ -1356,13 +1356,13 @@ pub(crate) proof fn lemma_opt_bytes_sizes<C: VCodec>(vs: Seq<Option<&'static [u8
 
 // ── Columns of byte strings ─────────────────────────────────────────────────
 
-impl<C: VCodec> seal::Sealed<C> for Vec<u8> {
+impl<C: Codec> seal::Sealed<C> for Vec<u8> {
     type X = RleReads<VBytesOps<C>>;
 
     type E = RleModel<VBytesWrite<C>>;
 }
 
-impl<C: VCodec> Owned<C> for Vec<u8> {
+impl<C: Codec> Owned<C> for Vec<u8> {
     type N = REncoder<'static, VBytesWrite<C>>;
 
     #[inline(always)]
@@ -1381,13 +1381,13 @@ impl<C: VCodec> Owned<C> for Vec<u8> {
     }
 }
 
-impl<C: VCodec> seal::Sealed<C> for Option<Vec<u8>> {
+impl<C: Codec> seal::Sealed<C> for Option<Vec<u8>> {
     type X = RleReads<VOptBytesOps<C>>;
 
     type E = RleModel<VOptBytesWrite<C>>;
 }
 
-impl<C: VCodec> Owned<C> for Option<Vec<u8>> {
+impl<C: Codec> Owned<C> for Option<Vec<u8>> {
     type N = REncoder<'static, VOptBytesWrite<C>>;
 
     #[inline(always)]
@@ -1443,11 +1443,11 @@ pub(super) proof fn vspec_lemma_below_option_vec_u8(a: Option<Seq<u8>>, b: Optio
     }
 }
 
-pub(super) proof fn vvalue_lemma_size_vec_u8<C: VCodec>(d: Seq<u8>)
+pub(super) proof fn vvalue_lemma_size_vec_u8<C: Codec>(d: Seq<u8>)
     requires
         saved::<Vec<u8>, C>(d),
     ensures
-        d.len() <= <Vec<u8> as VValue<C>>::size_bound(saved_values::<Vec<u8>, C>(d)),
+        d.len() <= <Vec<u8> as ColumnValueRef<C>>::size_bound(saved_values::<Vec<u8>, C>(d)),
 {
     <RleModel<VBytesWrite<C>> as Model<RleReads<VBytesOps<C>>>>::lemma_size(d);
     lemma_bytes_sizes::<C>(slab_values::<VBytesOps<C>>(d));
@@ -1479,11 +1479,11 @@ pub(super) fn vvalue_compare_vec_u8(a: &[u8], b: &[u8]) -> (r: Ordering)
     compare_bytes(a, b)
 }
 
-pub(super) proof fn vvalue_lemma_size_option_vec_u8<C: VCodec>(d: Seq<u8>)
+pub(super) proof fn vvalue_lemma_size_option_vec_u8<C: Codec>(d: Seq<u8>)
     requires
         saved::<Option<Vec<u8>>, C>(d),
     ensures
-        d.len() <= <Option<Vec<u8>> as VValue<C>>::size_bound(saved_values::<Option<Vec<u8>>, C>(d)),
+        d.len() <= <Option<Vec<u8>> as ColumnValueRef<C>>::size_bound(saved_values::<Option<Vec<u8>>, C>(d)),
 {
     <RleModel<VOptBytesWrite<C>> as Model<RleReads<VOptBytesOps<C>>>>::lemma_size(d);
     lemma_opt_bytes_sizes::<C>(slab_values::<VOptBytesOps<C>>(d));

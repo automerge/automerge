@@ -1,19 +1,19 @@
 //! The iterator of an accumulator column: its values, each with what
 //! the values up to it add up to.
 //!
-//! `prefix_iter` of a [`VerifiedAccColumn`](super::VerifiedAccColumn)
-//! gives a [`VerifiedAccIter`]. It moves as a [`VerifiedIter`] does, and
+//! `prefix_iter` of a [`AccColumn`](super::AccColumn)
+//! gives a [`AccIter`]. It moves as a [`Iter`] does, and
 //! keeps as it goes what the values it has passed add up to
-//! ([`total`](VerifiedAccIter::total)): those from the column's start,
-//! or from where [`reset_prefix`](VerifiedAccIter::reset_prefix) was
+//! ([`total`](AccIter::total)): those from the column's start,
+//! or from where [`reset_prefix`](AccIter::reset_prefix) was
 //! last called (`base_pos`). Each value it gives comes as a
-//! [`VerifiedAccValue`]: the value, what the values through it add up to
+//! [`AccValue`]: the value, what the values through it add up to
 //! and what those before it do. A move that finds a value
-//! ([`delta_nth`](VerifiedAccIter::delta_nth)) gives a
-//! [`VerifiedAccSeek`]: the value so, where it is, and what the values
+//! ([`delta_nth`](AccIter::delta_nth)) gives a
+//! [`AccSeek`]: the value so, where it is, and what the values
 //! passed over on the way add up to.
 //!
-//! It is what [`VerifiedPrefixIter`](super::VerifiedPrefixIter) is of a
+//! It is what [`PrefixIter`](super::PrefixIter) is of a
 //! prefix column, for an accumulator of the client's. What is proved is
 //! said of `accumulated`, which adds values in the order the column
 //! holds them: the running sum *is* `accumulated` of the column's values
@@ -31,8 +31,8 @@
 //! have no order.
 //!
 //! An iterator's place is kept without the borrow of its column in a
-//! [`VerifiedAccIterState`] ([`VerifiedAccIter::suspend`]), from which
-//! [`VerifiedAccIterState::try_resume`] gives an iterator again: one
+//! [`AccIterState`] ([`AccIter::suspend`]), from which
+//! [`AccIterState::try_resume`] gives an iterator again: one
 //! whose running sum counts from where the suspended one's did.
 //!
 //! This file is a specification, to be read as the guide to reviewing
@@ -46,8 +46,8 @@ use super::acc::{AccIndex, AccOf, AccWeight, VAccum, VAccumulated};
 use super::Get;
 #[cfg(verus_keep_ghost)]
 use super::{head_run, VGet, VSpec};
-use super::{VCodec, VValue, VerifiedColumn, VerifiedIter, VerifiedIterState, VerifiedRuns};
-use super::{VShiftable, VerifiedRanges, VerifiedUnshift};
+use super::{Codec, Column, ColumnValueRef, Iter, IterState, Runs};
+use super::{Ranges, Shiftable, Unshift};
 use crate::btree::SlabBTree;
 #[cfg(verus_keep_ghost)]
 use crate::column::Slab;
@@ -77,7 +77,7 @@ verus! {
 // ── A value with what the values up to it add up to ─────────────────────────
 
 /// A value of an accumulator column with what the values through it add
-/// up to, as a [`VerifiedAccIter`] gives it.
+/// up to, as a [`AccIter`] gives it.
 ///
 /// * [`prefix()`](Self::prefix) is what the values before this one add
 ///   up to;
@@ -86,8 +86,8 @@ verus! {
 ///
 /// Both count from where the iterator's running sum does: the column's
 /// start, unless the iterator's sum was reset
-/// ([`VerifiedAccIter::reset_prefix`]).
-pub struct VerifiedAccValue<'a, V: VAccumulated> {
+/// ([`AccIter::reset_prefix`]).
+pub struct AccValue<'a, V: VAccumulated> {
     /// The value.
     pub value: Get<'a, V>,
     /// What the values through this one add up to: what
@@ -98,7 +98,7 @@ pub struct VerifiedAccValue<'a, V: VAccumulated> {
     pub total: V::Acc,
 }
 
-impl<'a, V: VAccumulated> VerifiedAccValue<'a, V> {
+impl<'a, V: VAccumulated> AccValue<'a, V> {
     /// [`total`](Self::total), as a specification sees it: there it is
     /// written `total()`.
     pub open spec fn spec_total(&self) -> V::Acc {
@@ -149,20 +149,20 @@ impl<'a, V: VAccumulated> VerifiedAccValue<'a, V> {
     }
 }
 
-impl<'a, V: VAccumulated> Clone for VerifiedAccValue<'a, V> {
+impl<'a, V: VAccumulated> Clone for AccValue<'a, V> {
     fn clone(&self) -> (r: Self)
         ensures
             r == *self,
     {
-        VerifiedAccValue { value: self.value, total: self.total.dup() }
+        AccValue { value: self.value, total: self.total.dup() }
     }
 }
 
 // ── A value found, and how far it was ───────────────────────────────────────
-/// What [`VerifiedAccIter::delta_nth`] and an accumulator column's
+/// What [`AccIter::delta_nth`] and an accumulator column's
 /// `delta` find: a value with what the values up to it add up to, where
 /// it is, and what the values passed over on the way to it add up to.
-pub struct VerifiedAccSeek<'a, V: VAccumulated> {
+pub struct AccSeek<'a, V: VAccumulated> {
     /// The index in the column of the value found. The iterator stands
     /// just after it.
     pub pos: usize,
@@ -172,10 +172,10 @@ pub struct VerifiedAccSeek<'a, V: VAccumulated> {
     pub delta: V::Acc,
     /// The value found, with what the values through it add up to and
     /// what those before it do.
-    pub pv: VerifiedAccValue<'a, V>,
+    pub pv: AccValue<'a, V>,
 }
 
-impl<'a, V: VAccumulated> Clone for VerifiedAccSeek<'a, V> {
+impl<'a, V: VAccumulated> Clone for AccSeek<'a, V> {
     #[inline(always)]
     fn clone(&self) -> (r: Self)
         ensures
@@ -190,9 +190,9 @@ impl<'a, V: VAccumulated> Clone for VerifiedAccSeek<'a, V> {
 /// add up to, which an accumulator column's `prefix_iter` and
 /// `prefix_iter_range` give.
 ///
-/// It is a `std::iter::Iterator` of [`VerifiedAccValue`]s. The values it
+/// It is a `std::iter::Iterator` of [`AccValue`]s. The values it
 /// has left to give are in a specification `rest()`, as a
-/// [`VerifiedIter`]'s are, and what it gives of each is in `items()`.
+/// [`Iter`]'s are, and what it gives of each is in `items()`.
 /// Verus's specifications of the standard library's iterator functions
 /// speak of `remaining()`, which is `items()`.
 ///
@@ -205,10 +205,10 @@ impl<'a, V: VAccumulated> Clone for VerifiedAccSeek<'a, V> {
 /// An accumulator is the client's, and its functions may panic. If one
 /// does while the iterator moves, the iterator is left with nothing to
 /// give, as a `default()` one.
-pub struct VerifiedAccIter<'a, V: VAccumulated + VValue<C> + 'a, C: VCodec + 'a = Leb128> {
+pub struct AccIter<'a, V: VAccumulated + ColumnValueRef<C> + 'a, C: Codec + 'a = Leb128> {
     /// The column's index, for long moves; a default iterator has none.
     ix: Option<&'a SlabBTree<AccWeight<V::Acc>>>,
-    inner: VerifiedIter<'a, V, C, AccIndex>,
+    inner: Iter<'a, V, C, AccIndex>,
     /// What the values from `base_at` up to the iterator add up to.
     total: V::Acc,
     /// What the values before `base_at` add up to.
@@ -217,11 +217,11 @@ pub struct VerifiedAccIter<'a, V: VAccumulated + VValue<C> + 'a, C: VCodec + 'a 
     base_at: usize,
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
-    /// The iterator without its sums: a [`VerifiedIter`] that stands
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
+    /// The iterator without its sums: a [`Iter`] that stands
     /// where this one does, over the same column, with the same values
     /// left.
-    pub closed spec fn plain(&self) -> VerifiedIter<'a, V, C, AccIndex> {
+    pub closed spec fn plain(&self) -> Iter<'a, V, C, AccIndex> {
         self.inner
     }
 
@@ -238,7 +238,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
 
     /// The column the iterator reads, as it was when the iterator was
     /// made of it. No method of the iterator changes it.
-    pub open spec fn source(&self) -> Option<VerifiedColumn<V, C, AccIndex>> {
+    pub open spec fn source(&self) -> Option<Column<V, C, AccIndex>> {
         self.plain().source()
     }
 
@@ -275,11 +275,11 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
 
     /// What the iterator has left to give: each of the values left, with
     /// what the values through it add up to.
-    pub closed spec fn items(&self) -> Seq<VerifiedAccValue<'a, V>> {
+    pub closed spec fn items(&self) -> Seq<AccValue<'a, V>> {
         let o = self.inner.items();
         Seq::new(
             o.len(),
-            |i: int| VerifiedAccValue { value: o[i], total: self.acc_to(self.inner.it.pos + i + 1) },
+            |i: int| AccValue { value: o[i], total: self.acc_to(self.inner.it.pos + i + 1) },
         )
     }
 
@@ -356,7 +356,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 
     /// Where the iterator's window ends: the index in the column that
-    /// its last value comes before ([`VerifiedIter::end_pos`]).
+    /// its last value comes before ([`Iter::end_pos`]).
     #[verifier::when_used_as_spec(spec_end_pos)]
     #[inline(always)]
     pub fn end_pos(&self) -> (r: usize)
@@ -422,7 +422,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
 
     /// Make the window end at `end`: the iterator then gives the
     /// column's values from where it stands up to `end`, and none if it
-    /// stands at `end` or past it ([`VerifiedIter::set_max`]). The
+    /// stands at `end` or past it ([`Iter::set_max`]). The
     /// running sum stays.
     #[inline(always)]
     pub fn set_max(&mut self, end: usize)
@@ -552,7 +552,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     /// If the window has no value, the iterator has nothing left, and
     /// stands where [`shift`](Self::shift) leaves it then.
     #[inline(always)]
-    pub fn shift_next(&mut self, range: Range<usize>) -> (r: Option<VerifiedAccValue<'a, V>>)
+    pub fn shift_next(&mut self, range: Range<usize>) -> (r: Option<AccValue<'a, V>>)
         requires
             range.start >= old(self).pos(),
         ensures
@@ -592,14 +592,14 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
 
     /// The next run: the value the iterator gives next, and how many
     /// times it comes before another value does or the iterator has no
-    /// more ([`VerifiedIter::next_run`]). The iterator moves past the
+    /// more ([`Iter::next_run`]). The iterator moves past the
     /// whole run. The sums given are those of the run's last value:
     /// `total()` is the running sum through the run, which is the
     /// running sum as it was and then what the value adds, as many times
     /// over as the run is long; and `prefix()` is the sum before the
     /// run's last value.
     #[inline(always)]
-    pub fn next_run(&mut self) -> (r: Option<Run<VerifiedAccValue<'a, V>>>)
+    pub fn next_run(&mut self) -> (r: Option<Run<AccValue<'a, V>>>)
         ensures
             final(self).column() == old(self).column(),
             final(self).source() == old(self).source(),
@@ -634,10 +634,10 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 
     /// An iterator of the runs the iterator has left to give, without
-    /// their sums ([`VerifiedIter::runs`]): what
-    /// [`splice_runs`](VerifiedColumn::splice_runs) takes.
+    /// their sums ([`Iter::runs`]): what
+    /// [`splice_runs`](Column::splice_runs) takes.
     #[inline(always)]
-    pub fn runs(self) -> (r: VerifiedRuns<'a, V, C, AccIndex>)
+    pub fn runs(self) -> (r: Runs<'a, V, C, AccIndex>)
         ensures
             r.iter() == self.plain(),
     {
@@ -650,7 +650,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     /// values before it are then given; if there are not that many,
     /// none is left.
     #[inline(always)]
-    pub fn delta_nth(&mut self, n: usize) -> (r: Option<VerifiedAccSeek<'a, V>>)
+    pub fn delta_nth(&mut self, n: usize) -> (r: Option<AccSeek<'a, V>>)
         ensures
             n < old(self).rest().len() ==> {
                 &&& r matches Some(seek)
@@ -684,14 +684,14 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
 
     /// Where the iterator stands, where its window ends and where its
     /// running sum counts from, to keep without the borrow of the
-    /// column: [`VerifiedAccIterState::try_resume`] gives an iterator
+    /// column: [`AccIterState::try_resume`] gives an iterator
     /// from it.
     ///
     /// The state fits the column the iterator reads: resumed on that
     /// column, as it is, it gives an iterator that stands where this one
     /// does, with the same values left and the same running sum.
     #[inline(always)]
-    pub fn suspend(&self) -> (s: VerifiedAccIterState<V>)
+    pub fn suspend(&self) -> (s: AccIterState<V>)
         ensures
             s.pos() == self.pos(),
             s.end_pos() == self.end_pos(),
@@ -707,14 +707,14 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for VerifiedAccIter<'a, V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> vstd::std_specs::iter::IteratorSpecImpl for AccIter<'a, V, C> {
     /// The iterator keeps to what Verus asks of an iterator: `next` gives
     /// `remaining()`, one value after another, and then `None`.
     open spec fn obeys_prophetic_iter_laws(&self) -> bool {
         true
     }
 
-    open spec fn remaining(&self) -> Seq<VerifiedAccValue<'a, V>> {
+    open spec fn remaining(&self) -> Seq<AccValue<'a, V>> {
         self.items()
     }
 
@@ -726,7 +726,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> vstd::std_specs::iter::Iterator
         Some(self.items().len())
     }
 
-    open spec fn peek(&self, index: int) -> Option<VerifiedAccValue<'a, V>> {
+    open spec fn peek(&self, index: int) -> Option<AccValue<'a, V>> {
         if 0 <= index < self.items().len() {
             Some(self.items()[index])
         } else {
@@ -735,14 +735,14 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> vstd::std_specs::iter::Iterator
     }
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Iterator for VerifiedAccIter<'a, V, C> {
-    type Item = VerifiedAccValue<'a, V>;
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Iterator for AccIter<'a, V, C> {
+    type Item = AccValue<'a, V>;
 
     /// The next value, if one is left, with what the values through it
     /// add up to. What those before it add up to is the iterator's
     /// running sum as it was.
     #[inline(always)]
-    fn next(&mut self) -> (r: Option<VerifiedAccValue<'a, V>>)
+    fn next(&mut self) -> (r: Option<AccValue<'a, V>>)
         ensures
             match r {
                 Some(pv) => {
@@ -781,7 +781,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Iterator for VerifiedAccIter<'a
     /// passed over add up to, and within a slab a whole run is passed
     /// over at once.
     #[inline(always)]
-    fn nth(&mut self, n: usize) -> (r: Option<VerifiedAccValue<'a, V>>)
+    fn nth(&mut self, n: usize) -> (r: Option<AccValue<'a, V>>)
         ensures
             n < old(self).rest().len() ==> {
                 &&& r == Some(old(self).items()[n as int])
@@ -823,13 +823,13 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Iterator for VerifiedAccIter<'a
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> vstd::std_specs::iter::ExactSizeIteratorSpecImpl for VerifiedAccIter<'a, V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> vstd::std_specs::iter::ExactSizeIteratorSpecImpl for AccIter<'a, V, C> {
     open spec fn exact_len(&self) -> usize {
         self.items().len() as usize
     }
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> ExactSizeIterator for VerifiedAccIter<'a, V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> ExactSizeIterator for AccIter<'a, V, C> {
     /// How many values are left.
     #[inline]
     fn len(&self) -> (len: usize)
@@ -841,7 +841,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> ExactSizeIterator for VerifiedA
     }
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Clone for VerifiedAccIter<'a, V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Clone for AccIter<'a, V, C> {
     /// An iterator of its own that stands where this one does, with the
     /// same values left and the same running sum.
     #[inline(always)]
@@ -860,7 +860,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Clone for VerifiedAccIter<'a, V
     }
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Default for VerifiedAccIter<'a, V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Default for AccIter<'a, V, C> {
     /// An iterator with nothing to give.
     fn default() -> (r: Self)
         ensures
@@ -878,25 +878,25 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Default for VerifiedAccIter<'a,
 }
 
 // ── A place to come back to ─────────────────────────────────────────────────
-/// Where a [`VerifiedAccIter`] stood, where its window ended and where
+/// Where a [`AccIter`] stood, where its window ended and where
 /// its running sum counted from, kept without the borrow of the column:
-/// [`VerifiedAccIter::suspend`] gives it, and
+/// [`AccIter::suspend`] gives it, and
 /// [`try_resume`](Self::try_resume) an iterator from it.
 ///
-/// It holds a [`VerifiedIterState`] (`plain()`) and `base_pos()`. The
+/// It holds a [`IterState`] (`plain()`) and `base_pos()`. The
 /// sums themselves are not kept: `try_resume` asks the column for them.
-pub struct VerifiedAccIterState<V: VAccumulated> {
-    inner: VerifiedIterState,
+pub struct AccIterState<V: VAccumulated> {
+    inner: IterState,
     /// Where the running sum counts from.
     base_at: usize,
     _phantom: PhantomData<V>,
 }
 
-impl<V: VAccumulated> VerifiedAccIterState<V> {
+impl<V: VAccumulated> AccIterState<V> {
     /// The state without where the sum counts from: that of a
-    /// [`VerifiedIter`] standing where the iterator stood, with its
+    /// [`Iter`] standing where the iterator stood, with its
     /// window.
-    pub closed spec fn plain(&self) -> VerifiedIterState {
+    pub closed spec fn plain(&self) -> IterState {
         self.inner
     }
 
@@ -911,7 +911,7 @@ impl<V: VAccumulated> VerifiedAccIterState<V> {
     }
 
     /// The count of edits of the column the state was taken of
-    /// (`VerifiedColumn::edits`).
+    /// (`Column::edits`).
     pub open spec fn edits(&self) -> usize {
         self.plain().edits()
     }
@@ -922,16 +922,16 @@ impl<V: VAccumulated> VerifiedAccIterState<V> {
     }
 
     /// The state is a place in `column` as it is
-    /// ([`VerifiedIterState`]'s `fits`):
+    /// ([`IterState`]'s `fits`):
     /// [`try_resume`](Self::try_resume) gives an iterator exactly then.
-    pub open spec fn fits<C: VCodec>(&self, column: &VerifiedColumn<V, C, AccIndex>) -> bool where V: VValue<C> {
+    pub open spec fn fits<C: Codec>(&self, column: &Column<V, C, AccIndex>) -> bool where V: ColumnValueRef<C> {
         self.plain().fits(column)
     }
 
     /// A state fits only a column that counts the edits it does: one
     /// edited since the state was taken is refused
-    /// ([`VerifiedIterState`]'s `lemma_fits`).
-    pub proof fn lemma_fits<C: VCodec>(&self, column: &VerifiedColumn<V, C, AccIndex>) where V: VValue<C>
+    /// ([`IterState`]'s `lemma_fits`).
+    pub proof fn lemma_fits<C: Codec>(&self, column: &Column<V, C, AccIndex>) where V: ColumnValueRef<C>
         requires
             self.fits(column),
         ensures
@@ -952,7 +952,7 @@ impl<V: VAccumulated> VerifiedAccIterState<V> {
     /// stood, with its window, and whose running sum counts from where
     /// that one's did, if the state fits the column (`fits`); an error
     /// ([`PackError::InvalidResume`]) if it does not
-    /// ([`VerifiedIterState::try_resume`]).
+    /// ([`IterState::try_resume`]).
     ///
     /// The iterator given is one of `column` whatever column the state
     /// was taken of, and its running sum is `column`'s: what the values
@@ -963,10 +963,10 @@ impl<V: VAccumulated> VerifiedAccIterState<V> {
     /// edit's panic left `column` without its parts and the state would
     /// fit it.
     #[inline(always)]
-    pub fn try_resume<'a, C: VCodec>(&self, column: &'a VerifiedColumn<V, C, AccIndex>) -> (r: Result<
-        VerifiedAccIter<'a, V, C>,
+    pub fn try_resume<'a, C: Codec>(&self, column: &'a Column<V, C, AccIndex>) -> (r: Result<
+        AccIter<'a, V, C>,
         PackError,
-    >) where V: VValue<C>
+    >) where V: ColumnValueRef<C>
         ensures
             r is Ok <==> self.fits(column),
             r is Ok ==> self.edits() == column.edits(),
@@ -987,12 +987,12 @@ impl<V: VAccumulated> VerifiedAccIterState<V> {
 // ── The column's ────────────────────────────────────────────────────────────
 /// An accumulator column's values with what the values up to each add
 /// up to.
-impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
+impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
     /// An iterator over the values that keeps what they add up to: each
     /// value comes with what the values through it add up to, and what
     /// those before it do.
     #[inline(always)]
-    pub fn prefix_iter(&self) -> (it: VerifiedAccIter<'_, V, C>)
+    pub fn prefix_iter(&self) -> (it: AccIter<'_, V, C>)
         ensures
             it.rest() == self@,
             it.column() == self@,
@@ -1011,7 +1011,7 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
     /// to. The index gives that; the values before `start` are not all
     /// read.
     #[inline(always)]
-    pub fn prefix_iter_range(&self, start: usize, end: usize) -> (it: VerifiedAccIter<'_, V, C>)
+    pub fn prefix_iter_range(&self, start: usize, end: usize) -> (it: AccIter<'_, V, C>)
         requires
             start <= end <= self@.len(),
         ensures
@@ -1029,7 +1029,7 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
     /// The value at `index` with what the values through it add up to,
     /// and what those before it do; `None` if `index` is past the end.
     #[inline(always)]
-    pub fn get_prefixed(&self, index: usize) -> (r: Option<VerifiedAccValue<'_, V>>)
+    pub fn get_prefixed(&self, index: usize) -> (r: Option<AccValue<'_, V>>)
         ensures
             index < self@.len() ==> {
                 &&& r matches Some(pv)
@@ -1048,7 +1048,7 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
     /// values `from..to` before it add up to (`delta`); `None` if `to`
     /// is past the end. `from` is to be `to` at most.
     #[inline(always)]
-    pub fn delta(&self, from: usize, to: usize) -> (r: Option<VerifiedAccSeek<'_, V>>)
+    pub fn delta(&self, from: usize, to: usize) -> (r: Option<AccSeek<'_, V>>)
         requires
             from <= to,
         ensures
@@ -1067,23 +1067,23 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
     }
 }
 
-// ── Repositioning (`VShiftable`) ───────────────────────────────────────────
+// ── Repositioning (`Shiftable`) ───────────────────────────────────────────
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     /// The items the iterator ranges over: at each place of the column,
     /// the value there with what the values accumulate to through
     /// it (from `base_pos()`).
-    pub closed spec fn accumulated_items(&self) -> Seq<VerifiedAccValue<'a, V>> {
+    pub closed spec fn accumulated_items(&self) -> Seq<AccValue<'a, V>> {
         let o = vals_of::<V::X>(self.inner.slabs@);
-        Seq::new(o.len(), |p: int| VerifiedAccValue { value: o[p], total: self.acc_to(p + 1) })
+        Seq::new(o.len(), |p: int| AccValue { value: o[p], total: self.acc_to(p + 1) })
     }
 }
 
 /// The iterator repositioned as any of the verified ones is: its model
 /// is each value of the column with what the values accumulate to
 /// through it, each an item.
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VShiftable for VerifiedAccIter<'a, V, C> {
-    closed spec fn shift_vals(&self) -> Seq<VerifiedAccValue<'a, V>> {
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Shiftable for AccIter<'a, V, C> {
+    closed spec fn shift_vals(&self) -> Seq<AccValue<'a, V>> {
         self.accumulated_items()
     }
 
@@ -1095,15 +1095,15 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VShiftable for VerifiedAccIter<
         self.inner.it.pos + self.inner.it.items_left
     }
 
-    closed spec fn shift_left(&self) -> Seq<VerifiedAccValue<'a, V>> {
+    closed spec fn shift_left(&self) -> Seq<AccValue<'a, V>> {
         self.items()
     }
 
-    closed spec fn shift_items(&self) -> Seq<VerifiedAccValue<'a, V>> {
+    closed spec fn shift_items(&self) -> Seq<AccValue<'a, V>> {
         self.items()
     }
 
-    open spec fn shift_spans(x: VerifiedAccValue<'a, V>) -> Seq<VerifiedAccValue<'a, V>> {
+    open spec fn shift_spans(x: AccValue<'a, V>) -> Seq<AccValue<'a, V>> {
         seq![x]
     }
 
@@ -1115,16 +1115,16 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VShiftable for VerifiedAccIter<
         self.lemma_shift_impl()
     }
 
-    proof fn lemma_shift_unit(x: VerifiedAccValue<'a, V>) {
+    proof fn lemma_shift_unit(x: AccValue<'a, V>) {
     }
 
     #[inline(always)]
-    fn shift_step(&mut self) -> (r: Option<VerifiedAccValue<'a, V>>) {
+    fn shift_step(&mut self) -> (r: Option<AccValue<'a, V>>) {
         self.shift_step_impl()
     }
 
     #[inline(always)]
-    fn shift_nth(&mut self, n: usize) -> (r: Option<VerifiedAccValue<'a, V>>) {
+    fn shift_nth(&mut self, n: usize) -> (r: Option<AccValue<'a, V>>) {
         self.shift_nth_impl(n)
     }
 
@@ -1159,7 +1159,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VShiftable for VerifiedAccIter<
     }
 
     #[inline(always)]
-    fn seek_to(&mut self, at: usize) -> (r: Option<VerifiedAccValue<'a, V>>) {
+    fn seek_to(&mut self, at: usize) -> (r: Option<AccValue<'a, V>>) {
         self.seek_to_impl(at)
     }
 
@@ -1169,13 +1169,13 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VShiftable for VerifiedAccIter<
     }
 
     #[inline(always)]
-    fn shift_next(&mut self, range: Range<usize>) -> (r: Option<VerifiedAccValue<'a, V>>) {
+    fn shift_next(&mut self, range: Range<usize>) -> (r: Option<AccValue<'a, V>>) {
         self.shift_next_v_shiftable_impl(range)
     }
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
-    /// The iterator's repositioning model ([`VShiftable`]) in the terms
+impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
+    /// The iterator's repositioning model ([`Shiftable`]) in the terms
     /// of its own specification: at each place of the column, its value
     /// and what the values come to through it; it stands at `pos()`;
     /// what it has left is `items()`, each item a value.
@@ -1196,10 +1196,10 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 
     /// A lookahead: the iterator wrapped so that the item it gives next
-    /// can be looked at first ([`VerifiedUnshift::peek`]), as the old
+    /// can be looked at first ([`Unshift::peek`]), as the old
     /// API's `Shiftable::unshift` gives.
     #[inline(always)]
-    pub fn unshift(self) -> (r: VerifiedUnshift<Self>)
+    pub fn unshift(self) -> (r: Unshift<Self>)
         ensures
             r.unshift_vals() == self.accumulated_items(),
             r.unshift_left() == self.items(),
@@ -1217,7 +1217,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     ///
     /// When it comes to a range that starts before where it stands.
     #[inline(always)]
-    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: Ranges<'r, Self>)
         ensures
             r.ranges_vals() == self.accumulated_items(),
             r.ranges_left() == windows(self.accumulated_items(), ranges@),

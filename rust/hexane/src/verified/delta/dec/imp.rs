@@ -28,7 +28,7 @@ use crate::delta::diter::{crop, lemma_crop, lemma_crop_add, lemma_wrapping_add, 
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::past;
 use crate::iter_core::{Decode, Decoders};
-use crate::verified::codec::VCodec;
+use crate::verified::codec::Codec;
 #[cfg(verus_keep_ghost)]
 use crate::verified::head_run_max;
 use crate::verified::model::Model;
@@ -52,15 +52,15 @@ pub(super) open spec fn dvos<E, X, B>(vs: Seq<E::V>) -> Seq<Option<i64>> where
 }
 
 /// The differences that the saved delta column `bytes` holds.
-pub(super) open spec fn saved_ds<T: VDeltaValue<C>, C: VCodec>(bytes: Seq<u8>) -> Seq<Option<i64>> {
+pub(super) open spec fn saved_ds<T: DeltaValue<C>, C: Codec>(bytes: Seq<u8>) -> Seq<Option<i64>> {
     dvos::<DE<T, C>, DX<T, C>, DB<T, C>>(<DE<T, C> as Model<DX<T, C>>>::values(bytes))
 }
 
 /// What a saved delta column keeps are its differences, each added to
 /// those before it.
-pub(super) proof fn lemma_saved<T: VDeltaValue<C>, C: VCodec>(bytes: Seq<u8>)
+pub(super) proof fn lemma_saved<T: DeltaValue<C>, C: Codec>(bytes: Seq<u8>)
     ensures
-        VerifiedDeltaColumn::<T, C>::saved_kept(bytes) == rz(0, saved_ds::<T, C>(bytes)),
+        DeltaColumn::<T, C>::saved_kept(bytes) == rz(0, saved_ds::<T, C>(bytes)),
 {
     let vs = <DE<T, C> as Model<DX<T, C>>>::values(bytes);
     assert(rvals::<DE<T, C>, DX<T, C>, DB<T, C>>(vs) == rz(0, dvos::<DE<T, C>, DX<T, C>, DB<T, C>>(vs)));
@@ -68,7 +68,7 @@ pub(super) proof fn lemma_saved<T: VDeltaValue<C>, C: VCodec>(bytes: Seq<u8>)
 
 /// What a decoder of the column underneath reads (`o`) are, as
 /// differences, those of the values it stands for (`vs`).
-pub(super) proof fn lemma_read<'a, T: VDeltaValue<C>, C: VCodec>(o: Seq<DIt<'a, T, C>>, vs: Seq<<DE<T, C> as Slabs>::V>)
+pub(super) proof fn lemma_read<'a, T: DeltaValue<C>, C: Codec>(o: Seq<DIt<'a, T, C>>, vs: Seq<<DE<T, C> as Slabs>::V>)
     requires
         vs.len() == o.len(),
         forall|i: int| 0 <= i < o.len() ==> #[trigger] vs[i] == <DE<T, C> as ReadsAgree<'a, DX<T, C>>>::own(o[i]),
@@ -247,7 +247,7 @@ pub(super) proof fn lemma_num_run<T: VDelta>(ds: Seq<Option<i64>>, k: int, n: in
 /// the first `n` of the items left are `v`, so the `n` differences from
 /// `at` on are `v`'s; and where the run stopped short of `max` and of the
 /// end, the difference after it is another.
-pub(super) proof fn lemma_head<'a, T: VDeltaValue<C>, C: VCodec>(
+pub(super) proof fn lemma_head<'a, T: DeltaValue<C>, C: Codec>(
     o: Seq<DIt<'a, T, C>>,
     ds: Seq<Option<i64>>,
     at: int,
@@ -311,7 +311,7 @@ pub(super) proof fn lemma_head<'a, T: VDeltaValue<C>, C: VCodec>(
     assert(col.skip(at + n) =~= col.skip(at).skip(n));
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaDecoder<'a, T, C> {
     /// The decoder stands in a saved delta column's bytes with the
     /// differences from `at` on left to read and the sum of those
     /// before; and the column's values are the type's.
@@ -337,11 +337,11 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
     #[inline]
     pub(super) fn new_impl(bytes: &'a [u8]) -> (r: Self)
         requires
-            VerifiedDeltaColumn::<T, C>::valid(bytes@),
+            DeltaColumn::<T, C>::valid(bytes@),
         ensures
-            r.column() == VerifiedDeltaColumn::<T, C>::values(bytes@),
+            r.column() == DeltaColumn::<T, C>::values(bytes@),
             r.pos() == 0,
-            r.rest() == VerifiedDeltaColumn::<T, C>::values(bytes@),
+            r.rest() == DeltaColumn::<T, C>::values(bytes@),
     {
         let d = <DE<T, C> as Model<DX<T, C>>>::decoder(bytes);
         let ghost ds = saved_ds::<T, C>(bytes@);
@@ -353,16 +353,16 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
             lemma_crop(0);
             assert(vals::<T>(rz(0, ds)).skip(0) =~= vals::<T>(rz(0, ds)));
         }
-        VerifiedDeltaDecoder { d, running: 0, ds: Ghost(ds), at: Ghost(0) }
+        DeltaDecoder { d, running: 0, ds: Ghost(ds), at: Ghost(0) }
     }
 
     pub(super) fn try_new_impl(bytes: &'a [u8]) -> (r: Result<Self, PackError>)
         ensures
             r matches Ok(d) ==> {
-                &&& VerifiedDeltaColumn::<T, C>::valid(bytes@)
-                &&& d.column() == VerifiedDeltaColumn::<T, C>::values(bytes@)
+                &&& DeltaColumn::<T, C>::valid(bytes@)
+                &&& d.column() == DeltaColumn::<T, C>::values(bytes@)
                 &&& d.pos() == 0
-                &&& d.rest() == VerifiedDeltaColumn::<T, C>::values(bytes@)
+                &&& d.rest() == DeltaColumn::<T, C>::values(bytes@)
             },
     {
         match <DE<T, C> as Model<DX<T, C>>>::validate(bytes) {
@@ -553,7 +553,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
                     Some(x) => add_run(self.running, x, run.count, Ghost(psum(ds.take(at)))),
                     None => self.running,
                 };
-                *self = VerifiedDeltaDecoder { d, running, ds: Ghost(ds), at: Ghost(at + n) };
+                *self = DeltaDecoder { d, running, ds: Ghost(ds), at: Ghost(at + n) };
                 Some(Run { count: run.count, value: delta })
             },
             None => None,
@@ -561,7 +561,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaDecoder<'a, T, C> {
     #[inline]
     pub(super) fn next_impl(&mut self) -> (r: Option<T>)
         ensures
@@ -612,11 +612,11 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
                             lemma_wrapping_add(self.running, x);
                             lemma_crop_add(psum(ds.take(at)), x as int);
                         }
-                        *self = VerifiedDeltaDecoder { d, running, ds: Ghost(ds), at: Ghost(at + 1) };
+                        *self = DeltaDecoder { d, running, ds: Ghost(ds), at: Ghost(at + 1) };
                         Some(T::from_i64(Some(running)))
                     },
                     None => {
-                        *self = VerifiedDeltaDecoder { d, running: self.running, ds: Ghost(ds), at: Ghost(at + 1) };
+                        *self = DeltaDecoder { d, running: self.running, ds: Ghost(ds), at: Ghost(at + 1) };
                         Some(T::from_i64(None))
                     },
                 }
@@ -666,7 +666,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> DeltaDecoder<'a, T, C> {
     pub(super) fn clone_impl(&self) -> (r: Self)
         ensures
             r.column() == self.column(),
@@ -676,15 +676,15 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaDecoder<'a, T, C> {
         proof {
             use_type_invariant(self);
         }
-        VerifiedDeltaDecoder { d: self.d.dup(), running: self.running, ds: self.ds, at: self.at }
+        DeltaDecoder { d: self.d.dup(), running: self.running, ds: self.ds, at: self.at }
     }
 }
 
 } // verus!
 
-impl<T: VDeltaValue<C>, C: VCodec> std::fmt::Debug for VerifiedDeltaDecoder<'_, T, C> {
+impl<T: DeltaValue<C>, C: Codec> std::fmt::Debug for DeltaDecoder<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedDeltaDecoder")
+        f.debug_struct("DeltaDecoder")
             .field("running", &self.running)
             .finish()
     }

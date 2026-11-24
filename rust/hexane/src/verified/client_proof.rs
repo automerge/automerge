@@ -127,7 +127,7 @@
 //! [`load_plain`]); and the runs of a column of one kind make a column
 //! of another ([`copied_by_runs`]).
 //!
-//! And of a [`VerifiedEncoder`]: that values appended one by one are
+//! And of a [`Encoder`]: that values appended one by one are
 //! saved as a column of them, in the one encoding of them
 //! ([`encoded_as_saved`]), so that an encoder and a column save the same
 //! bytes for the same values ([`encoder_or_column`]), and what an
@@ -180,7 +180,7 @@
 //! own ([`told_by_a_remapping_save`],
 //! [`told_by_a_remapping_save_unless`]).
 //!
-//! And of a [`VerifiedEncoderState`], which writes into a buffer of its
+//! And of a [`EncoderState`], which writes into a buffer of its
 //! caller's as the values come: that values given one by one are
 //! written as a column of them, after what the buffer held
 //! ([`streamed_as_saved`]); that a state, an encoder, a column and
@@ -227,7 +227,7 @@
 //! encoder and a state take strings borrowed and owned
 //! ([`encode_text`], [`text_streamed`]).
 //!
-//! And of a [`VerifiedDecoder`], which reads a saved column from its
+//! And of a [`Decoder`], which reads a saved column from its
 //! bytes with no column in between: that a `for` loop over it gives
 //! the values the bytes are the saved column of ([`read_all`],
 //! [`decode_all`]), which are those of the column that saved them and
@@ -254,7 +254,7 @@
 //! [`told_by_a_decoders_scan`], [`told_by_a_decoders_copy`],
 //! [`told_by_a_decoders_loop`]).
 //!
-//! And of a prefix column ([`VerifiedPrefixColumn`]), a column kept
+//! And of a prefix column ([`PrefixColumn`]), a column kept
 //! with the sums of its values, which the clients above of a column of
 //! any kind of index take too: that bytes load as one where they load
 //! as a plain column and the sums of their values fit the type they
@@ -284,7 +284,7 @@
 //! the two searches' specifications say what each finds
 //! ([`the_two_places`]).
 //!
-//! And of a prefix column's iterator ([`VerifiedPrefixIter`]), which
+//! And of a prefix column's iterator ([`PrefixIter`]), which
 //! gives each value with the sums before it and through it: that a
 //! `for` loop over it gives the running sums of the column
 //! ([`running_sums`]), counted from the column's start though it reads
@@ -409,16 +409,13 @@ use super::{
     min_i, only, past, produced, ranges_ascend, refused, run_units, run_values, runs_of, scan_of,
     scan_taken, sorted, sorted_for, splice_does, spliced_cut, splices_do, sum_of, summed, sums_fit,
     times, total_len, total_str_len, total_str_len_opt, ulebsize, unit_runs, window, windows,
-    AccIndex, Get, LenBitIndex, LenIndex, RawColumn, RawColumnIter, SumIndex, VAccum, VAccumulated,
-    VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype,
-    VPack, VShiftable, VSpec, VSum, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter,
-    VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder,
-    VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEdit, VerifiedDeltaEncoder,
-    VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns,
-    VerifiedEdit, VerifiedEncoder, VerifiedEncoderState, VerifiedFindByRange, VerifiedIter,
-    VerifiedIterState, VerifiedLoadIter, VerifiedPrefixColumn, VerifiedPrefixIter,
-    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRanges,
-    VerifiedRuns, VerifiedUnshift,
+    AccColumn, AccIndex, AccIter, AccIterState, AccSeek, AccValue, Codec, Column, ColumnLoadIter,
+    ColumnValueRef, Decoder, DeltaColumn, DeltaDecoder, DeltaEdit, DeltaEncoder, DeltaEncoderState,
+    DeltaIter, DeltaIterState, DeltaRuns, DeltaValue, Edit, Encoder, EncoderState, FindByRange,
+    Get, Iter, IterState, LenBitIndex, LenIndex, PrefixColumn, PrefixIter, PrefixIterState,
+    PrefixSeek, PrefixValue, PrefixedValue, Ranges, RawColumn, RawColumnIter, RleValue, Runs,
+    Shiftable, SumIndex, Unshift, UnsignedPrefix, VAccum, VAccumulated, VAdds, VAmount, VDelta,
+    VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum,
 };
 #[cfg(feature = "bijou64")]
 use crate::Bijou64;
@@ -445,12 +442,12 @@ verus! {
 /// ([`Get`]: for a number, the number), and what they are in a
 /// specification is [`VGet::svs`] of them (for numbers, themselves).
 #[allow(dead_code)]
-fn round_trip<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(input: &Vec<Get<'v, V>>)
+fn round_trip<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(input: &Vec<Get<'v, V>>)
     requires
         V::size_bound(VGet::svs(input@)) <= 0xffff_fff5,
         input@.len() <= usize::MAX - 3,
 {
-    let mut col = VerifiedColumn::<V, C, K>::new();
+    let mut col = Column::<V, C, K>::new();
     col.splice(0, 0, input.as_slice());
     let out = col.to_vec();
     assert(VGet::svs(out@) == VGet::svs(input@));
@@ -461,7 +458,7 @@ fn round_trip<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(input: &Vec<Get<'v, 
         // of its kind
         col.lemma_kept();
     }
-    let back = VerifiedColumn::<V, C, K>::load(bytes.as_slice());
+    let back = Column::<V, C, K>::load(bytes.as_slice());
     proof {
         // as many values in a specification as were put in
         VGet::lemma_svs(input@);
@@ -562,7 +559,7 @@ fn round_trip_action(input: &Vec<Action>, nullable: &Vec<Option<Action>>)
 /// value.
 #[allow(dead_code)]
 fn edit_and_read(a: Action, b: Action) {
-    let mut col = VerifiedColumn::<Option<Action>>::new();
+    let mut col = Column::<Option<Action>>::new();
     col.push(Some(a));
     col.push(Some(b));
     col.insert(1, None);
@@ -623,7 +620,7 @@ fn bytes_in_bytes_out(a: &[u8], b: &[u8])
         a@.len() <= 1000,
         b@.len() <= 1000,
 {
-    let mut col = VerifiedColumn::<Vec<u8>>::new();
+    let mut col = Column::<Vec<u8>>::new();
     col.push(a);
     col.push(b);
     col.insert(1, a);
@@ -644,7 +641,7 @@ fn bytes_in_bytes_out(a: &[u8], b: &[u8])
     proof {
         lemma_total(col@, 1000);
     }
-    let back = VerifiedColumn::<Vec<u8>>::load(bytes.as_slice());
+    let back = Column::<Vec<u8>>::load(bytes.as_slice());
     assert(back is Ok);
     let back = back.unwrap();
     let mut it = back.iter_range(1, 3);
@@ -663,7 +660,7 @@ fn bytes_or_null(a: &[u8], none: &[u8])
     requires
         none@.len() == 0,
 {
-    let mut col = VerifiedColumn::<Option<Vec<u8>>>::new();
+    let mut col = Column::<Option<Vec<u8>>>::new();
     col.push(Some(a));
     col.push(None);
     col.push(Some(none));
@@ -682,10 +679,10 @@ fn bytes_or_null(a: &[u8], none: &[u8])
 /// What loads, saves back to the bytes it was loaded from: no two byte
 /// strings load as the same column. For any bytes, of any provenance.
 #[allow(dead_code)]
-fn load_then_save<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(bytes: &[u8]) {
-    if let Ok(col) = VerifiedColumn::<V, C, K>::load(bytes) {
+fn load_then_save<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(bytes: &[u8]) {
+    if let Ok(col) = Column::<V, C, K>::load(bytes) {
         proof {
-            VerifiedColumn::<V, C>::lemma_encoding(bytes@);
+            Column::<V, C>::lemma_encoding(bytes@);
         }
         let again = col.save();
         assert(again@ == bytes@);
@@ -697,12 +694,12 @@ fn load_then_save<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(bytes: &[u8]) {
 /// ([`VKeeps::keeps`]), and a column they load as is of their values,
 /// for which its kind is kept. For every value type, codec and kind.
 #[allow(dead_code)]
-fn load_as_a_kind<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(bytes: &[u8]) -> (r: Option<VerifiedColumn<V, C, K>>)
+fn load_as_a_kind<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(bytes: &[u8]) -> (r: Option<Column<V, C, K>>)
     ensures
-        VerifiedColumn::<V, C>::loadable(bytes@) && K::keeps(VerifiedColumn::<V, C>::values(bytes@)) ==> r is Some,
-        r matches Some(c) ==> c@ == VerifiedColumn::<V, C>::values(bytes@) && K::keeps(c@),
+        Column::<V, C>::loadable(bytes@) && K::keeps(Column::<V, C>::values(bytes@)) ==> r is Some,
+        r matches Some(c) ==> c@ == Column::<V, C>::values(bytes@) && K::keeps(c@),
 {
-    match VerifiedColumn::<V, C, K>::load(bytes) {
+    match Column::<V, C, K>::load(bytes) {
         Ok(c) => {
             proof {
                 c.lemma_kept();
@@ -716,10 +713,10 @@ fn load_as_a_kind<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(bytes: &[u8]) -> (r:
 /// A plain column is kept for any values: bytes that are `loadable`
 /// load as one.
 #[allow(dead_code)]
-fn load_plain<V: VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<VerifiedColumn<V, C>>)
+fn load_plain<V: ColumnValueRef<C>, C: Codec>(bytes: &[u8]) -> (r: Option<Column<V, C>>)
     ensures
-        VerifiedColumn::<V, C>::loadable(bytes@) ==> r is Some,
-        r matches Some(c) ==> c@ == VerifiedColumn::<V, C>::values(bytes@),
+        Column::<V, C>::loadable(bytes@) ==> r is Some,
+        r matches Some(c) ==> c@ == Column::<V, C>::values(bytes@),
 {
     load_as_a_kind::<V, C, LenIndex>(bytes)
 }
@@ -731,7 +728,7 @@ fn count_and_cut(input: &Vec<u32>)
     requires
         input@.len() >= 3,
 {
-    let mut col = VerifiedColumn::<u32>::default();
+    let mut col = Column::<u32>::default();
     let none = col.is_empty();
     assert(none);
     col.splice(0, 0, input.as_slice());
@@ -751,7 +748,7 @@ fn count_and_cut(input: &Vec<u32>)
     assert(col@ == input@.take(2));
     col.truncate(5);
     assert(col@ == input@.take(2));
-    let mut small = VerifiedColumn::<bool>::with_max_segments(2);
+    let mut small = Column::<bool>::with_max_segments(2);
     small.push(true);
     assert(small@ == seq![true]);
 }
@@ -760,16 +757,16 @@ fn count_and_cut(input: &Vec<u32>)
 /// holds its columns: each loads from its own range of the buffer as the
 /// values it had. For every value type and codec.
 #[allow(dead_code)]
-fn two_in_one_buffer<'v, V: VValue<C>, C: VCodec>(xs: &Vec<Get<'v, V>>, ys: &Vec<Get<'v, V>>)
+fn two_in_one_buffer<'v, V: ColumnValueRef<C>, C: Codec>(xs: &Vec<Get<'v, V>>, ys: &Vec<Get<'v, V>>)
     requires
         V::size_bound(VGet::svs(xs@)) <= 0xffff_fff5,
         V::size_bound(VGet::svs(ys@)) <= 0xffff_fff5,
         xs@.len() <= usize::MAX - 3,
         ys@.len() <= usize::MAX - 3,
 {
-    let mut a = VerifiedColumn::<V, C>::new();
+    let mut a = Column::<V, C>::new();
     a.splice(0, 0, xs.as_slice());
-    let mut b = VerifiedColumn::<V, C>::new();
+    let mut b = Column::<V, C>::new();
     b.splice(0, 0, ys.as_slice());
     proof {
         VGet::lemma_svs(xs@);
@@ -780,8 +777,8 @@ fn two_in_one_buffer<'v, V: VValue<C>, C: VCodec>(xs: &Vec<Get<'v, V>>, ys: &Vec
     out.push(0xff);
     let ra = a.save_to(&mut out);
     let rb = b.save_to(&mut out);
-    let ghost ea = VerifiedColumn::<V, C>::encoding(a@);
-    let ghost eb = VerifiedColumn::<V, C>::encoding(b@);
+    let ghost ea = Column::<V, C>::encoding(a@);
+    let ghost eb = Column::<V, C>::encoding(b@);
     // the buffer is what it held, then the one column, then the other
     assert(out@ == seq![0xffu8] + ea + eb);
     assert(ra.start == 1 && ra.end == rb.start && rb.end == out@.len());
@@ -790,8 +787,8 @@ fn two_in_one_buffer<'v, V: VValue<C>, C: VCodec>(xs: &Vec<Get<'v, V>>, ys: &Vec
     let db = vstd::slice::slice_subrange(out.as_slice(), rb.start, rb.end);
     assert(da@ == ea);
     assert(db@ == eb);
-    let la = VerifiedColumn::<V, C>::load(da);
-    let lb = VerifiedColumn::<V, C>::load(db);
+    let la = Column::<V, C>::load(da);
+    let lb = Column::<V, C>::load(db);
     assert(la is Ok && la->Ok_0@ == VGet::svs(xs@));
     assert(lb is Ok && lb->Ok_0@ == VGet::svs(ys@));
 }
@@ -800,14 +797,14 @@ fn two_in_one_buffer<'v, V: VValue<C>, C: VCodec>(xs: &Vec<Get<'v, V>>, ys: &Vec
 /// of each, and that a column of the one value alone is not written.
 /// For every value type and codec.
 #[allow(dead_code)]
-fn one_value_only<'v, V: VValue<C>, C: VCodec>(a: Get<'v, V>, b: Get<'v, V>)
+fn one_value_only<'v, V: ColumnValueRef<C>, C: Codec>(a: Get<'v, V>, b: Get<'v, V>)
     requires
         a.sv() != b.sv(),
 {
     let same = V::same(a, b);
     assert(!same);
 
-    let mut col = VerifiedColumn::<V, C>::new();
+    let mut col = Column::<V, C>::new();
     // an empty column holds no value that is not `a`
     let none = col.is_only(a);
     assert(none);
@@ -836,7 +833,7 @@ fn one_value_only<'v, V: VValue<C>, C: VCodec>(a: Get<'v, V>, b: Get<'v, V>)
     }
     let r = col.save_to_unless(&mut out, a);
     assert(!only(col@, a.sv()));
-    assert(out@ == seq![7u8] + VerifiedColumn::<V, C>::encoding(col@));
+    assert(out@ == seq![7u8] + Column::<V, C>::encoding(col@));
     assert(r.start == 1 && r.end == out@.len());
 
     // the other value taken out again
@@ -864,7 +861,7 @@ fn only_nulls(x: &[u8], none: &[u8])
     one_value_only::<bool, Leb128>(false, true);
     one_value_only::<Option<Vec<u8>>, Leb128>(None, Some(none));
 
-    let mut col = VerifiedColumn::<Option<Vec<u8>>>::new();
+    let mut col = Column::<Option<Vec<u8>>>::new();
     col.push(None);
     col.push(None);
     let nulls = col.is_only(None);
@@ -883,8 +880,8 @@ fn only_nulls(x: &[u8], none: &[u8])
 /// the same bytes, and an edit of one leaves the other as it was. For
 /// every value type and codec.
 #[allow(dead_code)]
-fn clone_then_diverge<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(xs: &Vec<Get<'v, V>>, a: Get<'v, V>) {
-    let mut col = VerifiedColumn::<V, C, K>::new();
+fn clone_then_diverge<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(xs: &Vec<Get<'v, V>>, a: Get<'v, V>) {
+    let mut col = Column::<V, C, K>::new();
     col.splice(0, 0, xs.as_slice());
     let ghost vs = VGet::svs(xs@);
     assert(col@ == vs);
@@ -912,7 +909,7 @@ fn clone_then_diverge<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(xs: &Vec<Get
 /// read from one is the bytes written to the first.
 #[allow(dead_code)]
 fn clone_of_clone(x: &[u8]) {
-    let mut col = VerifiedColumn::<Option<Vec<u8>>>::new();
+    let mut col = Column::<Option<Vec<u8>>>::new();
     col.push(Some(x));
     col.push(None);
     let mut twin = col.clone();
@@ -930,7 +927,7 @@ fn clone_of_clone(x: &[u8]) {
     assert(from_third matches Some(Some(v)) && v@ == x@);
 
     // an empty column's clone is empty, and a column on its own
-    let empty = VerifiedColumn::<bool>::new();
+    let empty = Column::<bool>::new();
     let mut other = empty.clone();
     other.push(true);
     assert(empty@.len() == 0);
@@ -946,14 +943,14 @@ fn clone_of_clone(x: &[u8]) {
 /// The client hands vectors over, of which Verus's library says what
 /// their iterators give. It proves nothing of an iterator itself.
 #[allow(dead_code)]
-fn collect_then_extend<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(a: Vec<Get<'v, V>>, b: Vec<Get<'v, V>>, c: Vec<Get<'v, V>>) {
+fn collect_then_extend<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(a: Vec<Get<'v, V>>, b: Vec<Get<'v, V>>, c: Vec<Get<'v, V>>) {
     let ghost (av, bv, cv) = (VGet::svs(a@), VGet::svs(b@), VGet::svs(c@));
     proof {
         VGet::lemma_svs(a@);
     }
-    let by_slice = VerifiedColumn::<V, C, K>::from_values(a.as_slice());
+    let by_slice = Column::<V, C, K>::from_values(a.as_slice());
     assert(by_slice@ == av);
-    let mut col: VerifiedColumn<V, C, K> = a.into_iter().collect();
+    let mut col: Column<V, C, K> = a.into_iter().collect();
     assert(col@ == av);
     // the same values, so the same bytes
     let x = by_slice.save();
@@ -976,11 +973,11 @@ fn collect_then_extend<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(a: Vec<Get<
 #[allow(dead_code)]
 fn collect_each(a: Vec<u64>, b: Vec<&[u8]>, c: Vec<Option<&[u8]>>, more: Vec<&[u8]>) {
     let ghost bv = VGet::svs(b@);
-    let nums: VerifiedColumn<u64> = a.into_iter().collect();
+    let nums: Column<u64> = a.into_iter().collect();
     assert(nums@ == a@);
-    let mut strs: VerifiedColumn<Vec<u8>> = b.into_iter().collect();
+    let mut strs: Column<Vec<u8>> = b.into_iter().collect();
     assert(strs@ == bv);
-    let opts = VerifiedColumn::<Option<Vec<u8>>>::from_iter(c);
+    let opts = Column::<Option<Vec<u8>>>::from_iter(c);
     assert(opts@ == VGet::svs(c@));
     strs.extend(more);
     assert(strs@ == bv + VGet::svs(more@));
@@ -1014,15 +1011,15 @@ proof fn lemma_counted<G: VGet>(rs: Seq<Run<G>>)
 /// value, and the column is as much longer as the runs' counts are
 /// together. For every value type and codec.
 #[allow(dead_code)]
-fn runs_in<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(a: Get<'v, V>, b: Get<'v, V>, c: Get<'v, V>, more: Vec<Run<Get<'v, V>>>)
+fn runs_in<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(a: Get<'v, V>, b: Get<'v, V>, c: Get<'v, V>, more: Vec<Run<Get<'v, V>>>)
     requires
         a.sv() != b.sv(),
 {
-    let mut col = VerifiedColumn::<V, C, K>::fill(3, a);
+    let mut col = Column::<V, C, K>::fill(3, a);
     assert(col@ =~= seq![a.sv(), a.sv(), a.sv()]);
     let all_a = col.is_only(a);
     assert(all_a);
-    let empty = VerifiedColumn::<V, C, K>::fill(0, a);
+    let empty = Column::<V, C, K>::fill(0, a);
     assert(empty@.len() == 0);
 
     let mut runs: Vec<Run<Get<'v, V>>> = Vec::new();
@@ -1063,7 +1060,7 @@ fn runs_in<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(a: Get<'v, V>, b: Get<'
 /// another: the values of both, in order.
 #[allow(dead_code)]
 fn runs_of_slices(x: &[u8], k: usize, a: Vec<Run<u64>>, b: Vec<Run<u64>>) {
-    let mut col = VerifiedColumn::<Option<Vec<u8>>>::new();
+    let mut col = Column::<Option<Vec<u8>>>::new();
     let mut runs: Vec<Run<Option<&[u8]>>> = Vec::new();
     runs.push(Run { count: k, value: Some(x) });
     proof {
@@ -1075,7 +1072,7 @@ fn runs_of_slices(x: &[u8], k: usize, a: Vec<Run<u64>>, b: Vec<Run<u64>>) {
     let all = col.is_only(Some(x));
     assert(all);
 
-    let mut nums = VerifiedColumn::<u64>::new();
+    let mut nums = Column::<u64>::new();
     nums.splice_runs(0, 0, a);
     let len = nums.len();
     nums.splice_runs(len, 0, b);
@@ -1090,13 +1087,13 @@ fn runs_of_slices(x: &[u8], k: usize, a: Vec<Run<u64>>, b: Vec<Run<u64>>) {
 /// slab; and with another length asked for it does not load. For every
 /// value type and codec.
 #[allow(dead_code)]
-fn load_with_a_length<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, v: Get<'v, V>, other: usize)
+fn load_with_a_length<'v, V: ColumnValueRef<C>, C: Codec>(input: &Vec<Get<'v, V>>, v: Get<'v, V>, other: usize)
     requires
         V::size_bound(VGet::svs(input@)) <= 0xffff_fff5,
         input@.len() <= usize::MAX - 3,
         other != input@.len(),
 {
-    let mut col = VerifiedColumn::<V, C>::new();
+    let mut col = Column::<V, C>::new();
     col.splice(0, 0, input.as_slice());
     let n = col.len();
     let bytes = col.save();
@@ -1104,26 +1101,26 @@ fn load_with_a_length<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, v: G
         VGet::lemma_svs(input@);
         // no bytes are no values: so these bytes are none if the column
         // is empty, and only then
-        VerifiedColumn::<V, C>::lemma_no_bytes();
+        Column::<V, C>::lemma_no_bytes();
         if n == 0 {
             assert(col@ =~= Seq::empty());
-            VerifiedColumn::<V, C>::lemma_save_unique(bytes@, Seq::empty());
+            Column::<V, C>::lemma_save_unique(bytes@, Seq::empty());
         } else if bytes@.len() == 0 {
             assert(bytes@ =~= Seq::empty());
         }
     }
 
-    let back = VerifiedColumn::<V, C>::load_with(bytes.as_slice(), LoadOpts::new().with_length(n));
+    let back = Column::<V, C>::load_with(bytes.as_slice(), LoadOpts::new().with_length(n));
     assert(back is Ok && back->Ok_0@ == col@);
 
     // a fill value fills nothing but an empty column, with no values
-    let back = VerifiedColumn::<V, C>::load_with(bytes.as_slice(), LoadOpts::new().with_length(n).with_fill(v));
+    let back = Column::<V, C>::load_with(bytes.as_slice(), LoadOpts::new().with_length(n).with_fill(v));
     assert(back is Ok && back->Ok_0@ =~= col@);
 
-    let back = VerifiedColumn::<V, C>::load_with(bytes.as_slice(), LoadOpts::new().with_length(n).with_max_segments(2));
+    let back = Column::<V, C>::load_with(bytes.as_slice(), LoadOpts::new().with_length(n).with_max_segments(2));
     assert(back is Ok && back->Ok_0@ == col@);
 
-    let back = VerifiedColumn::<V, C>::load_with(bytes.as_slice(), LoadOpts::new().with_length(other));
+    let back = Column::<V, C>::load_with(bytes.as_slice(), LoadOpts::new().with_length(other));
     assert(back is Err);
 }
 
@@ -1133,12 +1130,12 @@ fn load_with_a_length<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, v: G
 /// column, and with a fill value and no length as that too. For every
 /// value type and codec.
 #[allow(dead_code)]
-fn load_a_fill<'v, V: VValue<C>, C: VCodec>(v: Get<'v, V>, n: usize) {
+fn load_a_fill<'v, V: ColumnValueRef<C>, C: Codec>(v: Get<'v, V>, n: usize) {
     let none: Vec<u8> = Vec::new();
     proof {
-        VerifiedColumn::<V, C>::lemma_no_bytes();
+        Column::<V, C>::lemma_no_bytes();
     }
-    let r = VerifiedColumn::<V, C>::load_with(none.as_slice(), LoadOpts::new().with_length(n).with_fill(v));
+    let r = Column::<V, C>::load_with(none.as_slice(), LoadOpts::new().with_length(n).with_fill(v));
     if n as u64 <= i64::MAX as u64 && n <= usize::MAX - 3 {
         assert(r is Ok);
         let col = r.unwrap();
@@ -1154,10 +1151,10 @@ fn load_a_fill<'v, V: VValue<C>, C: VCodec>(v: Get<'v, V>, n: usize) {
         assert(r is Err);
     }
 
-    let r = VerifiedColumn::<V, C>::load_with(none.as_slice(), LoadOpts::new().with_length(n));
+    let r = Column::<V, C>::load_with(none.as_slice(), LoadOpts::new().with_length(n));
     assert(r is Ok <==> n == 0);
 
-    let r = VerifiedColumn::<V, C>::load_with(none.as_slice(), LoadOpts::new().with_fill(v));
+    let r = Column::<V, C>::load_with(none.as_slice(), LoadOpts::new().with_fill(v));
     assert(r is Ok && r->Ok_0@.len() == 0);
 }
 
@@ -1167,29 +1164,29 @@ fn load_a_fill<'v, V: VValue<C>, C: VCodec>(v: Get<'v, V>, n: usize) {
 #[allow(dead_code)]
 fn load_fills(x: &[u8]) {
     let none: Vec<u8> = Vec::new();
-    let r = VerifiedColumn::<Option<Vec<u8>>>::load_with(
+    let r = Column::<Option<Vec<u8>>>::load_with(
         none.as_slice(),
         LoadOpts::new().with_length(3).with_fill(None),
     );
     assert(r is Ok && r->Ok_0@ =~= seq![None::<Seq<u8>>, None, None]);
 
-    let r = VerifiedColumn::<Vec<u8>>::load_with(
+    let r = Column::<Vec<u8>>::load_with(
         none.as_slice(),
         LoadOpts::default().with_fill(x).with_max_segments(4).with_length(2),
     );
     assert(r is Ok && r->Ok_0@ =~= seq![x@, x@]);
 
-    let r = VerifiedColumn::<u64>::load_with(none.as_slice(), LoadOpts::new().with_length(5).with_fill(7));
+    let r = Column::<u64>::load_with(none.as_slice(), LoadOpts::new().with_length(5).with_fill(7));
     assert(r is Ok && r->Ok_0@ =~= seq![7u64, 7, 7, 7, 7]);
 
     proof {
-        VerifiedColumn::<u64>::lemma_no_bytes();
+        Column::<u64>::lemma_no_bytes();
     }
-    let r = VerifiedColumn::<u64>::load_with(none.as_slice(), LoadOpts::new().with_length(usize::MAX).with_fill(7));
+    let r = Column::<u64>::load_with(none.as_slice(), LoadOpts::new().with_length(usize::MAX).with_fill(7));
     assert(r is Err);
 
     // and with no option, no bytes are a column of no values
-    let r = VerifiedColumn::<u64>::load_with(none.as_slice(), LoadOpts::default());
+    let r = Column::<u64>::load_with(none.as_slice(), LoadOpts::default());
     assert(r is Ok && r->Ok_0@.len() == 0);
 }
 
@@ -1220,11 +1217,11 @@ proof fn lemma_sum_of(lens: Seq<usize>, i: int)
 /// save to less than 4 GiB finds no fault in what it saves. For every
 /// value type and codec.
 #[allow(dead_code)]
-fn slabs_and_validation<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(input: &Vec<Get<'v, V>>)
+fn slabs_and_validation<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(input: &Vec<Get<'v, V>>)
     requires
         V::size_bound(VGet::svs(input@)) <= u32::MAX,
 {
-    let mut col = VerifiedColumn::<V, C, K>::new();
+    let mut col = Column::<V, C, K>::new();
     col.splice(0, 0, input.as_slice());
     proof {
         VGet::lemma_svs(input@);
@@ -1271,13 +1268,13 @@ fn slabs_of_each(a: &Vec<u64>, b: &Vec<bool>)
 /// A column loaded from less than 4 GiB of bytes finds no fault in what
 /// it saves, which is those bytes. For any bytes, of any provenance.
 #[allow(dead_code)]
-fn load_then_validate<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(bytes: &[u8])
+fn load_then_validate<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(bytes: &[u8])
     requires
         bytes@.len() <= u32::MAX,
 {
-    if let Ok(col) = VerifiedColumn::<V, C, K>::load(bytes) {
+    if let Ok(col) = Column::<V, C, K>::load(bytes) {
         proof {
-            VerifiedColumn::<V, C>::lemma_encoding(bytes@);
+            Column::<V, C>::lemma_encoding(bytes@);
         }
         let r = col.validate_encoding();
         assert(r is Ok);
@@ -1285,10 +1282,10 @@ fn load_then_validate<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(bytes: &[u8])
 }
 
 /// How two values stand in the order is a thing a client can ask
-/// ([`VValue::compare`]): the later of two is one of them, and neither
+/// ([`ColumnValueRef::compare`]): the later of two is one of them, and neither
 /// comes after it. For every value type and codec.
 #[allow(dead_code)]
-fn later_of<'v, V: VValue<C>, C: VCodec>(a: Get<'v, V>, b: Get<'v, V>) -> (r: Get<'v, V>)
+fn later_of<'v, V: ColumnValueRef<C>, C: Codec>(a: Get<'v, V>, b: Get<'v, V>) -> (r: Get<'v, V>)
     ensures
         r.sv() == a.sv() || r.sv() == b.sv(),
         !V::below(r.sv(), a.sv()),
@@ -1310,7 +1307,7 @@ fn later_of<'v, V: VValue<C>, C: VCodec>(a: Get<'v, V>, b: Get<'v, V>) -> (r: Ge
 /// order still. For every value type and codec, from the laws of the
 /// order alone ([`VSpec::lemma_below`]).
 #[allow(dead_code)]
-fn insert_in_order<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, x: Get<'v, V>) -> (at:
+fn insert_in_order<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, x: Get<'v, V>) -> (at:
     usize)
     requires
         sorted::<V>(old(col)@),
@@ -1362,7 +1359,7 @@ fn insert_in_order<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut Verif
 /// and the greater ones after. A client says so with `<` and `>`: what
 /// the order of a number type is can be read ([`VSpec::below`]).
 #[allow(dead_code)]
-fn find_number(col: &VerifiedColumn<u32>, x: u32) -> (r: Range<usize>)
+fn find_number(col: &Column<u32>, x: u32) -> (r: Range<usize>)
     requires
         forall|i: int, j: int| 0 <= i <= j < col@.len() ==> col@[i] <= col@[j],
     ensures
@@ -1392,7 +1389,7 @@ fn find_action(sets: usize, deletes: usize)
     requires
         sets + deletes <= 1000,
 {
-    let mut col = VerifiedColumn::<Action>::new();
+    let mut col = Column::<Action>::new();
     let mut i: usize = 0;
     while i < sets
         invariant
@@ -1470,7 +1467,7 @@ fn find_bytes(a: &[u8], b: &[u8])
         a@.len() < b@.len(),
         b@.take(a@.len() as int) == a@,
 {
-    let mut col = VerifiedColumn::<Option<Vec<u8>>>::new();
+    let mut col = Column::<Option<Vec<u8>>>::new();
     col.push(None);
     col.push(Some(a));
     col.push(Some(b));
@@ -1510,7 +1507,7 @@ fn find_by_a_byte(a: &[u8], b: &[u8], i: usize)
         a@.take(i as int) == b@.take(i as int),
         a@[i as int] < b@[i as int],
 {
-    let mut col = VerifiedColumn::<Vec<u8>>::new();
+    let mut col = Column::<Vec<u8>>::new();
     col.push(a);
     col.push(b);
     assert(col@ == seq![a@, b@]);
@@ -1540,7 +1537,7 @@ fn find_flags_and_nulls(falses: usize, trues: usize, x: u32)
     requires
         falses + trues <= 1000,
 {
-    let mut col = VerifiedColumn::<bool>::new();
+    let mut col = Column::<bool>::new();
     let mut i: usize = 0;
     while i < falses + trues
         invariant
@@ -1570,7 +1567,7 @@ fn find_flags_and_nulls(falses: usize, trues: usize, x: u32)
     }
     assert(r.start == falses && r.end == n);
 
-    let mut col = VerifiedColumn::<Option<u32>>::new();
+    let mut col = Column::<Option<u32>>::new();
     col.push(None);
     col.push(None);
     col.push(Some(x));
@@ -1593,7 +1590,7 @@ fn find_flags_and_nulls(falses: usize, trues: usize, x: u32)
 /// `m` are less than `x` and the others greater, in whatever order
 /// among themselves, it gives the empty range at `m`.
 #[allow(dead_code)]
-fn find_the_gap(col: &VerifiedColumn<i64>, x: i64, m: usize) -> (r: Range<usize>)
+fn find_the_gap(col: &Column<i64>, x: i64, m: usize) -> (r: Range<usize>)
     requires
         m <= col@.len(),
         forall|k: int| 0 <= k < m ==> col@[k] < x,
@@ -1624,7 +1621,7 @@ fn find_the_gap(col: &VerifiedColumn<i64>, x: i64, m: usize) -> (r: Range<usize>
 /// that each place holds what the function gave for the value that was
 /// there (`mapped`).
 #[allow(dead_code)]
-fn remap_as_it_is<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>)
+fn remap_as_it_is<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>)
     ensures
         final(col)@ == old(col)@,
 {
@@ -1639,7 +1636,7 @@ fn remap_as_it_is<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedCo
 /// Numbers doubled, by a function that does not take every number: the
 /// client has to show that it takes those of the column, and no more.
 #[allow(dead_code)]
-fn double_the_small(col: &mut VerifiedColumn<u64>)
+fn double_the_small(col: &mut Column<u64>)
     requires
         forall|i: int| 0 <= i < old(col)@.len() ==> old(col)@[i] <= 1000,
     ensures
@@ -1687,7 +1684,7 @@ fn next_action(a: Action) -> (b: Action)
 /// The client's own type, remapped by a function that has a name; and
 /// nulls of it, which the function leaves.
 #[allow(dead_code)]
-fn step_the_actions(col: &mut VerifiedColumn<Action>, nullable: &mut VerifiedColumn<Option<Action>>)
+fn step_the_actions(col: &mut Column<Action>, nullable: &mut Column<Option<Action>>)
     ensures
         final(col)@.len() == old(col)@.len(),
         forall|i: int| 0 <= i < old(col)@.len() ==> final(col)@[i] == after(old(col)@[i]),
@@ -1718,7 +1715,7 @@ fn step_the_actions(col: &mut VerifiedColumn<Action>, nullable: &mut VerifiedCol
 /// or nulls, of which the nulls stay and the strings are emptied. The
 /// function is given a string of its own, and may hand back that one.
 #[allow(dead_code)]
-fn longer_and_emptied(col: &mut VerifiedColumn<Vec<u8>>, nullable: &mut VerifiedColumn<Option<Vec<u8>>>, b: u8)
+fn longer_and_emptied(col: &mut Column<Vec<u8>>, nullable: &mut Column<Option<Vec<u8>>>, b: u8)
     ensures
         final(col)@.len() == old(col)@.len(),
         forall|i: int| 0 <= i < old(col)@.len() ==> final(col)@[i] == old(col)@[i].push(b),
@@ -1761,7 +1758,7 @@ fn longer_and_emptied(col: &mut VerifiedColumn<Vec<u8>>, nullable: &mut Verified
 /// says only that it gives no less than it is given, so that it knows
 /// only that of the column.
 #[allow(dead_code)]
-fn turned_and_raised(flags: &mut VerifiedColumn<bool>, col: &mut VerifiedColumn<i64>, floor: i64)
+fn turned_and_raised(flags: &mut Column<bool>, col: &mut Column<i64>, floor: i64)
     ensures
         final(flags)@.len() == old(flags)@.len(),
         forall|i: int| 0 <= i < old(flags)@.len() ==> final(flags)@[i] == !old(flags)@[i],
@@ -1790,7 +1787,7 @@ fn turned_and_raised(flags: &mut VerifiedColumn<bool>, col: &mut VerifiedColumn<
 /// Numbers or nulls: a function that takes every value but the greatest
 /// number, of a column that the client knows to be without it.
 #[allow(dead_code)]
-fn one_more(col: &mut VerifiedColumn<Option<u64>>)
+fn one_more(col: &mut Column<Option<u64>>)
     requires
         forall|i: int| 0 <= i < old(col)@.len() ==> old(col)@[i] != Some(u64::MAX),
     ensures
@@ -1822,7 +1819,7 @@ fn one_more(col: &mut VerifiedColumn<Option<u64>>)
 /// order: here each goes into a `Vec`, which then holds what the column
 /// does. For every value type and codec.
 #[allow(dead_code)]
-fn read_in_a_loop<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>) -> (out: Vec<Get<'a, V>>)
+fn read_in_a_loop<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>) -> (out: Vec<Get<'a, V>>)
     ensures
         <Get<'a, V> as VGet>::svs(out@) == col@,
 {
@@ -1848,7 +1845,7 @@ fn read_in_a_loop<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a Verifie
 /// A `for` loop over a column itself: whether every number of it is
 /// below `m`.
 #[allow(dead_code)]
-fn all_below(col: &VerifiedColumn<u32>, m: u32) -> (r: bool)
+fn all_below(col: &Column<u32>, m: u32) -> (r: bool)
     ensures
         r == forall|i: int| 0 <= i < col@.len() ==> col@[i] < m,
 {
@@ -1868,7 +1865,7 @@ fn all_below(col: &VerifiedColumn<u32>, m: u32) -> (r: bool)
 /// Two columns read side by side, with the standard library's `zip`:
 /// whether they hold the same numbers.
 #[allow(dead_code)]
-fn agree(a: &VerifiedColumn<u64>, b: &VerifiedColumn<u64>) -> (r: bool)
+fn agree(a: &Column<u64>, b: &Column<u64>) -> (r: bool)
     requires
         a@.len() == b@.len(),
     ensures
@@ -1897,7 +1894,7 @@ fn agree(a: &VerifiedColumn<u64>, b: &VerifiedColumn<u64>) -> (r: bool)
 /// leaves the iterator behind it, and an iterator knows how many values
 /// it has left.
 #[allow(dead_code)]
-fn every_other(col: &VerifiedColumn<i64>)
+fn every_other(col: &Column<i64>)
     requires
         col@.len() == 5,
 {
@@ -1921,7 +1918,7 @@ fn every_other(col: &VerifiedColumn<i64>)
 /// The value two places on, if a column is that long: for every value
 /// type and codec.
 #[allow(dead_code)]
-fn the_third<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>) -> (r: Option<Get<'a, V>>)
+fn the_third<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>) -> (r: Option<Get<'a, V>>)
     ensures
         match r {
             Some(v) => col@.len() > 2 && v.sv() == col@[2],
@@ -1960,7 +1957,7 @@ proof fn lemma_no_less<F: FnMut(u64, u64) -> u64>(f: F, m: u64, vs: Seq<u64>, r:
 /// A fold: a number that is no less than any of a column's, by a closure
 /// that keeps the greater of two.
 #[allow(dead_code)]
-fn the_greatest(col: &VerifiedColumn<u64>) -> (r: u64)
+fn the_greatest(col: &Column<u64>) -> (r: u64)
     ensures
         forall|i: int| 0 <= i < col@.len() ==> r >= col@[i],
 {
@@ -1985,7 +1982,7 @@ fn the_greatest(col: &VerifiedColumn<u64>) -> (r: u64)
 /// then goes its own way; and an iterator of no column gives nothing.
 /// For every value type and codec.
 #[allow(dead_code)]
-fn two_readers<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>)
+fn two_readers<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>)
     requires
         col@.len() == 3,
 {
@@ -2005,7 +2002,7 @@ fn two_readers<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedCo
     let left_a = a.len();
     let left_b = b.len();
     assert(left_a == 0 && left_b == 1);
-    let mut none = VerifiedIter::<V, C, K>::default();
+    let mut none = Iter::<V, C, K>::default();
     let n = none.next();
     assert(n is None);
 }
@@ -2013,7 +2010,7 @@ fn two_readers<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedCo
 /// An iterator's window moved to a range of the column: a `for` loop
 /// then reads the column's values there. For every value type and codec.
 #[allow(dead_code)]
-fn in_the_range<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>, a: usize, b: usize) -> (out: Vec<
+fn in_the_range<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>, a: usize, b: usize) -> (out: Vec<
     Get<'a, V>,
 >)
     requires
@@ -2048,7 +2045,7 @@ fn in_the_range<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedC
 /// one, `set_max` the other, and what is left is the column's values
 /// between the two.
 #[allow(dead_code)]
-fn where_it_stands(col: &VerifiedColumn<u64>)
+fn where_it_stands(col: &Column<u64>)
     requires
         col@.len() == 10,
 {
@@ -2082,7 +2079,7 @@ fn where_it_stands(col: &VerifiedColumn<u64>)
 /// gave, and its window ends there: where the range ended, or the
 /// column if that came first. For every value type and codec.
 #[allow(dead_code)]
-fn read_out<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, a: usize, b: usize) -> (r: (usize, usize, usize))
+fn read_out<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, a: usize, b: usize) -> (r: (usize, usize, usize))
     requires
         a <= b,
         a <= col@.len(),
@@ -2132,7 +2129,7 @@ fn read_out<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C,
 /// from the one to the other, and how many values the second window then
 /// has left: for every value type and codec.
 #[allow(dead_code)]
-fn at_two_places<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>, i: usize, j: usize, n: usize) -> (r: (
+fn at_two_places<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>, i: usize, j: usize, n: usize) -> (r: (
     Get<'a, V>,
     Get<'a, V>,
     usize,
@@ -2160,7 +2157,7 @@ fn at_two_places<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a Verified
 /// How long an iterator's window is: that many values it has left,
 /// unless the window ends past the column and it has fewer.
 #[allow(dead_code)]
-fn window_len<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &VerifiedIter<'_, V, C, K>) -> (r: usize)
+fn window_len<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &Iter<'_, V, C, K>) -> (r: usize)
     ensures
         r >= it.rest().len(),
         it.end_pos() <= it.column().len() ==> r == it.rest().len(),
@@ -2177,7 +2174,7 @@ fn window_len<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &VerifiedIter<'_, V,
 /// where a copy, an iterator over a whole column and an iterator of no
 /// column stand.
 #[allow(dead_code)]
-fn moved_past(col: &VerifiedColumn<u64>)
+fn moved_past(col: &Column<u64>)
     requires
         col@.len() == 10,
 {
@@ -2237,7 +2234,7 @@ fn moved_past(col: &VerifiedColumn<u64>)
     let (p, e, n) = (it.pos(), it.end_pos(), it.len());
     assert(v is None && p == 10 && e == 10 && n == 0);
     // an iterator of no column
-    let mut d = VerifiedIter::<u64>::default();
+    let mut d = Iter::<u64>::default();
     let (p, e) = (d.pos(), d.end_pos());
     assert(p == 0 && e == 0);
     d.set_max(4);
@@ -2249,7 +2246,7 @@ fn moved_past(col: &VerifiedColumn<u64>)
 /// which column a new iterator or a copy reads, where it stands and
 /// where its window ends, and what a move leaves it to give.
 #[allow(dead_code)]
-fn told_by_the_call(col: &VerifiedColumn<u64>)
+fn told_by_the_call(col: &Column<u64>)
     requires
         col@.len() == 10,
 {
@@ -2264,7 +2261,7 @@ fn told_by_the_call(col: &VerifiedColumn<u64>)
     assert(b.pos() == 1 && b.end_pos() == 20 && b.column() == col@);
     assert(b.source() == it.source());
     // an iterator of no column
-    let d = VerifiedIter::<u64>::default();
+    let d = Iter::<u64>::default();
     assert(d.pos() == 0 && d.end_pos() == 0);
     // a move on, and two moves of the window: to one with values, and
     // to one with none
@@ -2282,7 +2279,7 @@ fn told_by_the_call(col: &VerifiedColumn<u64>)
 /// the length: asked of the window's end alone. If it does, the iterator
 /// has left as many values as lie between where it stands and that end.
 #[allow(dead_code)]
-fn ends_within<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &VerifiedIter<'_, V, C, K>, len: usize) -> (r: bool)
+fn ends_within<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &Iter<'_, V, C, K>, len: usize) -> (r: bool)
     requires
         len == it.column().len(),
     ensures
@@ -2301,7 +2298,7 @@ fn ends_within<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &VerifiedIter<'_, V
 /// often as the column has it at its start and no more often; and no run
 /// only of a column with no value. For every value type and codec.
 #[allow(dead_code)]
-fn the_first_run<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
+fn the_first_run<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
     ensures
         match r {
             Some(run) => {
@@ -2324,11 +2321,11 @@ fn the_first_run<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a Verified
 /// and an iterator that gives no run has its window end where it stands.
 /// For every value type and codec.
 #[allow(dead_code)]
-fn runs_in_a_window<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(a: Get<'v, V>, b: Get<'v, V>)
+fn runs_in_a_window<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(a: Get<'v, V>, b: Get<'v, V>)
     requires
         a.sv() != b.sv(),
 {
-    let mut col = VerifiedColumn::<V, C, K>::fill(3, a);
+    let mut col = Column::<V, C, K>::fill(3, a);
     let mut bs: Vec<Run<Get<'v, V>>> = Vec::new();
     bs.push(Run { count: 2, value: b });
     proof {
@@ -2430,7 +2427,7 @@ proof fn lemma_runs_apart<T>(o: Seq<T>)
 /// its count says; none is of no value, and no two that follow one
 /// another are of the same value. For every value type and codec.
 #[allow(dead_code)]
-fn in_runs<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>) -> (out: Vec<Run<Get<'a, V>>>)
+fn in_runs<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>) -> (out: Vec<Run<Get<'a, V>>>)
     ensures
         run_values(out@) == col@,
         forall|i: int| 0 <= i < out@.len() ==> (#[trigger] out@[i]).count >= 1,
@@ -2499,7 +2496,7 @@ proof fn lemma_counted_step<G>(rs: Seq<Run<G>>, k: int)
 /// counts add up to the length of the range, and adding them does not
 /// overflow. For every value type and codec.
 #[allow(dead_code)]
-fn count_by_runs<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, a: usize, b: usize) -> (n: usize)
+fn count_by_runs<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, a: usize, b: usize) -> (n: usize)
     requires
         a <= b <= col@.len(),
     ensures
@@ -2535,12 +2532,12 @@ fn count_by_runs<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<
 /// new column, make a column of the same values. For every value type
 /// and codec, and from a column of any kind of index into one of any.
 #[allow(dead_code)]
-fn copied_by_runs<V: VValue<C>, C: VCodec, K: VIndex<V, C>, K2: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>) -> (r:
-    VerifiedColumn<V, C, K2>)
+fn copied_by_runs<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, K2: VIndex<V, C>>(col: &Column<V, C, K>) -> (r:
+    Column<V, C, K2>)
     ensures
         r@ == col@,
 {
-    let mut r = VerifiedColumn::<V, C, K2>::new();
+    let mut r = Column::<V, C, K2>::new();
     let it = col.iter();
     proof {
         it.lemma_items_len();
@@ -2555,7 +2552,7 @@ fn copied_by_runs<V: VValue<C>, C: VCodec, K: VIndex<V, C>, K2: VIndex<V, C>>(co
 /// read: after a run it stands past the run in the same column, with
 /// the same end of its window, and has left what it had less the run.
 #[allow(dead_code)]
-fn run_by_run(col: &VerifiedColumn<bool>)
+fn run_by_run(col: &Column<bool>)
     requires
         col@.len() > 0,
 {
@@ -2577,7 +2574,7 @@ fn run_by_run(col: &VerifiedColumn<bool>)
 /// iterator had, as it gives them and as specifications have them; and
 /// what is left is those less the run.
 #[allow(dead_code)]
-fn told_by_a_run<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'a, V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
+fn told_by_a_run<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'a, V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
     ensures
         match r {
             Some(run) => head_run(it.items(), run.value, run.count as int) && head_run(
@@ -2611,7 +2608,7 @@ fn told_by_a_run<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<
 /// The same of the iterator of runs: what its `next` says of the
 /// iterator of values whose runs it gives.
 #[allow(dead_code)]
-fn told_by_the_runs<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'a, V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
+fn told_by_the_runs<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'a, V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
     ensures
         match r {
             Some(run) => head_run(it.items(), run.value, run.count as int) && head_run(
@@ -2645,7 +2642,7 @@ fn told_by_the_runs<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIt
 
 /// Any iterator has left no more values than a `usize` counts, and as
 /// many as a specification has of them.
-proof fn no_more_than_counted<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'a, V, C, K>)
+proof fn no_more_than_counted<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'a, V, C, K>)
     ensures
         it.items().len() <= usize::MAX,
         it.rest().len() == it.items().len(),
@@ -2658,7 +2655,7 @@ proof fn no_more_than_counted<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: 
 /// is that is `x`, or that none of them is; and where that leaves the
 /// iterator.
 #[allow(dead_code)]
-fn told_by_a_scan<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'a, V, C, K>, x: Get<'_, V>) -> (r: Option<usize>)
+fn told_by_a_scan<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'a, V, C, K>, x: Get<'_, V>) -> (r: Option<usize>)
     ensures
         match r {
             Some(k) => {
@@ -2693,7 +2690,7 @@ fn told_by_a_scan<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter
 /// the column's values alone: a scan of an iterator over that window.
 /// For every value type and codec.
 #[allow(dead_code)]
-fn first_place_in<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, x: Get<'_, V>, a: usize, b: usize) -> (r:
+fn first_place_in<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, x: Get<'_, V>, a: usize, b: usize) -> (r:
     Option<usize>)
     requires
         a <= b <= col@.len(),
@@ -2729,7 +2726,7 @@ fn first_place_in<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn
 /// the last one stopped: the places come in rising order, each holds
 /// `x`, and no other place does. For every value type and codec.
 #[allow(dead_code)]
-fn all_places<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, x: Get<'_, V>) -> (out: Vec<usize>)
+fn all_places<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, x: Get<'_, V>) -> (out: Vec<usize>)
     ensures
         forall|i: int, j: int| 0 <= i < j < out@.len() ==> out@[i] < out@[j],
         forall|i: int| 0 <= i < out@.len() ==> out@[i] < col@.len() && col@[out@[i] as int] == x.sv(),
@@ -2797,7 +2794,7 @@ fn all_places<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, 
 /// if they are in order as far as `x` can tell; and where that leaves
 /// the iterator.
 #[allow(dead_code)]
-fn told_by_a_seek<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'a, V, C, K>, x: Get<'_, V>, range: Range<usize>) -> (r:
+fn told_by_a_seek<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'a, V, C, K>, x: Get<'_, V>, range: Range<usize>) -> (r:
     Range<usize>)
     requires
         it.pos() <= range.start <= range.end <= it.pos() + it.rest().len(),
@@ -2828,7 +2825,7 @@ fn told_by_a_seek<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter
 /// takes it to where the range starts, or leaves it where it is if that
 /// is behind it; and so does a range that ends behind the iterator.
 #[allow(dead_code)]
-fn seek_out_of_range<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'a, V, C, K>, x: Get<'_, V>, range: Range<usize>) -> (r:
+fn seek_out_of_range<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'a, V, C, K>, x: Get<'_, V>, range: Range<usize>) -> (r:
     Range<usize>)
     ensures
         r.start == r.end || (range.start < range.end && it.pos() < range.end && range.start < it.pos()
@@ -2853,7 +2850,7 @@ fn seek_out_of_range<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedI
 /// stand, with the same end to its window. For every value type and
 /// codec.
 #[allow(dead_code)]
-fn find_in_the_rest<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &mut VerifiedIter<'_, V, C, K>, x: Get<'_, V>) -> (r: Range<usize>)
+fn find_in_the_rest<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &mut Iter<'_, V, C, K>, x: Get<'_, V>) -> (r: Range<usize>)
     requires
         sorted::<V>(old(it).rest()),
     ensures
@@ -2885,7 +2882,7 @@ fn find_in_the_rest<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &mut VerifiedI
 /// greater ones after, and the iterator then gives the first `x`, if
 /// the column has one.
 #[allow(dead_code)]
-fn seek_then_read(col: &VerifiedColumn<u64>, x: u64) -> (r: Range<usize>)
+fn seek_then_read(col: &Column<u64>, x: u64) -> (r: Range<usize>)
     requires
         forall|i: int, j: int| 0 <= i <= j < col@.len() ==> col@[i] <= col@[j],
     ensures
@@ -2928,8 +2925,8 @@ fn seek_then_read(col: &VerifiedColumn<u64>, x: u64) -> (r: Range<usize>)
 /// the iterator has left its column's values in that window, and that
 /// the state fits the column the iterator reads.
 #[allow(dead_code)]
-fn told_by_a_suspend<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &VerifiedIter<'a, V, C, K>, col: &VerifiedColumn<V, C, K>) -> (s:
-    VerifiedIterState)
+fn told_by_a_suspend<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &Iter<'a, V, C, K>, col: &Column<V, C, K>) -> (s:
+    IterState)
     ensures
         s.pos() == it.pos(),
         s.end_pos() == it.end_pos(),
@@ -2946,8 +2943,8 @@ fn told_by_a_suspend<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &Verified
 /// does, and has left this column's values in the state's window, which
 /// is its own window too unless the state stands at the column's end.
 #[allow(dead_code)]
-fn told_by_a_resume<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(s: &VerifiedIterState, col: &'a VerifiedColumn<V, C, K>) -> (r: Result<
-    VerifiedIter<'a, V, C, K>,
+fn told_by_a_resume<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(s: &IterState, col: &'a Column<V, C, K>) -> (r: Result<
+    Iter<'a, V, C, K>,
     PackError,
 >)
     ensures
@@ -2966,7 +2963,7 @@ fn told_by_a_resume<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(s: &VerifiedIt
 /// for on its own: an iterator that reads a column has that column's
 /// values for its own, and one that reads none has none.
 #[allow(dead_code)]
-fn told_by_the_source<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &VerifiedIter<'a, V, C, K>, col: &VerifiedColumn<V, C, K>)
+fn told_by_the_source<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &Iter<'a, V, C, K>, col: &Column<V, C, K>)
     ensures
         it.source() == Some(*col) ==> it.column() == col@,
         it.source() is None ==> it.column().len() == 0,
@@ -2980,8 +2977,8 @@ fn told_by_the_source<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &Verifie
 /// it reads. Suspended and resumed on that column, it is sure to be
 /// given back, where it stood and with the same values left.
 #[allow(dead_code)]
-fn handed_over<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'_, V, C, K>, col: &'a VerifiedColumn<V, C, K>) -> (on:
-    VerifiedIter<'a, V, C, K>)
+fn handed_over<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'_, V, C, K>, col: &'a Column<V, C, K>) -> (on:
+    Iter<'a, V, C, K>)
     requires
         it.source() == Some(*col),
     ensures
@@ -3002,7 +2999,7 @@ fn handed_over<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'_
 /// to be given, and reads the value at `k + 1`. For every value type
 /// and codec.
 #[allow(dead_code)]
-fn stop_and_go_on<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>, k: usize) -> (r: (
+fn stop_and_go_on<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>, k: usize) -> (r: (
     Option<Get<'a, V>>,
     Option<Get<'a, V>>,
 ))
@@ -3031,9 +3028,9 @@ fn stop_and_go_on<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a Verifie
 /// The states of an iterator over a range of a column and of one over
 /// all of it fit the column, and stand and end where the iterators do.
 #[allow(dead_code)]
-fn of_a_range<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, a: usize, b: usize) -> (r: (
-    VerifiedIterState,
-    VerifiedIterState,
+fn of_a_range<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, a: usize, b: usize) -> (r: (
+    IterState,
+    IterState,
 ))
     requires
         a <= b <= col@.len(),
@@ -3051,9 +3048,9 @@ fn of_a_range<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, 
 /// column; if it does fit one, the iterator given stands at 0 with
 /// nothing to give.
 #[allow(dead_code)]
-fn of_no_column<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>) -> (r: bool)
+fn of_no_column<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>) -> (r: bool)
 {
-    let it = VerifiedIter::<V, C, K>::default();
+    let it = Iter::<V, C, K>::default();
     assert(it.source() is None);
     let s = it.suspend();
     assert(s.pos() == 0 && s.end_pos() == 0);
@@ -3070,8 +3067,8 @@ fn of_no_column<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V
 /// No move of an iterator changes the column it reads: of any iterator,
 /// each move asked on its own.
 #[allow(dead_code)]
-fn reads_the_same_column<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    it: &mut VerifiedIter<'a, V, C, K>,
+fn reads_the_same_column<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    it: &mut Iter<'a, V, C, K>,
     which: u8,
     n: usize,
     x: Get<'_, V>,
@@ -3109,7 +3106,7 @@ fn reads_the_same_column<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
 /// Whatever moves an iterator makes, it reads the column it was made
 /// of: so does a copy of it, and what that suspends to fits the column.
 #[allow(dead_code)]
-fn after_every_move(col: &VerifiedColumn<u64>, x: u64) -> (s: VerifiedIterState)
+fn after_every_move(col: &Column<u64>, x: u64) -> (s: IterState)
     ensures
         s.fits(col),
 {
@@ -3133,7 +3130,7 @@ fn after_every_move(col: &VerifiedColumn<u64>, x: u64) -> (s: VerifiedIterState)
 /// is the one the state was taken of: if an iterator is given, the
 /// value it gives is that column's at the state's place.
 #[allow(dead_code)]
-fn resumed_on_any<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(s: &VerifiedIterState, col: &'a VerifiedColumn<V, C, K>) -> (r: Option<
+fn resumed_on_any<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(s: &IterState, col: &'a Column<V, C, K>) -> (r: Option<
     Get<'a, V>,
 >)
     ensures
@@ -3150,8 +3147,8 @@ fn resumed_on_any<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(s: &VerifiedIter
 
 /// The readers of two columns, kept between calls as states.
 pub struct Paused {
-    pub numbers: VerifiedIterState,
-    pub flags: VerifiedIterState,
+    pub numbers: IterState,
+    pub flags: IterState,
 }
 
 /// A client that keeps the readers of its columns between calls as
@@ -3161,7 +3158,7 @@ pub struct Paused {
 /// one place on, fitting their columns still: so the next call can be
 /// made. Nothing is given where one of the windows has no value left.
 #[allow(dead_code)]
-fn step_both(numbers: &VerifiedColumn<u64>, flags: &VerifiedColumn<bool>, p: Paused) -> (r: Option<(u64, bool, Paused)>)
+fn step_both(numbers: &Column<u64>, flags: &Column<bool>, p: Paused) -> (r: Option<(u64, bool, Paused)>)
     requires
         p.numbers.fits(numbers),
         p.flags.fits(flags),
@@ -3191,21 +3188,21 @@ fn step_both(numbers: &VerifiedColumn<u64>, flags: &VerifiedColumn<bool>, p: Pau
 // ── The encoder ─────────────────────────────────────────────────────────────
 /// What `new` and `default` say of the encoder they give.
 #[allow(dead_code)]
-fn told_by_a_new_encoder<'a, V: VValue<C>, C: VCodec>() -> (r: (VerifiedEncoder<'a, V, C>, VerifiedEncoder<'a, V, C>))
+fn told_by_a_new_encoder<'a, V: ColumnValueRef<C>, C: Codec>() -> (r: (Encoder<'a, V, C>, Encoder<'a, V, C>))
     ensures
         r.0.wf(),
         r.0@.len() == 0,
         r.1.wf(),
         r.1@.len() == 0,
 {
-    let a = VerifiedEncoder::<V, C>::new();
-    let b = VerifiedEncoder::<V, C>::default();
+    let a = Encoder::<V, C>::new();
+    let b = Encoder::<V, C>::default();
     (a, b)
 }
 
 /// What `len` and `is_empty` say.
 #[allow(dead_code)]
-fn told_by_the_count<'a, V: VValue<C>, C: VCodec>(enc: &VerifiedEncoder<'a, V, C>) -> (r: (usize, bool))
+fn told_by_the_count<'a, V: ColumnValueRef<C>, C: Codec>(enc: &Encoder<'a, V, C>) -> (r: (usize, bool))
     requires
         enc.wf(),
     ensures
@@ -3218,7 +3215,7 @@ fn told_by_the_count<'a, V: VValue<C>, C: VCodec>(enc: &VerifiedEncoder<'a, V, C
 /// What `append` says: the encoder is one still, and has one value
 /// more, the one given, after those it had.
 #[allow(dead_code)]
-fn told_by_an_append<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, V, C>, v: Get<'a, V>)
+fn told_by_an_append<'a, V: ColumnValueRef<C>, C: Codec>(enc: &mut Encoder<'a, V, C>, v: Get<'a, V>)
     requires
         old(enc).wf(),
     ensures
@@ -3234,7 +3231,7 @@ fn told_by_an_append<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, 
 /// What `append_n` says: `n` values more, each the one given, after
 /// those the encoder had.
 #[allow(dead_code)]
-fn told_by_an_append_n<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, V, C>, v: Get<'a, V>, n: usize)
+fn told_by_an_append_n<'a, V: ColumnValueRef<C>, C: Codec>(enc: &mut Encoder<'a, V, C>, v: Get<'a, V>, n: usize)
     requires
         old(enc).wf(),
     ensures
@@ -3249,7 +3246,7 @@ fn told_by_an_append_n<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a
 
 /// What `append_owned` says: as `append`, of the value handed over.
 #[allow(dead_code)]
-fn told_by_an_owned<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, V, C>, w: V)
+fn told_by_an_owned<'a, V: ColumnValueRef<C>, C: Codec>(enc: &mut Encoder<'a, V, C>, w: V)
     requires
         old(enc).wf(),
     ensures
@@ -3264,7 +3261,7 @@ fn told_by_an_owned<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, V
 
 /// What `append_n_owned` says: as `append_n`, of the value handed over.
 #[allow(dead_code)]
-fn told_by_owned_n<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, V, C>, w: V, n: usize)
+fn told_by_owned_n<'a, V: ColumnValueRef<C>, C: Codec>(enc: &mut Encoder<'a, V, C>, w: V, n: usize)
     requires
         old(enc).wf(),
     ensures
@@ -3280,7 +3277,7 @@ fn told_by_owned_n<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, V,
 /// What `extend` says of a vector handed over: its values, after those
 /// the encoder had.
 #[allow(dead_code)]
-fn told_by_an_extend<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, V, C>, vs: Vec<Get<'a, V>>)
+fn told_by_an_extend<'a, V: ColumnValueRef<C>, C: Codec>(enc: &mut Encoder<'a, V, C>, vs: Vec<Get<'a, V>>)
     requires
         old(enc).wf(),
     ensures
@@ -3294,13 +3291,13 @@ fn told_by_an_extend<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, 
 /// values given, the one encoding of them, and within the bound of
 /// their size.
 #[allow(dead_code)]
-fn told_by_an_encoders_save<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>) -> (r: Vec<u8>)
+fn told_by_an_encoders_save<'a, V: ColumnValueRef<C>, C: Codec>(enc: Encoder<'a, V, C>) -> (r: Vec<u8>)
     requires
         enc.wf(),
     ensures
-        VerifiedColumn::<V, C>::valid(r@),
-        VerifiedColumn::<V, C>::values(r@) == enc@,
-        r@ == VerifiedColumn::<V, C>::encoding(enc@),
+        Column::<V, C>::valid(r@),
+        Column::<V, C>::values(r@) == enc@,
+        r@ == Column::<V, C>::encoding(enc@),
         r@.len() <= V::size_bound(enc@),
 {
     enc.save()
@@ -3310,15 +3307,15 @@ fn told_by_an_encoders_save<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a
 /// the encoding of the values given, which is a saved column of them
 /// within the bound of their size, and the range returned is where.
 #[allow(dead_code)]
-fn told_by_an_encoders_save_to<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>, out: &mut Vec<u8>) -> (r:
+fn told_by_an_encoders_save_to<'a, V: ColumnValueRef<C>, C: Codec>(enc: Encoder<'a, V, C>, out: &mut Vec<u8>) -> (r:
     Range<usize>)
     requires
         enc.wf(),
     ensures
-        final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(enc@),
-        VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(enc@)),
-        VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(enc@)) == enc@,
-        VerifiedColumn::<V, C>::encoding(enc@).len() <= V::size_bound(enc@),
+        final(out)@ == old(out)@ + Column::<V, C>::encoding(enc@),
+        Column::<V, C>::valid(Column::<V, C>::encoding(enc@)),
+        Column::<V, C>::values(Column::<V, C>::encoding(enc@)) == enc@,
+        Column::<V, C>::encoding(enc@).len() <= V::size_bound(enc@),
         r.start == old(out)@.len(),
         r.end == final(out)@.len(),
 {
@@ -3330,14 +3327,14 @@ fn told_by_an_encoders_save_to<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder
 /// The loop carries `enc.wf()`, and what the encoder has been given so
 /// far.
 #[allow(dead_code)]
-fn encoded_as_saved<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) -> (r: Vec<u8>)
+fn encoded_as_saved<'v, V: ColumnValueRef<C>, C: Codec>(input: &Vec<Get<'v, V>>) -> (r: Vec<u8>)
     ensures
-        VerifiedColumn::<V, C>::valid(r@),
-        VerifiedColumn::<V, C>::values(r@) == VGet::svs(input@),
-        r@ == VerifiedColumn::<V, C>::encoding(VGet::svs(input@)),
+        Column::<V, C>::valid(r@),
+        Column::<V, C>::values(r@) == VGet::svs(input@),
+        r@ == Column::<V, C>::encoding(VGet::svs(input@)),
         r@.len() <= V::size_bound(VGet::svs(input@)),
 {
-    let mut enc = VerifiedEncoder::<V, C>::new();
+    let mut enc = Encoder::<V, C>::new();
     let mut i: usize = 0;
     proof {
         VGet::lemma_svs(input@.take(0));
@@ -3366,9 +3363,9 @@ fn encoded_as_saved<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) -> (r:
 
 /// An encoder and a column save the same bytes for the same values.
 #[allow(dead_code)]
-fn encoder_or_column<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) {
+fn encoder_or_column<'v, V: ColumnValueRef<C>, C: Codec>(input: &Vec<Get<'v, V>>) {
     let a = encoded_as_saved::<V, C>(input);
-    let col = VerifiedColumn::<V, C>::from_values(input.as_slice());
+    let col = Column::<V, C>::from_values(input.as_slice());
     let b = col.save();
     assert(a@ == b@);
 }
@@ -3376,7 +3373,7 @@ fn encoder_or_column<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) {
 /// What an encoder saves loads as a column of the values given, where
 /// their number and size are a column's to load.
 #[allow(dead_code)]
-fn encode_then_load<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) -> (r: VerifiedColumn<V, C>)
+fn encode_then_load<'v, V: ColumnValueRef<C>, C: Codec>(input: &Vec<Get<'v, V>>) -> (r: Column<V, C>)
     requires
         V::size_bound(VGet::svs(input@)) <= 0xffff_fff5,
         input@.len() <= usize::MAX - 3,
@@ -3387,7 +3384,7 @@ fn encode_then_load<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) -> (r:
     proof {
         VGet::lemma_svs(input@);
     }
-    let back = VerifiedColumn::<V, C>::load(bytes.as_slice());
+    let back = Column::<V, C>::load(bytes.as_slice());
     assert(back is Ok);
     back.unwrap()
 }
@@ -3395,11 +3392,11 @@ fn encode_then_load<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) -> (r:
 /// A column's values, given to an encoder by the column's iterator, are
 /// saved as the column saves them.
 #[allow(dead_code)]
-fn reencoded<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>) -> (r: Vec<u8>)
+fn reencoded<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>) -> (r: Vec<u8>)
     ensures
-        r@ == VerifiedColumn::<V, C>::encoding(col@),
+        r@ == Column::<V, C>::encoding(col@),
 {
-    let mut enc = VerifiedEncoder::<V, C>::new();
+    let mut enc = Encoder::<V, C>::new();
     enc.extend(col.iter());
     let bytes = col.save();
     let r = enc.save();
@@ -3410,12 +3407,12 @@ fn reencoded<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C
 /// Runs given to an encoder with `append_n`, run by run: what is saved
 /// holds each run's value as often as its count says.
 #[allow(dead_code)]
-fn encoded_by_runs<'v, V: VValue<C>, C: VCodec>(runs: &Vec<Run<Get<'v, V>>>) -> (r: Vec<u8>)
+fn encoded_by_runs<'v, V: ColumnValueRef<C>, C: Codec>(runs: &Vec<Run<Get<'v, V>>>) -> (r: Vec<u8>)
     ensures
-        VerifiedColumn::<V, C>::valid(r@),
-        VerifiedColumn::<V, C>::values(r@) == run_values(runs@),
+        Column::<V, C>::valid(r@),
+        Column::<V, C>::values(r@) == run_values(runs@),
 {
-    let mut enc = VerifiedEncoder::<V, C>::new();
+    let mut enc = Encoder::<V, C>::new();
     let mut i: usize = 0;
     proof {
         assert(enc@ =~= run_values(runs@.take(0)));
@@ -3446,10 +3443,10 @@ fn encoded_by_runs<'v, V: VValue<C>, C: VCodec>(runs: &Vec<Run<Get<'v, V>>>) -> 
 #[allow(dead_code)]
 fn encode_numbers() -> (r: Vec<u8>)
     ensures
-        VerifiedColumn::<u64>::valid(r@),
-        VerifiedColumn::<u64>::values(r@) == seq![7u64, 7, 7, 9, 1, 2, 3],
+        Column::<u64>::valid(r@),
+        Column::<u64>::values(r@) == seq![7u64, 7, 7, 9, 1, 2, 3],
 {
-    let mut enc = VerifiedEncoder::<u64>::new();
+    let mut enc = Encoder::<u64>::new();
     let none = enc.is_empty();
     assert(none);
     enc.append(7);
@@ -3479,15 +3476,15 @@ fn encode_numbers() -> (r: Vec<u8>)
 #[allow(dead_code)]
 fn encode_strings<'a>(a: &'a [u8], b: Vec<u8>, c: Vec<u8>) -> (r: (Vec<u8>, Vec<u8>))
     ensures
-        VerifiedColumn::<Vec<u8>>::values(r.0@) == seq![a@, b@, a@, a@],
-        VerifiedColumn::<Option<Vec<u8>>>::values(r.1@) == seq![Some(a@), None, None, Some(c@)],
+        Column::<Vec<u8>>::values(r.0@) == seq![a@, b@, a@, a@],
+        Column::<Option<Vec<u8>>>::values(r.1@) == seq![Some(a@), None, None, Some(c@)],
 {
-    let mut x = VerifiedEncoder::<Vec<u8>>::new();
+    let mut x = Encoder::<Vec<u8>>::new();
     x.append(a);
     x.append_owned(b);
     x.append_n(a, 2);
     assert(x@ =~= seq![a@, b@, a@, a@]);
-    let mut y = VerifiedEncoder::<Option<Vec<u8>>>::new();
+    let mut y = Encoder::<Option<Vec<u8>>>::new();
     y.append(Some(a));
     y.append_n(None, 2);
     y.append_owned(Some(c));
@@ -3498,7 +3495,7 @@ fn encode_strings<'a>(a: &'a [u8], b: Vec<u8>, c: Vec<u8>) -> (r: (Vec<u8>, Vec<
 /// A client's function that is handed encoders: it requires that they
 /// are encoders (`wf()`), and says that they still are.
 #[allow(dead_code)]
-fn log_both<'a>(numbers: &mut VerifiedEncoder<'a, u64>, flags: &mut VerifiedEncoder<'a, bool>, x: u64, f: bool)
+fn log_both<'a>(numbers: &mut Encoder<'a, u64>, flags: &mut Encoder<'a, bool>, x: u64, f: bool)
     requires
         old(numbers).wf(),
         old(flags).wf(),
@@ -3514,9 +3511,9 @@ fn log_both<'a>(numbers: &mut VerifiedEncoder<'a, u64>, flags: &mut VerifiedEnco
 
 /// A client's writer of rows: an encoder for each column of a table.
 pub struct Rows<'a> {
-    pub ids: VerifiedEncoder<'a, u64>,
-    pub names: VerifiedEncoder<'a, Vec<u8>>,
-    pub flags: VerifiedEncoder<'a, bool>,
+    pub ids: Encoder<'a, u64>,
+    pub names: Encoder<'a, Vec<u8>>,
+    pub flags: Encoder<'a, bool>,
 }
 
 /// Where the three columns of a table were written.
@@ -3543,7 +3540,7 @@ impl<'a> Rows<'a> {
             r.wf(),
             r.ids@.len() == 0,
     {
-        Rows { ids: VerifiedEncoder::new(), names: VerifiedEncoder::new(), flags: VerifiedEncoder::new() }
+        Rows { ids: Encoder::new(), names: Encoder::new(), flags: Encoder::new() }
     }
 
     /// One row more.
@@ -3576,22 +3573,22 @@ impl<'a> Rows<'a> {
             r.names.end == r.flags.start,
             r.flags.end == final(out)@.len(),
             r.ids.start <= r.ids.end <= r.names.end <= r.flags.end,
-            final(out)@.subrange(r.ids.start as int, r.ids.end as int) == VerifiedColumn::<u64>::encoding(self.ids@),
-            final(out)@.subrange(r.names.start as int, r.names.end as int) == VerifiedColumn::<Vec<u8>>::encoding(
+            final(out)@.subrange(r.ids.start as int, r.ids.end as int) == Column::<u64>::encoding(self.ids@),
+            final(out)@.subrange(r.names.start as int, r.names.end as int) == Column::<Vec<u8>>::encoding(
                 self.names@,
             ),
-            final(out)@.subrange(r.flags.start as int, r.flags.end as int) == VerifiedColumn::<bool>::encoding(
+            final(out)@.subrange(r.flags.start as int, r.flags.end as int) == Column::<bool>::encoding(
                 self.flags@,
             ),
-            VerifiedColumn::<u64>::values(VerifiedColumn::<u64>::encoding(self.ids@)) == self.ids@,
-            VerifiedColumn::<Vec<u8>>::values(VerifiedColumn::<Vec<u8>>::encoding(self.names@)) == self.names@,
-            VerifiedColumn::<bool>::values(VerifiedColumn::<bool>::encoding(self.flags@)) == self.flags@,
+            Column::<u64>::values(Column::<u64>::encoding(self.ids@)) == self.ids@,
+            Column::<Vec<u8>>::values(Column::<Vec<u8>>::encoding(self.names@)) == self.names@,
+            Column::<bool>::values(Column::<bool>::encoding(self.flags@)) == self.flags@,
     {
         let Rows { ids, names, flags } = self;
         let ghost (a, b, c) = (
-            VerifiedColumn::<u64>::encoding(ids@),
-            VerifiedColumn::<Vec<u8>>::encoding(names@),
-            VerifiedColumn::<bool>::encoding(flags@),
+            Column::<u64>::encoding(ids@),
+            Column::<Vec<u8>>::encoding(names@),
+            Column::<bool>::encoding(flags@),
         );
         let x = ids.save_to(out);
         let y = names.save_to(out);
@@ -3612,7 +3609,7 @@ impl<'a> Rows<'a> {
 /// writer says it is: if those bytes load, they load as the numbers
 /// given.
 #[allow(dead_code)]
-fn rows_written<'a>(first: &'a [u8], second: &'a [u8], out: &mut Vec<u8>) -> (r: Option<VerifiedColumn<u64>>)
+fn rows_written<'a>(first: &'a [u8], second: &'a [u8], out: &mut Vec<u8>) -> (r: Option<Column<u64>>)
     ensures
         r matches Some(col) ==> col@ == seq![1u64, 2],
 {
@@ -3622,7 +3619,7 @@ fn rows_written<'a>(first: &'a [u8], second: &'a [u8], out: &mut Vec<u8>) -> (r:
     assert(rows.ids@ =~= seq![1u64, 2]);
     let w = rows.finish(out);
     let bytes = vstd::slice::slice_subrange(out.as_slice(), w.ids.start, w.ids.end);
-    match VerifiedColumn::<u64>::load(bytes) {
+    match Column::<u64>::load(bytes) {
         Ok(col) => Some(col),
         Err(_) => None,
     }
@@ -3631,7 +3628,7 @@ fn rows_written<'a>(first: &'a [u8], second: &'a [u8], out: &mut Vec<u8>) -> (r:
 // ── The encoder's segment budget ────────────────────────────────────────────
 /// What `with_max_segments` says of the encoder it gives.
 #[allow(dead_code)]
-fn told_by_a_budget<'a, V: VValue<C>, C: VCodec>(max: usize) -> (r: VerifiedEncoder<'a, V, C>)
+fn told_by_a_budget<'a, V: ColumnValueRef<C>, C: Codec>(max: usize) -> (r: Encoder<'a, V, C>)
     requires
         max >= 2,
     ensures
@@ -3639,37 +3636,37 @@ fn told_by_a_budget<'a, V: VValue<C>, C: VCodec>(max: usize) -> (r: VerifiedEnco
         r@.len() == 0,
         r.max_segments() == Some(max),
 {
-    VerifiedEncoder::<V, C>::with_max_segments(max)
+    Encoder::<V, C>::with_max_segments(max)
 }
 
 /// What `with_segments` says of the encoder it gives: its budget is the
 /// one a column has that was given none.
 #[allow(dead_code)]
-fn told_by_the_default_budget<'a, V: VValue<C>, C: VCodec>() -> (r: VerifiedEncoder<'a, V, C>)
+fn told_by_the_default_budget<'a, V: ColumnValueRef<C>, C: Codec>() -> (r: Encoder<'a, V, C>)
     ensures
         r.wf(),
         r@.len() == 0,
         r.max_segments() == Some(64usize),
 {
-    VerifiedEncoder::<V, C>::with_segments()
+    Encoder::<V, C>::with_segments()
 }
 
 /// What `new` and `default` say of the budget: there is none.
 #[allow(dead_code)]
-fn told_by_no_budget<'a, V: VValue<C>, C: VCodec>() -> (r: (VerifiedEncoder<'a, V, C>, VerifiedEncoder<'a, V, C>))
+fn told_by_no_budget<'a, V: ColumnValueRef<C>, C: Codec>() -> (r: (Encoder<'a, V, C>, Encoder<'a, V, C>))
     ensures
         r.0.max_segments() is None,
         r.1.max_segments() is None,
 {
-    let a = VerifiedEncoder::<V, C>::new();
-    let b = VerifiedEncoder::<V, C>::default();
+    let a = Encoder::<V, C>::new();
+    let b = Encoder::<V, C>::default();
     (a, b)
 }
 
 /// What each way of giving values says of the budget: it is kept.
 #[allow(dead_code)]
-fn told_of_a_budget<'a, V: VValue<C>, C: VCodec>(
-    enc: &mut VerifiedEncoder<'a, V, C>,
+fn told_of_a_budget<'a, V: ColumnValueRef<C>, C: Codec>(
+    enc: &mut Encoder<'a, V, C>,
     v: Get<'a, V>,
     w: V,
     x: V,
@@ -3700,8 +3697,8 @@ fn told_of_a_budget<'a, V: VValue<C>, C: VCodec>(
 /// budget leaves the buffer whenever every value is `v`. And the range
 /// returned is what was added.
 #[allow(dead_code)]
-fn told_by_an_encoders_save_to_unless<'a, V: VValue<C>, C: VCodec>(
-    enc: VerifiedEncoder<'a, V, C>,
+fn told_by_an_encoders_save_to_unless<'a, V: ColumnValueRef<C>, C: Codec>(
+    enc: Encoder<'a, V, C>,
     out: &mut Vec<u8>,
     v: Get<'a, V>,
 ) -> (r: Range<usize>)
@@ -3711,10 +3708,10 @@ fn told_by_an_encoders_save_to_unless<'a, V: VValue<C>, C: VCodec>(
         final(out)@ == old(out)@ ==> only(enc@, v.sv()),
         enc.max_segments() is None && only(enc@, v.sv()) ==> final(out)@ == old(out)@,
         final(out)@ != old(out)@ ==> {
-            &&& final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(enc@)
-            &&& VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(enc@))
-            &&& VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(enc@)) == enc@
-            &&& VerifiedColumn::<V, C>::encoding(enc@).len() <= V::size_bound(enc@)
+            &&& final(out)@ == old(out)@ + Column::<V, C>::encoding(enc@)
+            &&& Column::<V, C>::valid(Column::<V, C>::encoding(enc@))
+            &&& Column::<V, C>::values(Column::<V, C>::encoding(enc@)) == enc@
+            &&& Column::<V, C>::encoding(enc@).len() <= V::size_bound(enc@)
         },
         r.start == old(out)@.len(),
         r.end == final(out)@.len(),
@@ -3724,7 +3721,7 @@ fn told_by_an_encoders_save_to_unless<'a, V: VValue<C>, C: VCodec>(
 
 /// What an encoder's `into_column` says: a column of the values given.
 #[allow(dead_code)]
-fn told_by_an_encoders_column<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>) -> (r: VerifiedColumn<V, C>)
+fn told_by_an_encoders_column<'a, V: ColumnValueRef<C>, C: Codec>(enc: Encoder<'a, V, C>) -> (r: Column<V, C>)
     requires
         enc.wf(),
     ensures
@@ -3739,18 +3736,18 @@ fn told_by_an_encoders_column<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<
 /// encoding of the values. This holds of an encoder with a budget and
 /// of one without.
 #[allow(dead_code)]
-fn read_from_the_range<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>, out: &mut Vec<u8>, v: Get<'a, V>) -> (r:
+fn read_from_the_range<'a, V: ColumnValueRef<C>, C: Codec>(enc: Encoder<'a, V, C>, out: &mut Vec<u8>, v: Get<'a, V>) -> (r:
     Range<usize>)
     requires
         enc.wf(),
     ensures
         r.start <= r.end <= final(out)@.len(),
         r.start == r.end ==> only(enc@, v.sv()) && final(out)@ == old(out)@,
-        r.start < r.end ==> final(out)@.subrange(r.start as int, r.end as int) == VerifiedColumn::<V, C>::encoding(enc@),
+        r.start < r.end ==> final(out)@.subrange(r.start as int, r.end as int) == Column::<V, C>::encoding(enc@),
 {
     let r = enc.save_to_unless(out, v);
     proof {
-        let d = VerifiedColumn::<V, C>::encoding(enc@);
+        let d = Column::<V, C>::encoding(enc@);
         if out@ != old(out)@ {
             assert(out@.subrange(r.start as int, r.end as int) =~= d);
             assert(d.len() > 0) by {
@@ -3771,7 +3768,7 @@ fn zeros_take_no_bytes(n: usize, m: usize, out: &mut Vec<u8>)
     ensures
         final(out)@ == old(out)@,
 {
-    let mut enc = VerifiedEncoder::<u64>::new();
+    let mut enc = Encoder::<u64>::new();
     enc.append_n(0, n);
     enc.append_n_owned(0, m);
     assert(only(enc@, 0u64));
@@ -3786,12 +3783,12 @@ fn others_take_bytes(with: Option<usize>, out: &mut Vec<u8>) -> (r: Range<usize>
     requires
         with matches Some(max) ==> max >= 2,
     ensures
-        final(out)@ == old(out)@ + VerifiedColumn::<u64>::encoding(seq![0u64, 5]),
-        VerifiedColumn::<u64>::values(final(out)@.subrange(r.start as int, r.end as int)) == seq![0u64, 5],
+        final(out)@ == old(out)@ + Column::<u64>::encoding(seq![0u64, 5]),
+        Column::<u64>::values(final(out)@.subrange(r.start as int, r.end as int)) == seq![0u64, 5],
 {
     let mut enc = match with {
-        Some(max) => VerifiedEncoder::<u64>::with_max_segments(max),
-        None => VerifiedEncoder::<u64>::new(),
+        Some(max) => Encoder::<u64>::with_max_segments(max),
+        None => Encoder::<u64>::new(),
     };
     enc.append(0);
     enc.append(5);
@@ -3801,7 +3798,7 @@ fn others_take_bytes(with: Option<usize>, out: &mut Vec<u8>) -> (r: Range<usize>
     }
     let r = enc.save_to_unless(out, 0);
     proof {
-        let d = VerifiedColumn::<u64>::encoding(seq![0u64, 5]);
+        let d = Column::<u64>::encoding(seq![0u64, 5]);
         assert(out@.subrange(r.start as int, r.end as int) =~= d);
     }
     r
@@ -3811,7 +3808,7 @@ fn others_take_bytes(with: Option<usize>, out: &mut Vec<u8>) -> (r: Range<usize>
 /// without, whatever the value it is to save unless: no values are
 /// saved as no bytes.
 #[allow(dead_code)]
-fn nothing_given_nothing_written<'a, V: VValue<C>, C: VCodec>(with: Option<usize>, out: &mut Vec<u8>, v: Get<'a, V>) -> (r:
+fn nothing_given_nothing_written<'a, V: ColumnValueRef<C>, C: Codec>(with: Option<usize>, out: &mut Vec<u8>, v: Get<'a, V>) -> (r:
     Range<usize>)
     requires
         with matches Some(max) ==> max >= 2,
@@ -3820,13 +3817,13 @@ fn nothing_given_nothing_written<'a, V: VValue<C>, C: VCodec>(with: Option<usize
         r.start == r.end,
 {
     let enc = match with {
-        Some(max) => VerifiedEncoder::<V, C>::with_max_segments(max),
-        None => VerifiedEncoder::<V, C>::new(),
+        Some(max) => Encoder::<V, C>::with_max_segments(max),
+        None => Encoder::<V, C>::new(),
     };
     let r = enc.save_to_unless(out, v);
     proof {
-        VerifiedColumn::<V, C>::lemma_no_bytes();
-        VerifiedColumn::<V, C>::lemma_encoding(Seq::<u8>::empty());
+        Column::<V, C>::lemma_no_bytes();
+        Column::<V, C>::lemma_encoding(Seq::<u8>::empty());
         assert(out@ =~= old(out)@);
     }
     r
@@ -3837,7 +3834,7 @@ fn nothing_given_nothing_written<'a, V: VValue<C>, C: VCodec>(with: Option<usize
 /// carries `enc.wf()` and what the encoder has been given, and nothing
 /// of the budget.
 #[allow(dead_code)]
-fn encoded_into_column<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, with: Option<usize>) -> (r: VerifiedColumn<
+fn encoded_into_column<'v, V: ColumnValueRef<C>, C: Codec>(input: &Vec<Get<'v, V>>, with: Option<usize>) -> (r: Column<
     V,
     C,
 >)
@@ -3847,8 +3844,8 @@ fn encoded_into_column<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, wit
         r@ == VGet::svs(input@),
 {
     let mut enc = match with {
-        Some(max) => VerifiedEncoder::<V, C>::with_max_segments(max),
-        None => VerifiedEncoder::<V, C>::new(),
+        Some(max) => Encoder::<V, C>::with_max_segments(max),
+        None => Encoder::<V, C>::new(),
     };
     let mut i: usize = 0;
     proof {
@@ -3881,15 +3878,15 @@ fn encoded_into_column<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, wit
 /// columns have the same values and save the same bytes, which are what
 /// the encoder saves.
 #[allow(dead_code)]
-fn one_column_three_ways<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, max: usize) -> (r: Vec<u8>)
+fn one_column_three_ways<'v, V: ColumnValueRef<C>, C: Codec>(input: &Vec<Get<'v, V>>, max: usize) -> (r: Vec<u8>)
     requires
         max >= 2,
     ensures
-        r@ == VerifiedColumn::<V, C>::encoding(VGet::svs(input@)),
+        r@ == Column::<V, C>::encoding(VGet::svs(input@)),
 {
     let a = encoded_into_column::<V, C>(input, Some(max));
     let b = encoded_into_column::<V, C>(input, None);
-    let c = VerifiedColumn::<V, C>::from_values(input.as_slice());
+    let c = Column::<V, C>::from_values(input.as_slice());
     assert(a@ == b@ && b@ == c@);
     let x = a.save();
     let y = b.save();
@@ -3908,8 +3905,8 @@ fn a_budget_saves_the_same<'a>(a: &'a [u8], n: usize) -> (r: (Vec<u8>, Vec<u8>))
     ensures
         r.0@ == r.1@,
 {
-    let mut x = VerifiedEncoder::<Option<Vec<u8>>>::new();
-    let mut y = VerifiedEncoder::<Option<Vec<u8>>>::with_max_segments(2);
+    let mut x = Encoder::<Option<Vec<u8>>>::new();
+    let mut y = Encoder::<Option<Vec<u8>>>::with_max_segments(2);
     x.append(Some(a));
     y.append(Some(a));
     x.append_n(None, n);
@@ -3925,8 +3922,8 @@ fn a_budget_saves_the_same<'a>(a: &'a [u8], n: usize) -> (r: (Vec<u8>, Vec<u8>))
 /// given, each what the function gave for the value given in its place.
 /// And the range returned is what was added.
 #[allow(dead_code)]
-fn told_by_a_remapping_save<'a, V: VValue<C>, C: VCodec, F: Fn(V) -> V>(
-    enc: VerifiedEncoder<'a, V, C>,
+fn told_by_a_remapping_save<'a, V: ColumnValueRef<C>, C: Codec, F: Fn(V) -> V>(
+    enc: Encoder<'a, V, C>,
     out: &mut Vec<u8>,
     f: F,
 ) -> (r: Range<usize>)
@@ -3936,10 +3933,10 @@ fn told_by_a_remapping_save<'a, V: VValue<C>, C: VCodec, F: Fn(V) -> V>(
     ensures
         ({
             let d = final(out)@.skip(old(out)@.len() as int);
-            let w = VerifiedColumn::<V, C>::values(d);
+            let w = Column::<V, C>::values(d);
             &&& final(out)@ == old(out)@ + d
-            &&& VerifiedColumn::<V, C>::valid(d)
-            &&& d == VerifiedColumn::<V, C>::encoding(w)
+            &&& Column::<V, C>::valid(d)
+            &&& d == Column::<V, C>::encoding(w)
             &&& d.len() <= V::size_bound(w)
             &&& w.len() == enc@.len()
             &&& forall|i: int| 0 <= i < enc@.len() ==> mapped(f, enc@[i], #[trigger] w[i])
@@ -3957,8 +3954,8 @@ fn told_by_a_remapping_save<'a, V: VValue<C>, C: VCodec, F: Fn(V) -> V>(
 /// given leaves the buffer, whether the encoder has a budget or not.
 /// And the range returned is what was added.
 #[allow(dead_code)]
-fn told_by_a_remapping_save_unless<'a, V: VValue<C>, C: VCodec, F: Fn(V) -> V>(
-    enc: VerifiedEncoder<'a, V, C>,
+fn told_by_a_remapping_save_unless<'a, V: ColumnValueRef<C>, C: Codec, F: Fn(V) -> V>(
+    enc: Encoder<'a, V, C>,
     out: &mut Vec<u8>,
     v: Get<'a, V>,
     f: F,
@@ -3972,10 +3969,10 @@ fn told_by_a_remapping_save_unless<'a, V: VValue<C>, C: VCodec, F: Fn(V) -> V>(
             ==> final(out)@ == old(out)@,
         final(out)@ != old(out)@ ==> {
             let d = final(out)@.skip(old(out)@.len() as int);
-            let w = VerifiedColumn::<V, C>::values(d);
+            let w = Column::<V, C>::values(d);
             &&& final(out)@ == old(out)@ + d
-            &&& VerifiedColumn::<V, C>::valid(d)
-            &&& d == VerifiedColumn::<V, C>::encoding(w)
+            &&& Column::<V, C>::valid(d)
+            &&& d == Column::<V, C>::encoding(w)
             &&& d.len() <= V::size_bound(w)
             &&& w.len() == enc@.len()
             &&& forall|i: int| 0 <= i < enc@.len() ==> mapped(f, enc@[i], #[trigger] w[i])
@@ -3990,11 +3987,11 @@ fn told_by_a_remapping_save_unless<'a, V: VValue<C>, C: VCodec, F: Fn(V) -> V>(
 /// saves what `save_to` saves: the encoding of the values given. For
 /// every value type and codec, with a budget or without.
 #[allow(dead_code)]
-fn saved_as_it_is<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>, out: &mut Vec<u8>) -> (r: Range<usize>)
+fn saved_as_it_is<'a, V: ColumnValueRef<C>, C: Codec>(enc: Encoder<'a, V, C>, out: &mut Vec<u8>) -> (r: Range<usize>)
     requires
         enc.wf(),
     ensures
-        final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(enc@),
+        final(out)@ == old(out)@ + Column::<V, C>::encoding(enc@),
         r.start == old(out)@.len(),
         r.end == final(out)@.len(),
 {
@@ -4004,7 +4001,7 @@ fn saved_as_it_is<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>, o
         { v };
     let r = enc.save_to_and_remap(out, f);
     proof {
-        let w = VerifiedColumn::<V, C>::values(out@.skip(old(out)@.len() as int));
+        let w = Column::<V, C>::values(out@.skip(old(out)@.len() as int));
         assert(w =~= enc@);
     }
     r
@@ -4014,7 +4011,7 @@ fn saved_as_it_is<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>, o
 /// every number: the client has to show that it takes those given, and
 /// no more. If what was written loads, it loads as the doubles.
 #[allow(dead_code)]
-fn doubled_as_saved(input: &Vec<u64>, with: Option<usize>, out: &mut Vec<u8>) -> (r: Option<VerifiedColumn<u64>>)
+fn doubled_as_saved(input: &Vec<u64>, with: Option<usize>, out: &mut Vec<u8>) -> (r: Option<Column<u64>>)
     requires
         with matches Some(max) ==> max >= 2,
         forall|i: int| 0 <= i < input@.len() ==> input@[i] <= 1000,
@@ -4025,8 +4022,8 @@ fn doubled_as_saved(input: &Vec<u64>, with: Option<usize>, out: &mut Vec<u8>) ->
         },
 {
     let mut enc = match with {
-        Some(max) => VerifiedEncoder::<u64>::with_max_segments(max),
-        None => VerifiedEncoder::<u64>::new(),
+        Some(max) => Encoder::<u64>::with_max_segments(max),
+        None => Encoder::<u64>::new(),
     };
     let mut i: usize = 0;
     while i < input.len()
@@ -4056,7 +4053,7 @@ fn doubled_as_saved(input: &Vec<u64>, with: Option<usize>, out: &mut Vec<u8>) ->
     proof {
         assert(bytes@ =~= out@.skip(old(out)@.len() as int));
     }
-    match VerifiedColumn::<u64>::load(bytes) {
+    match Column::<u64>::load(bytes) {
         Ok(col) => {
             proof {
                 assert forall|i: int| 0 <= i < input@.len() implies col@[i] == 2 * input@[i] by {
@@ -4071,13 +4068,13 @@ fn doubled_as_saved(input: &Vec<u64>, with: Option<usize>, out: &mut Vec<u8>) ->
 
 /// The client's own type, saved through a function that has a name.
 #[allow(dead_code)]
-fn stepped_as_saved(enc: VerifiedEncoder<'_, Action>, out: &mut Vec<u8>) -> (r: Range<usize>)
+fn stepped_as_saved(enc: Encoder<'_, Action>, out: &mut Vec<u8>) -> (r: Range<usize>)
     requires
         enc.wf(),
     ensures
         r.start <= r.end <= final(out)@.len(),
         ({
-            let w = VerifiedColumn::<Action>::values(final(out)@.subrange(r.start as int, r.end as int));
+            let w = Column::<Action>::values(final(out)@.subrange(r.start as int, r.end as int));
             &&& w.len() == enc@.len()
             &&& forall|i: int| 0 <= i < enc@.len() ==> w[i] == after(enc@[i])
         }),
@@ -4085,7 +4082,7 @@ fn stepped_as_saved(enc: VerifiedEncoder<'_, Action>, out: &mut Vec<u8>) -> (r: 
     let r = enc.save_to_and_remap(out, next_action);
     proof {
         let d = out@.skip(old(out)@.len() as int);
-        let w = VerifiedColumn::<Action>::values(d);
+        let w = Column::<Action>::values(d);
         assert(out@.subrange(r.start as int, r.end as int) =~= d);
         assert forall|i: int| 0 <= i < enc@.len() implies w[i] == after(enc@[i]) by {
             assert(mapped(next_action, enc@[i], w[i]));
@@ -4099,8 +4096,8 @@ fn stepped_as_saved(enc: VerifiedEncoder<'_, Action>, out: &mut Vec<u8>) -> (r: 
 /// found again by its range.
 #[allow(dead_code)]
 fn turned_and_longer<'a>(
-    flags: VerifiedEncoder<'a, bool>,
-    names: VerifiedEncoder<'a, Vec<u8>>,
+    flags: Encoder<'a, bool>,
+    names: Encoder<'a, Vec<u8>>,
     b: u8,
     out: &mut Vec<u8>,
 ) -> (r: (Range<usize>, Range<usize>))
@@ -4110,8 +4107,8 @@ fn turned_and_longer<'a>(
     ensures
         r.0.start <= r.0.end <= r.1.start <= r.1.end <= final(out)@.len(),
         ({
-            let x = VerifiedColumn::<bool>::values(final(out)@.subrange(r.0.start as int, r.0.end as int));
-            let y = VerifiedColumn::<Vec<u8>>::values(final(out)@.subrange(r.1.start as int, r.1.end as int));
+            let x = Column::<bool>::values(final(out)@.subrange(r.0.start as int, r.0.end as int));
+            let y = Column::<Vec<u8>>::values(final(out)@.subrange(r.1.start as int, r.1.end as int));
             &&& x.len() == flags@.len()
             &&& forall|i: int| 0 <= i < flags@.len() ==> x[i] == !flags@[i]
             &&& y.len() == names@.len()
@@ -4137,8 +4134,8 @@ fn turned_and_longer<'a>(
     proof {
         let d = mid.skip(o.len() as int);
         let e = out@.skip(mid.len() as int);
-        let x = VerifiedColumn::<bool>::values(d);
-        let y = VerifiedColumn::<Vec<u8>>::values(e);
+        let x = Column::<bool>::values(d);
+        let y = Column::<Vec<u8>>::values(e);
         assert(out@.subrange(p.start as int, p.end as int) =~= d);
         assert(out@.subrange(q.start as int, q.end as int) =~= e);
         assert forall|i: int| 0 <= i < flags@.len() implies x[i] == !flags@[i] by {
@@ -4157,7 +4154,7 @@ fn turned_and_longer<'a>(
 /// given and whatever its budget, which a plain `save_to_unless` does
 /// not say of an encoder with one.
 #[allow(dead_code)]
-fn zeroed_takes_no_bytes(enc: VerifiedEncoder<'_, u64>, out: &mut Vec<u8>)
+fn zeroed_takes_no_bytes(enc: Encoder<'_, u64>, out: &mut Vec<u8>)
     requires
         enc.wf(),
     ensures
@@ -4173,7 +4170,7 @@ fn zeroed_takes_no_bytes(enc: VerifiedEncoder<'_, u64>, out: &mut Vec<u8>)
 
 /// And so do byte strings all made null.
 #[allow(dead_code)]
-fn nulled_takes_no_bytes<'a>(enc: VerifiedEncoder<'a, Option<Vec<u8>>>, out: &mut Vec<u8>)
+fn nulled_takes_no_bytes<'a>(enc: Encoder<'a, Option<Vec<u8>>>, out: &mut Vec<u8>)
     requires
         enc.wf(),
     ensures
@@ -4190,13 +4187,13 @@ fn nulled_takes_no_bytes<'a>(enc: VerifiedEncoder<'a, Option<Vec<u8>>>, out: &mu
 /// the value named, the values are written: all of them, as `save_to`
 /// writes them. For every value type and codec.
 #[allow(dead_code)]
-fn kept_and_written<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>, out: &mut Vec<u8>, v: Get<'a, V>) -> (r:
+fn kept_and_written<'a, V: ColumnValueRef<C>, C: Codec>(enc: Encoder<'a, V, C>, out: &mut Vec<u8>, v: Get<'a, V>) -> (r:
     Range<usize>)
     requires
         enc.wf(),
         !only(enc@, v.sv()),
     ensures
-        final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(enc@),
+        final(out)@ == old(out)@ + Column::<V, C>::encoding(enc@),
         final(out)@ != old(out)@,
 {
     let f = |x: V| -> (w: V)
@@ -4210,7 +4207,7 @@ fn kept_and_written<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>,
                 assert(mapped(f, enc@[i], v.sv()));
             }
         }
-        let w = VerifiedColumn::<V, C>::values(out@.skip(old(out)@.len() as int));
+        let w = Column::<V, C>::values(out@.skip(old(out)@.len() as int));
         assert(w =~= enc@);
     }
     r
@@ -4221,8 +4218,8 @@ fn kept_and_written<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>,
 /// function gave `v` for every value and nothing was written; another,
 /// that the bytes there are a saved column of what the function gave.
 #[allow(dead_code)]
-fn read_from_the_remapped_range<'a, V: VValue<C>, C: VCodec, F: Fn(V) -> V>(
-    enc: VerifiedEncoder<'a, V, C>,
+fn read_from_the_remapped_range<'a, V: ColumnValueRef<C>, C: Codec, F: Fn(V) -> V>(
+    enc: Encoder<'a, V, C>,
     out: &mut Vec<u8>,
     v: Get<'a, V>,
     f: F,
@@ -4236,8 +4233,8 @@ fn read_from_the_remapped_range<'a, V: VValue<C>, C: VCodec, F: Fn(V) -> V>(
             0 <= i < enc@.len() ==> mapped(f, #[trigger] enc@[i], v.sv()),
         r.start < r.end ==> {
             let d = final(out)@.subrange(r.start as int, r.end as int);
-            let w = VerifiedColumn::<V, C>::values(d);
-            &&& VerifiedColumn::<V, C>::valid(d)
+            let w = Column::<V, C>::values(d);
+            &&& Column::<V, C>::valid(d)
             &&& w.len() == enc@.len()
             &&& forall|i: int| 0 <= i < enc@.len() ==> mapped(f, enc@[i], #[trigger] w[i])
         },
@@ -4262,9 +4259,9 @@ fn read_from_the_remapped_range<'a, V: VValue<C>, C: VCodec, F: Fn(V) -> V>(
 /// nothing, and may start on any buffer, all of which is then what was
 /// there before it.
 #[allow(dead_code)]
-fn told_by_a_new_state<'a, V: VValue<C>, C: VCodec>() -> (r: (
-    VerifiedEncoderState<'a, V, C>,
-    VerifiedEncoderState<'a, V, C>,
+fn told_by_a_new_state<'a, V: ColumnValueRef<C>, C: Codec>() -> (r: (
+    EncoderState<'a, V, C>,
+    EncoderState<'a, V, C>,
 ))
     ensures
         r.0@.len() == 0,
@@ -4274,8 +4271,8 @@ fn told_by_a_new_state<'a, V: VValue<C>, C: VCodec>() -> (r: (
         forall|buf: Seq<u8>| #[trigger] r.1.on(buf),
         forall|buf: Seq<u8>| #[trigger] r.1.before(buf) == buf,
 {
-    let a = VerifiedEncoderState::<V, C>::new();
-    let b = VerifiedEncoderState::<V, C>::default();
+    let a = EncoderState::<V, C>::new();
+    let b = EncoderState::<V, C>::default();
     (a, b)
 }
 
@@ -4283,7 +4280,7 @@ fn told_by_a_new_state<'a, V: VValue<C>, C: VCodec>() -> (r: (
 /// was given. They take no buffer, and require that there is one the
 /// state is on.
 #[allow(dead_code)]
-fn told_by_a_states_count<'a, V: VValue<C>, C: VCodec>(s: &VerifiedEncoderState<'a, V, C>, buf: &Vec<u8>) -> (r: (
+fn told_by_a_states_count<'a, V: ColumnValueRef<C>, C: Codec>(s: &EncoderState<'a, V, C>, buf: &Vec<u8>) -> (r: (
     usize,
     bool,
 ))
@@ -4300,8 +4297,8 @@ fn told_by_a_states_count<'a, V: VValue<C>, C: VCodec>(s: &VerifiedEncoderState<
 /// the buffer is still the state's, and what was there before the state
 /// is what was.
 #[allow(dead_code)]
-fn told_by_a_states_append<'a, V: VValue<C>, C: VCodec>(
-    s: &mut VerifiedEncoderState<'a, V, C>,
+fn told_by_a_states_append<'a, V: ColumnValueRef<C>, C: Codec>(
+    s: &mut EncoderState<'a, V, C>,
     buf: &mut Vec<u8>,
     v: Get<'a, V>,
 )
@@ -4321,8 +4318,8 @@ fn told_by_a_states_append<'a, V: VValue<C>, C: VCodec>(
 /// What a state's `append_n` says: the value `n` times, after those the
 /// state had.
 #[allow(dead_code)]
-fn told_by_a_states_append_n<'a, V: VValue<C>, C: VCodec>(
-    s: &mut VerifiedEncoderState<'a, V, C>,
+fn told_by_a_states_append_n<'a, V: ColumnValueRef<C>, C: Codec>(
+    s: &mut EncoderState<'a, V, C>,
     buf: &mut Vec<u8>,
     v: Get<'a, V>,
     n: usize,
@@ -4343,8 +4340,8 @@ fn told_by_a_states_append_n<'a, V: VValue<C>, C: VCodec>(
 /// What a state's `append_owned` and `append_n_owned` say: as `append`
 /// and `append_n`, of the value handed over.
 #[allow(dead_code)]
-fn told_by_a_states_owned<'a, V: VValue<C>, C: VCodec>(
-    s: &mut VerifiedEncoderState<'a, V, C>,
+fn told_by_a_states_owned<'a, V: ColumnValueRef<C>, C: Codec>(
+    s: &mut EncoderState<'a, V, C>,
     buf: &mut Vec<u8>,
     v: V,
     w: V,
@@ -4368,8 +4365,8 @@ fn told_by_a_states_owned<'a, V: VValue<C>, C: VCodec>(
 /// What a state's `extend` says of a vector handed over: its values,
 /// after those the state had.
 #[allow(dead_code)]
-fn told_by_a_states_extend<'a, V: VValue<C>, C: VCodec>(
-    s: &mut VerifiedEncoderState<'a, V, C>,
+fn told_by_a_states_extend<'a, V: ColumnValueRef<C>, C: Codec>(
+    s: &mut EncoderState<'a, V, C>,
     buf: &mut Vec<u8>,
     vs: Vec<Get<'a, V>>,
 )
@@ -4386,8 +4383,8 @@ fn told_by_a_states_extend<'a, V: VValue<C>, C: VCodec>(
 /// What `is_single_run_of` says: whether every value given is the one
 /// asked for, either way.
 #[allow(dead_code)]
-fn told_by_a_single_run<'a, V: VValue<C>, C: VCodec>(
-    s: &VerifiedEncoderState<'a, V, C>,
+fn told_by_a_single_run<'a, V: ColumnValueRef<C>, C: Codec>(
+    s: &EncoderState<'a, V, C>,
     buf: &Vec<u8>,
     v: Get<'a, V>,
 ) -> (r: bool)
@@ -4404,14 +4401,14 @@ fn told_by_a_single_run<'a, V: VValue<C>, C: VCodec>(
 /// the state and then the encoding of the values given, which is a
 /// saved column of them within the bound of their size.
 #[allow(dead_code)]
-fn told_by_a_finish<'a, V: VValue<C>, C: VCodec>(s: VerifiedEncoderState<'a, V, C>, buf: &mut Vec<u8>)
+fn told_by_a_finish<'a, V: ColumnValueRef<C>, C: Codec>(s: EncoderState<'a, V, C>, buf: &mut Vec<u8>)
     requires
         s.on(old(buf)@),
     ensures
-        final(buf)@ == s.before(old(buf)@) + VerifiedColumn::<V, C>::encoding(s@),
-        VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(s@)),
-        VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(s@)) == s@,
-        VerifiedColumn::<V, C>::encoding(s@).len() <= V::size_bound(s@),
+        final(buf)@ == s.before(old(buf)@) + Column::<V, C>::encoding(s@),
+        Column::<V, C>::valid(Column::<V, C>::encoding(s@)),
+        Column::<V, C>::values(Column::<V, C>::encoding(s@)) == s@,
+        Column::<V, C>::encoding(s@).len() <= V::size_bound(s@),
 {
     s.finish(buf);
 }
@@ -4419,7 +4416,7 @@ fn told_by_a_finish<'a, V: VValue<C>, C: VCodec>(s: VerifiedEncoderState<'a, V, 
 /// What `lemma_before` says: what was in the buffer before the state
 /// is still its start.
 #[allow(dead_code)]
-proof fn told_by_the_bytes_before<'a, V: VValue<C>, C: VCodec>(s: VerifiedEncoderState<'a, V, C>, buf: Seq<u8>)
+proof fn told_by_the_bytes_before<'a, V: ColumnValueRef<C>, C: Codec>(s: EncoderState<'a, V, C>, buf: Seq<u8>)
     requires
         s.on(buf),
     ensures
@@ -4437,16 +4434,16 @@ proof fn told_by_the_bytes_before<'a, V: VValue<C>, C: VCodec>(s: VerifiedEncode
 /// The loop carries that the buffer is the state's (`on`), what was
 /// there before the state, and what the state has been given so far.
 #[allow(dead_code)]
-fn streamed_as_saved<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, buf: &mut Vec<u8>) -> (r: Range<usize>)
+fn streamed_as_saved<'v, V: ColumnValueRef<C>, C: Codec>(input: &Vec<Get<'v, V>>, buf: &mut Vec<u8>) -> (r: Range<usize>)
     ensures
-        final(buf)@ == old(buf)@ + VerifiedColumn::<V, C>::encoding(VGet::svs(input@)),
+        final(buf)@ == old(buf)@ + Column::<V, C>::encoding(VGet::svs(input@)),
         r.start == old(buf)@.len(),
         r.end == final(buf)@.len(),
-        VerifiedColumn::<V, C>::valid(final(buf)@.subrange(r.start as int, r.end as int)),
-        VerifiedColumn::<V, C>::values(final(buf)@.subrange(r.start as int, r.end as int)) == VGet::svs(input@),
+        Column::<V, C>::valid(final(buf)@.subrange(r.start as int, r.end as int)),
+        Column::<V, C>::values(final(buf)@.subrange(r.start as int, r.end as int)) == VGet::svs(input@),
 {
     let start = buf.len();
-    let mut s = VerifiedEncoderState::<V, C>::new();
+    let mut s = EncoderState::<V, C>::new();
     let mut i: usize = 0;
     proof {
         VGet::lemma_svs(input@.take(0));
@@ -4473,7 +4470,7 @@ fn streamed_as_saved<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, buf: 
     }
     s.finish(buf);
     proof {
-        let d = VerifiedColumn::<V, C>::encoding(VGet::svs(input@));
+        let d = Column::<V, C>::encoding(VGet::svs(input@));
         assert(buf@.subrange(start as int, buf@.len() as int) =~= d);
     }
     start..buf.len()
@@ -4482,16 +4479,16 @@ fn streamed_as_saved<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, buf: 
 /// A state, an encoder, a column and `encode` give the same bytes for
 /// the same values.
 #[allow(dead_code)]
-fn one_encoding_four_ways<'v, V: VValue<C>, C: VCodec>(input: Vec<Get<'v, V>>) -> (r: Vec<u8>)
+fn one_encoding_four_ways<'v, V: ColumnValueRef<C>, C: Codec>(input: Vec<Get<'v, V>>) -> (r: Vec<u8>)
     ensures
-        r@ == VerifiedColumn::<V, C>::encoding(VGet::svs(input@)),
+        r@ == Column::<V, C>::encoding(VGet::svs(input@)),
 {
     let mut a: Vec<u8> = Vec::new();
     streamed_as_saved::<V, C>(&input, &mut a);
     let b = encoded_as_saved::<V, C>(&input);
-    let col = VerifiedColumn::<V, C>::from_values(input.as_slice());
+    let col = Column::<V, C>::from_values(input.as_slice());
     let c = col.save();
-    let d = VerifiedEncoder::<V, C>::encode(input);
+    let d = Encoder::<V, C>::encode(input);
     assert(a@ =~= b@);
     assert(b@ == c@);
     assert(c@ == d@);
@@ -4501,7 +4498,7 @@ fn one_encoding_four_ways<'v, V: VValue<C>, C: VCodec>(input: Vec<Get<'v, V>>) -
 /// What `encode` gives loads as a column of the values given, where
 /// their number and size are a column's to load.
 #[allow(dead_code)]
-fn stream_then_load<'v, V: VValue<C>, C: VCodec>(input: Vec<Get<'v, V>>) -> (r: VerifiedColumn<V, C>)
+fn stream_then_load<'v, V: ColumnValueRef<C>, C: Codec>(input: Vec<Get<'v, V>>) -> (r: Column<V, C>)
     requires
         V::size_bound(VGet::svs(input@)) <= 0xffff_fff5,
         input@.len() <= usize::MAX - 3,
@@ -4511,8 +4508,8 @@ fn stream_then_load<'v, V: VValue<C>, C: VCodec>(input: Vec<Get<'v, V>>) -> (r: 
     proof {
         VGet::lemma_svs(input@);
     }
-    let bytes = VerifiedEncoder::<V, C>::encode(input);
-    let back = VerifiedColumn::<V, C>::load(bytes.as_slice());
+    let bytes = Encoder::<V, C>::encode(input);
+    let back = Column::<V, C>::load(bytes.as_slice());
     assert(back is Ok);
     back.unwrap()
 }
@@ -4523,19 +4520,19 @@ fn stream_then_load<'v, V: VValue<C>, C: VCodec>(input: Vec<Get<'v, V>>) -> (r: 
 #[allow(dead_code)]
 fn strings_streamed<'a>(a: &'a [u8], b: Vec<u8>, c: Vec<u8>, buf: &mut Vec<u8>) -> (r: usize)
     ensures
-        final(buf)@ == old(buf)@ + VerifiedColumn::<Vec<u8>>::encoding(seq![a@, b@, a@, a@]) + VerifiedColumn::<
+        final(buf)@ == old(buf)@ + Column::<Vec<u8>>::encoding(seq![a@, b@, a@, a@]) + Column::<
             Option<Vec<u8>>,
         >::encoding(seq![Some(a@), None, None, Some(c@)]),
-        r == old(buf)@.len() + VerifiedColumn::<Vec<u8>>::encoding(seq![a@, b@, a@, a@]).len(),
+        r == old(buf)@.len() + Column::<Vec<u8>>::encoding(seq![a@, b@, a@, a@]).len(),
 {
-    let mut x = VerifiedEncoderState::<Vec<u8>>::new();
+    let mut x = EncoderState::<Vec<u8>>::new();
     x.append(buf, a);
     x.append_owned(buf, b);
     x.append_n(buf, a, 2);
     assert(x@ =~= seq![a@, b@, a@, a@]);
     x.finish(buf);
     let mid = buf.len();
-    let mut y = VerifiedEncoderState::<Option<Vec<u8>>>::new();
+    let mut y = EncoderState::<Option<Vec<u8>>>::new();
     y.append(buf, Some(a));
     y.append_n(buf, None, 2);
     y.append_owned(buf, Some(c));
@@ -4551,9 +4548,9 @@ fn strings_streamed<'a>(a: &'a [u8], b: Vec<u8>, c: Vec<u8>, buf: &mut Vec<u8>) 
 #[allow(dead_code)]
 fn a_single_run(buf: &mut Vec<u8>)
     ensures
-        final(buf)@ == old(buf)@ + VerifiedColumn::<u64>::encoding(seq![7u64, 7, 7, 7, 8]),
+        final(buf)@ == old(buf)@ + Column::<u64>::encoding(seq![7u64, 7, 7, 7, 8]),
 {
-    let mut s = VerifiedEncoderState::<u64>::new();
+    let mut s = EncoderState::<u64>::new();
     assert(s.on(buf@));
     let none = s.is_single_run_of(3);
     assert(none);
@@ -4582,7 +4579,7 @@ fn a_single_run(buf: &mut Vec<u8>)
 /// it. The client keeps the two together between calls.
 pub struct Log<'a> {
     pub buf: Vec<u8>,
-    pub s: VerifiedEncoderState<'a, u64>,
+    pub s: EncoderState<'a, u64>,
 }
 
 impl<'a> Log<'a> {
@@ -4603,7 +4600,7 @@ impl<'a> Log<'a> {
             r.s@.len() == 0,
             r.head() == buf@,
     {
-        Log { buf, s: VerifiedEncoderState::new() }
+        Log { buf, s: EncoderState::new() }
     }
 
     /// One number more.
@@ -4624,8 +4621,8 @@ impl<'a> Log<'a> {
         requires
             self.wf(),
         ensures
-            r@ == self.head() + VerifiedColumn::<u64>::encoding(self.s@),
-            VerifiedColumn::<u64>::values(VerifiedColumn::<u64>::encoding(self.s@)) == self.s@,
+            r@ == self.head() + Column::<u64>::encoding(self.s@),
+            Column::<u64>::values(Column::<u64>::encoding(self.s@)) == self.s@,
     {
         let Log { mut buf, s } = self;
         s.finish(&mut buf);
@@ -4636,7 +4633,7 @@ impl<'a> Log<'a> {
 /// Three numbers logged after a header, and read back from behind it:
 /// if those bytes load, they load as the numbers.
 #[allow(dead_code)]
-fn logged(header: Vec<u8>) -> (r: Option<VerifiedColumn<u64>>)
+fn logged(header: Vec<u8>) -> (r: Option<Column<u64>>)
     ensures
         r matches Some(col) ==> col@ == seq![4u64, 5, 6],
 {
@@ -4649,12 +4646,12 @@ fn logged(header: Vec<u8>) -> (r: Option<VerifiedColumn<u64>>)
     assert(log.s@ =~= seq![4u64, 5, 6]);
     let out = log.finish();
     proof {
-        let d = VerifiedColumn::<u64>::encoding(seq![4u64, 5, 6]);
+        let d = Column::<u64>::encoding(seq![4u64, 5, 6]);
         assert(out@ =~= h + d);
         assert(out@.subrange(at as int, out@.len() as int) =~= d);
     }
     let bytes = vstd::slice::slice_subrange(out.as_slice(), at, out.len());
-    match VerifiedColumn::<u64>::load(bytes) {
+    match Column::<u64>::load(bytes) {
         Ok(col) => Some(col),
         Err(_) => None,
     }
@@ -4664,12 +4661,12 @@ fn logged(header: Vec<u8>) -> (r: Option<VerifiedColumn<u64>>)
 /// where the state started, and the buffer is what it was. That needs
 /// `lemma_before`: what was there before the state is still there.
 #[allow(dead_code)]
-fn given_up<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>, buf: &mut Vec<u8>)
+fn given_up<'a, V: ColumnValueRef<C>, C: Codec>(vs: Vec<Get<'a, V>>, buf: &mut Vec<u8>)
     ensures
         final(buf)@ == old(buf)@,
 {
     let start = buf.len();
-    let mut s = VerifiedEncoderState::<V, C>::new();
+    let mut s = EncoderState::<V, C>::new();
     s.extend(buf, vs);
     proof {
         s.lemma_before(buf@);
@@ -4682,14 +4679,14 @@ fn given_up<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>, buf: &mut Vec<u8>)
 /// the values are written unless each is `v`, and the client is told
 /// which.
 #[allow(dead_code)]
-fn written_unless_one<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>, v: Get<'a, V>, buf: &mut Vec<u8>) -> (r: bool)
+fn written_unless_one<'a, V: ColumnValueRef<C>, C: Codec>(vs: Vec<Get<'a, V>>, v: Get<'a, V>, buf: &mut Vec<u8>) -> (r: bool)
     ensures
         r == only(VGet::svs(vs@), v.sv()),
         r ==> final(buf)@ == old(buf)@,
-        !r ==> final(buf)@ == old(buf)@ + VerifiedColumn::<V, C>::encoding(VGet::svs(vs@)),
+        !r ==> final(buf)@ == old(buf)@ + Column::<V, C>::encoding(VGet::svs(vs@)),
 {
     let start = buf.len();
-    let mut s = VerifiedEncoderState::<V, C>::new();
+    let mut s = EncoderState::<V, C>::new();
     s.extend(buf, vs);
     assert(s@ =~= VGet::svs(vs@));
     if s.is_single_run_of(v) {
@@ -4710,14 +4707,14 @@ fn written_unless_one<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>, v: Get<'
 /// column of its values, the one encoding of them, within the bound of
 /// their size.
 #[allow(dead_code)]
-fn told_by_an_encode<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>) -> (r: Vec<u8>)
+fn told_by_an_encode<'a, V: ColumnValueRef<C>, C: Codec>(vs: Vec<Get<'a, V>>) -> (r: Vec<u8>)
     ensures
-        VerifiedColumn::<V, C>::valid(r@),
-        VerifiedColumn::<V, C>::values(r@) == VGet::svs(vs@),
-        r@ == VerifiedColumn::<V, C>::encoding(VGet::svs(vs@)),
+        Column::<V, C>::valid(r@),
+        Column::<V, C>::values(r@) == VGet::svs(vs@),
+        r@ == Column::<V, C>::encoding(VGet::svs(vs@)),
         r@.len() <= V::size_bound(VGet::svs(vs@)),
 {
-    VerifiedEncoder::<V, C>::encode(vs)
+    Encoder::<V, C>::encode(vs)
 }
 
 /// What `encode_to` says of a vector handed over: the buffer is what it
@@ -4725,16 +4722,16 @@ fn told_by_an_encode<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>) -> (r: Ve
 /// column of them within the bound of their size, and the range
 /// returned is where.
 #[allow(dead_code)]
-fn told_by_an_encode_to<'a, V: VValue<C>, C: VCodec>(buf: &mut Vec<u8>, vs: Vec<Get<'a, V>>) -> (r: Range<usize>)
+fn told_by_an_encode_to<'a, V: ColumnValueRef<C>, C: Codec>(buf: &mut Vec<u8>, vs: Vec<Get<'a, V>>) -> (r: Range<usize>)
     ensures
-        final(buf)@ == old(buf)@ + VerifiedColumn::<V, C>::encoding(VGet::svs(vs@)),
-        VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(VGet::svs(vs@))),
-        VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(VGet::svs(vs@))) == VGet::svs(vs@),
-        VerifiedColumn::<V, C>::encoding(VGet::svs(vs@)).len() <= V::size_bound(VGet::svs(vs@)),
+        final(buf)@ == old(buf)@ + Column::<V, C>::encoding(VGet::svs(vs@)),
+        Column::<V, C>::valid(Column::<V, C>::encoding(VGet::svs(vs@))),
+        Column::<V, C>::values(Column::<V, C>::encoding(VGet::svs(vs@))) == VGet::svs(vs@),
+        Column::<V, C>::encoding(VGet::svs(vs@)).len() <= V::size_bound(VGet::svs(vs@)),
         r.start == old(buf)@.len(),
         r.end == final(buf)@.len(),
 {
-    VerifiedEncoder::<V, C>::encode_to(buf, vs)
+    Encoder::<V, C>::encode_to(buf, vs)
 }
 
 /// What `encode_to_unless` says of a vector handed over. The buffer is
@@ -4743,20 +4740,20 @@ fn told_by_an_encode_to<'a, V: VValue<C>, C: VCodec>(buf: &mut Vec<u8>, vs: Vec<
 /// column of them within the bound of their size. And the range
 /// returned is what was added.
 #[allow(dead_code)]
-fn told_by_an_encode_to_unless<'a, V: VValue<C>, C: VCodec>(buf: &mut Vec<u8>, vs: Vec<Get<'a, V>>, v: Get<'a, V>) -> (r:
+fn told_by_an_encode_to_unless<'a, V: ColumnValueRef<C>, C: Codec>(buf: &mut Vec<u8>, vs: Vec<Get<'a, V>>, v: Get<'a, V>) -> (r:
     Range<usize>)
     ensures
         (final(buf)@ == old(buf)@) == only(VGet::svs(vs@), v.sv()),
         final(buf)@ != old(buf)@ ==> {
-            &&& final(buf)@ == old(buf)@ + VerifiedColumn::<V, C>::encoding(VGet::svs(vs@))
-            &&& VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(VGet::svs(vs@)))
-            &&& VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(VGet::svs(vs@))) == VGet::svs(vs@)
-            &&& VerifiedColumn::<V, C>::encoding(VGet::svs(vs@)).len() <= V::size_bound(VGet::svs(vs@))
+            &&& final(buf)@ == old(buf)@ + Column::<V, C>::encoding(VGet::svs(vs@))
+            &&& Column::<V, C>::valid(Column::<V, C>::encoding(VGet::svs(vs@)))
+            &&& Column::<V, C>::values(Column::<V, C>::encoding(VGet::svs(vs@))) == VGet::svs(vs@)
+            &&& Column::<V, C>::encoding(VGet::svs(vs@)).len() <= V::size_bound(VGet::svs(vs@))
         },
         r.start == old(buf)@.len(),
         r.end == final(buf)@.len(),
 {
-    VerifiedEncoder::<V, C>::encode_to_unless(buf, vs, v)
+    Encoder::<V, C>::encode_to_unless(buf, vs, v)
 }
 
 /// Two columns written into one buffer by `encode_to`, one after the
@@ -4770,12 +4767,12 @@ fn two_columns_one_buffer(ids: Vec<u64>, flags: Vec<bool>, buf: &mut Vec<u8>) ->
         r.0.end == r.1.start,
         r.1.end == final(buf)@.len(),
         r.0.start <= r.0.end <= r.1.end,
-        VerifiedColumn::<u64>::values(final(buf)@.subrange(r.0.start as int, r.0.end as int)) == ids@,
-        VerifiedColumn::<bool>::values(final(buf)@.subrange(r.1.start as int, r.1.end as int)) == flags@,
+        Column::<u64>::values(final(buf)@.subrange(r.0.start as int, r.0.end as int)) == ids@,
+        Column::<bool>::values(final(buf)@.subrange(r.1.start as int, r.1.end as int)) == flags@,
 {
-    let ghost (a, b) = (VerifiedColumn::<u64>::encoding(ids@), VerifiedColumn::<bool>::encoding(flags@));
-    let x = VerifiedEncoder::<u64>::encode_to(buf, ids);
-    let y = VerifiedEncoder::<bool>::encode_to(buf, flags);
+    let ghost (a, b) = (Column::<u64>::encoding(ids@), Column::<bool>::encoding(flags@));
+    let x = Encoder::<u64>::encode_to(buf, ids);
+    let y = Encoder::<bool>::encode_to(buf, flags);
     proof {
         let o = old(buf)@;
         assert(buf@ =~= o + a + b);
@@ -4789,7 +4786,7 @@ fn two_columns_one_buffer(ids: Vec<u64>, flags: Vec<bool>, buf: &mut Vec<u8>) ->
 /// Values that are all the one named take no bytes: `encode_to_unless`
 /// leaves the buffer.
 #[allow(dead_code)]
-fn all_the_one_leave_the_buffer<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>, v: Get<'a, V>, buf: &mut Vec<u8>)
+fn all_the_one_leave_the_buffer<'a, V: ColumnValueRef<C>, C: Codec>(vs: Vec<Get<'a, V>>, v: Get<'a, V>, buf: &mut Vec<u8>)
     requires
         forall|i: int| 0 <= i < vs@.len() ==> (#[trigger] vs@[i]).sv() == v.sv(),
     ensures
@@ -4799,7 +4796,7 @@ fn all_the_one_leave_the_buffer<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>
         VGet::lemma_svs(vs@);
         assert(only(VGet::svs(vs@), v.sv()));
     }
-    let r = VerifiedEncoder::<V, C>::encode_to_unless(buf, vs, v);
+    let r = Encoder::<V, C>::encode_to_unless(buf, vs, v);
     assert(r.start == r.end);
 }
 
@@ -4822,16 +4819,16 @@ fn nulls_leave_the_buffer(buf: &mut Vec<u8>)
 #[allow(dead_code)]
 fn another_is_written(buf: &mut Vec<u8>) -> (r: Range<usize>)
     ensures
-        final(buf)@ == old(buf)@ + VerifiedColumn::<u64>::encoding(seq![0u64, 5]),
-        VerifiedColumn::<u64>::values(final(buf)@.subrange(r.start as int, r.end as int)) == seq![0u64, 5],
+        final(buf)@ == old(buf)@ + Column::<u64>::encoding(seq![0u64, 5]),
+        Column::<u64>::values(final(buf)@.subrange(r.start as int, r.end as int)) == seq![0u64, 5],
 {
     let mut vs: Vec<u64> = Vec::new();
     vs.push(0);
     vs.push(5);
     assert(vs@ =~= seq![0u64, 5]);
-    let r = VerifiedEncoder::<u64>::encode_to_unless(buf, vs, 0);
+    let r = Encoder::<u64>::encode_to_unless(buf, vs, 0);
     proof {
-        let d = VerifiedColumn::<u64>::encoding(seq![0u64, 5]);
+        let d = Column::<u64>::encoding(seq![0u64, 5]);
         assert(buf@.subrange(r.start as int, r.end as int) =~= d);
     }
     r
@@ -4842,16 +4839,16 @@ fn another_is_written(buf: &mut Vec<u8>) -> (r: Range<usize>)
 /// and nothing was written; another, that the bytes there are the
 /// encoding of the values.
 #[allow(dead_code)]
-fn read_from_the_encoded_range<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>, buf: &mut Vec<u8>, v: Get<'a, V>) -> (r:
+fn read_from_the_encoded_range<'a, V: ColumnValueRef<C>, C: Codec>(vs: Vec<Get<'a, V>>, buf: &mut Vec<u8>, v: Get<'a, V>) -> (r:
     Range<usize>)
     ensures
         r.start <= r.end <= final(buf)@.len(),
         r.start == r.end ==> only(VGet::svs(vs@), v.sv()) && final(buf)@ == old(buf)@,
-        r.start < r.end ==> final(buf)@.subrange(r.start as int, r.end as int) == VerifiedColumn::<V, C>::encoding(
+        r.start < r.end ==> final(buf)@.subrange(r.start as int, r.end as int) == Column::<V, C>::encoding(
             VGet::svs(vs@),
         ),
 {
-    let r = VerifiedEncoder::<V, C>::encode_to_unless(buf, vs, v);
+    let r = Encoder::<V, C>::encode_to_unless(buf, vs, v);
     proof {
         let d = buf@.skip(old(buf)@.len() as int);
         assert(buf@.subrange(r.start as int, r.end as int) =~= d);
@@ -4904,7 +4901,7 @@ fn text_in_text_out(a: &str, b: &str)
         encode_utf8(a@).len() <= 1000,
         encode_utf8(b@).len() <= 1000,
 {
-    let mut col = VerifiedColumn::<String>::new();
+    let mut col = Column::<String>::new();
     col.push(a);
     col.push(b);
     col.insert(1, a);
@@ -4925,7 +4922,7 @@ fn text_in_text_out(a: &str, b: &str)
     proof {
         lemma_total_str(col@, 1000);
     }
-    let back = VerifiedColumn::<String>::load(bytes.as_slice());
+    let back = Column::<String>::load(bytes.as_slice());
     assert(back is Ok);
     let back = back.unwrap();
     let mut it = back.iter_range(1, 3);
@@ -4940,7 +4937,7 @@ fn text_in_text_out(a: &str, b: &str)
 /// A string read is the string written, and not only as long: no two
 /// strings have the same characters.
 #[allow(dead_code)]
-fn the_string_itself<'a>(col: &mut VerifiedColumn<String>, a: &'a str) -> (r: bool)
+fn the_string_itself<'a>(col: &mut Column<String>, a: &'a str) -> (r: bool)
     requires
         old(col)@.len() < 1000,
     ensures
@@ -4968,9 +4965,9 @@ fn the_string_itself<'a>(col: &mut VerifiedColumn<String>, a: &'a str) -> (r: bo
 #[allow(dead_code)]
 fn fruit() -> (r: Vec<u8>)
     ensures
-        VerifiedColumn::<String>::values(r@) == seq!["apple"@, "pear"@, ""@, "pear"@],
+        Column::<String>::values(r@) == seq!["apple"@, "pear"@, ""@, "pear"@],
 {
-    let mut col = VerifiedColumn::<String>::new();
+    let mut col = Column::<String>::new();
     col.push("apple");
     col.push("pear");
     col.push("");
@@ -4992,19 +4989,19 @@ fn fruit() -> (r: Vec<u8>)
 #[allow(dead_code)]
 fn saved_if_short(a: &str) -> (r: Option<Vec<u8>>)
     ensures
-        r matches Some(bytes) ==> VerifiedColumn::<String>::values(bytes@) == seq![a@],
+        r matches Some(bytes) ==> Column::<String>::values(bytes@) == seq![a@],
         encode_utf8(a@).len() <= 1000 ==> r is Some,
 {
     if a.as_bytes().len() > 1000 {
         return None;
     }
-    let mut col = VerifiedColumn::<String>::new();
+    let mut col = Column::<String>::new();
     col.push(a);
     let bytes = col.save();
     proof {
         lemma_total_str(col@, 1000);
     }
-    let back = VerifiedColumn::<String>::load(bytes.as_slice());
+    let back = Column::<String>::load(bytes.as_slice());
     assert(back is Ok);
     assert(back->Ok_0@ == seq![a@]);
     Some(bytes)
@@ -5020,7 +5017,7 @@ fn find_text(a: &str, b: &str)
     requires
         bytes_below(encode_utf8(a@), encode_utf8(b@)),
 {
-    let mut col = VerifiedColumn::<String>::new();
+    let mut col = Column::<String>::new();
     col.push(a);
     col.push(b);
     assert(col@ == seq![a@, b@]);
@@ -5067,13 +5064,13 @@ fn text_compared(a: &str, b: &str) -> (r: Ordering)
         (r is Less) == bytes_below(encode_utf8(a@), encode_utf8(b@)),
         (r is Equal) == (a@ == b@),
 {
-    <String as VValue<Leb128>>::compare(a, b)
+    <String as ColumnValueRef<Leb128>>::compare(a, b)
 }
 
 /// Strings, each with a `!` at its end: the function is given a
 /// `String` of its own, and may hand back that one.
 #[allow(dead_code)]
-fn exclaimed(col: &mut VerifiedColumn<String>)
+fn exclaimed(col: &mut Column<String>)
     ensures
         final(col)@.len() == old(col)@.len(),
         forall|i: int| 0 <= i < old(col)@.len() ==> final(col)@[i] == old(col)@[i].push('!'),
@@ -5094,9 +5091,9 @@ fn exclaimed(col: &mut VerifiedColumn<String>)
 #[allow(dead_code)]
 fn encode_text<'a>(a: &'a str, b: String) -> (r: Vec<u8>)
     ensures
-        VerifiedColumn::<String>::values(r@) == seq![a@, b@, a@, a@],
+        Column::<String>::values(r@) == seq![a@, b@, a@, a@],
 {
-    let mut x = VerifiedEncoder::<String>::new();
+    let mut x = Encoder::<String>::new();
     x.append(a);
     x.append_owned(b);
     x.append_n(a, 2);
@@ -5109,9 +5106,9 @@ fn encode_text<'a>(a: &'a str, b: String) -> (r: Vec<u8>)
 #[allow(dead_code)]
 fn text_streamed<'a>(a: &'a str, b: String, buf: &mut Vec<u8>)
     ensures
-        final(buf)@ == old(buf)@ + VerifiedColumn::<String>::encoding(seq![a@, b@, a@, a@]),
+        final(buf)@ == old(buf)@ + Column::<String>::encoding(seq![a@, b@, a@, a@]),
 {
-    let mut x = VerifiedEncoderState::<String>::new();
+    let mut x = EncoderState::<String>::new();
     x.append(buf, a);
     x.append_owned(buf, b);
     x.append_n(buf, a, 2);
@@ -5178,7 +5175,7 @@ fn opt_text_in_text_out(a: &str)
     requires
         encode_utf8(a@).len() <= 1000,
 {
-    let mut col = VerifiedColumn::<Option<String>>::new();
+    let mut col = Column::<Option<String>>::new();
     col.push(Some(a));
     col.push(None);
     col.insert(1, Some(a));
@@ -5194,7 +5191,7 @@ fn opt_text_in_text_out(a: &str)
     proof {
         lemma_total_str_opt(col@, 1000);
     }
-    let back = VerifiedColumn::<Option<String>>::load(bytes.as_slice());
+    let back = Column::<Option<String>>::load(bytes.as_slice());
     assert(back is Ok);
     let back = back.unwrap();
     let mut it = back.iter_range(1, 3);
@@ -5216,7 +5213,7 @@ fn find_opt_text(a: &str, b: &str)
     requires
         bytes_below(encode_utf8(a@), encode_utf8(b@)),
 {
-    let mut col = VerifiedColumn::<Option<String>>::new();
+    let mut col = Column::<Option<String>>::new();
     col.push(None);
     col.push(Some(a));
     col.push(Some(b));
@@ -5250,14 +5247,14 @@ fn opt_text_compared(a: Option<&str>, b: Option<&str>) -> (r: Ordering)
         },
         (r is Equal) == (a.sv() == b.sv()),
 {
-    <Option<String> as VValue<Leb128>>::compare(a, b)
+    <Option<String> as ColumnValueRef<Leb128>>::compare(a, b)
 }
 
 /// Strings that may be null, each string with a `!` at its end and each
 /// null left a null: the function is given a `String` of its own, and
 /// may hand back that one.
 #[allow(dead_code)]
-fn opt_exclaimed(col: &mut VerifiedColumn<Option<String>>)
+fn opt_exclaimed(col: &mut Column<Option<String>>)
     ensures
         final(col)@.len() == old(col)@.len(),
         forall|i: int|
@@ -5290,9 +5287,9 @@ fn opt_exclaimed(col: &mut VerifiedColumn<Option<String>>)
 #[allow(dead_code)]
 fn encode_opt_text<'a>(a: &'a str, b: String) -> (r: Vec<u8>)
     ensures
-        VerifiedColumn::<Option<String>>::values(r@) == seq![Some(a@), None, Some(b@), None, None],
+        Column::<Option<String>>::values(r@) == seq![Some(a@), None, Some(b@), None, None],
 {
-    let mut x = VerifiedEncoder::<Option<String>>::new();
+    let mut x = Encoder::<Option<String>>::new();
     x.append(Some(a));
     x.append(None);
     x.append_owned(Some(b));
@@ -5313,7 +5310,7 @@ fn load_opt_text(bytes: &[u8]) {
 /// after a push the column counts one more, and refuses the state. For
 /// every value type and codec.
 #[allow(dead_code)]
-fn ended_by_a_push<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, v: Get<'_, V>) -> (r: bool)
+fn ended_by_a_push<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>) -> (r: bool)
     ensures
         !r,
         final(col)@ == old(col)@.push(v.sv()),
@@ -5333,8 +5330,8 @@ fn ended_by_a_push<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedC
 /// is one whatever its iterator gives, and a remap is one though it
 /// leaves each value as it was.
 #[allow(dead_code)]
-fn ended_by_each_edit<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    col: &mut VerifiedColumn<V, C, K>,
+fn ended_by_each_edit<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    col: &mut Column<V, C, K>,
     v: Get<'v, V>,
     more: Vec<Get<'v, V>>,
     runs: Vec<Run<Get<'v, V>>>,
@@ -5388,7 +5385,7 @@ fn ended_by_each_edit<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
 /// nothing, an extend by nothing, and splices of what an iterator with
 /// no item gives, values or runs.
 #[allow(dead_code)]
-fn no_edits<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize, none: &[Get<'v, V>])
+fn no_edits<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize, none: &[Get<'v, V>])
     requires
         at <= old(col)@.len(),
         none@.len() == 0,
@@ -5426,7 +5423,7 @@ fn no_edits<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColu
 /// A column of no value is not edited by a `clear`: it counts what it
 /// did. One of any value is.
 #[allow(dead_code)]
-fn cleared<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>)
+fn cleared<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>)
     ensures
         final(col)@.len() == 0,
         old(col)@.len() == 0 ==> final(col).edits() == old(col).edits(),
@@ -5440,7 +5437,7 @@ fn cleared<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V,
 /// column's count after `k` of them, for any `k` a `usize` holds, is
 /// not what it was (`lemma_after_edits`).
 #[allow(dead_code)]
-fn ended_by_many<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, v: Get<'_, V>, k: usize) -> (r: bool)
+fn ended_by_many<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>, k: usize) -> (r: bool)
     requires
         k > 0,
     ensures
@@ -5473,7 +5470,7 @@ fn ended_by_many<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedCol
 /// removal of what was pushed the column holds what it did, and refuses
 /// the state taken before the two.
 #[allow(dead_code)]
-fn ended_though_undone<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, v: Get<'_, V>) -> (r: bool)
+fn ended_though_undone<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>) -> (r: bool)
     ensures
         !r,
         final(col)@ == old(col)@,
@@ -5501,7 +5498,7 @@ fn ended_though_undone<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut Verif
 /// state of the column, and the column, which nothing has edited, gives
 /// an iterator for it still.
 #[allow(dead_code)]
-fn a_copy_edited<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, v: Get<'_, V>) -> (r: (bool, bool))
+fn a_copy_edited<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, v: Get<'_, V>) -> (r: (bool, bool))
     ensures
         !r.0,
         r.1,
@@ -5521,8 +5518,8 @@ fn a_copy_edited<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<
 /// for on its own. A splice of a slice: an edit more if it deletes a
 /// value or the slice has one.
 #[allow(dead_code)]
-fn counted_by_a_splice<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    col: &mut VerifiedColumn<V, C, K>,
+fn counted_by_a_splice<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    col: &mut Column<V, C, K>,
     at: usize,
     del: usize,
     values: &[Get<'_, V>],
@@ -5541,8 +5538,8 @@ fn counted_by_a_splice<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
 /// runs: an edit more if it deletes a value or leaves the column of
 /// another length.
 #[allow(dead_code)]
-fn counted_by_a_splice_iter<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: IntoIterator<Item = Get<'v, V>>>(
-    col: &mut VerifiedColumn<V, C, K>,
+fn counted_by_a_splice_iter<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, I: IntoIterator<Item = Get<'v, V>>>(
+    col: &mut Column<V, C, K>,
     at: usize,
     del: usize,
     values: I,
@@ -5558,8 +5555,8 @@ fn counted_by_a_splice_iter<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: Int
 }
 
 #[allow(dead_code)]
-fn counted_by_a_splice_runs<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: IntoIterator<Item = Run<Get<'v, V>>>>(
-    col: &mut VerifiedColumn<V, C, K>,
+fn counted_by_a_splice_runs<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, I: IntoIterator<Item = Run<Get<'v, V>>>>(
+    col: &mut Column<V, C, K>,
     at: usize,
     del: usize,
     runs: I,
@@ -5577,8 +5574,8 @@ fn counted_by_a_splice_runs<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: Int
 /// An `extend`, by any iterator: an edit more if the column is the
 /// longer for it.
 #[allow(dead_code)]
-fn counted_by_an_extend<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: IntoIterator<Item = Get<'v, V>>>(
-    col: &mut VerifiedColumn<V, C, K>,
+fn counted_by_an_extend<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, I: IntoIterator<Item = Get<'v, V>>>(
+    col: &mut Column<V, C, K>,
     values: I,
 )
     ensures
@@ -5590,7 +5587,7 @@ fn counted_by_an_extend<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: IntoIte
 
 /// An insert, a push and a removal: an edit more, each.
 #[allow(dead_code)]
-fn counted_by_an_insert<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize, v: Get<'_, V>)
+fn counted_by_an_insert<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize, v: Get<'_, V>)
     requires
         at <= old(col)@.len(),
     ensures
@@ -5600,7 +5597,7 @@ fn counted_by_an_insert<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut Veri
 }
 
 #[allow(dead_code)]
-fn counted_by_a_push<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, v: Get<'_, V>)
+fn counted_by_a_push<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>)
     ensures
         final(col).edits() == after_edit(old(col).edits()),
 {
@@ -5608,7 +5605,7 @@ fn counted_by_a_push<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut Verifie
 }
 
 #[allow(dead_code)]
-fn counted_by_a_remove<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize)
+fn counted_by_a_remove<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize)
     requires
         at < old(col)@.len(),
     ensures
@@ -5619,7 +5616,7 @@ fn counted_by_a_remove<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut Verif
 
 /// A `truncate`: an edit more if the column was longer than asked for.
 #[allow(dead_code)]
-fn counted_by_a_truncate<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, len: usize)
+fn counted_by_a_truncate<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, len: usize)
     ensures
         len < old(col)@.len() ==> final(col).edits() == after_edit(old(col).edits()),
         len >= old(col)@.len() ==> final(col).edits() == old(col).edits(),
@@ -5629,7 +5626,7 @@ fn counted_by_a_truncate<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut Ver
 
 /// A `remove_n`: an edit more unless it removes no value.
 #[allow(dead_code)]
-fn counted_by_a_remove_n<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize, n: usize)
+fn counted_by_a_remove_n<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize, n: usize)
     requires
         at <= old(col)@.len(),
         n <= old(col)@.len() - at,
@@ -5642,7 +5639,7 @@ fn counted_by_a_remove_n<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut Ver
 
 /// A `clear`: an edit more if the column held a value.
 #[allow(dead_code)]
-fn counted_by_a_clear<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>)
+fn counted_by_a_clear<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>)
     ensures
         old(col)@.len() > 0 ==> final(col).edits() == after_edit(old(col).edits()),
         old(col)@.len() == 0 ==> final(col).edits() == old(col).edits(),
@@ -5653,7 +5650,7 @@ fn counted_by_a_clear<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut Verifi
 /// A remap: an edit more, whatever the function and whatever the
 /// column.
 #[allow(dead_code)]
-fn counted_by_a_remap<V: VValue<C>, C: VCodec, K: VIndex<V, C>, F: Fn(V) -> V>(col: &mut VerifiedColumn<V, C, K>, f: F)
+fn counted_by_a_remap<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, F: Fn(V) -> V>(col: &mut Column<V, C, K>, f: F)
     requires
         forall|v: V| old(col)@.contains(V::sv_of(v)) ==> #[trigger] call_requires(f, (v,)),
     ensures
@@ -5664,7 +5661,7 @@ fn counted_by_a_remap<V: VValue<C>, C: VCodec, K: VIndex<V, C>, F: Fn(V) -> V>(c
 
 /// And a copy: what the column counts.
 #[allow(dead_code)]
-fn counted_by_a_clone<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>) -> (r: VerifiedColumn<V, C, K>)
+fn counted_by_a_clone<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>) -> (r: Column<V, C, K>)
     ensures
         r.edits() == col.edits(),
         r@ == col@,
@@ -5698,7 +5695,7 @@ proof fn the_count_after(n: usize, k: nat)
 /// decoder is an iterator of the standard library's, as a column's
 /// iterator is.
 #[allow(dead_code)]
-fn read_all<'a, V: VValue<C>, C: VCodec>(dec: VerifiedDecoder<'a, V, C>) -> (out: Vec<Get<'a, V>>)
+fn read_all<'a, V: ColumnValueRef<C>, C: Codec>(dec: Decoder<'a, V, C>) -> (out: Vec<Get<'a, V>>)
     ensures
         out@ == dec.items(),
         <Get<'a, V> as VGet>::svs(out@) == dec.rest(),
@@ -5726,13 +5723,13 @@ fn read_all<'a, V: VValue<C>, C: VCodec>(dec: VerifiedDecoder<'a, V, C>) -> (out
 /// are read into holds the values the bytes are the saved column of.
 /// For every value type and codec.
 #[allow(dead_code)]
-fn decode_all<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (out: Vec<Get<'a, V>>)
+fn decode_all<'a, V: ColumnValueRef<C>, C: Codec>(bytes: &'a [u8]) -> (out: Vec<Get<'a, V>>)
     requires
-        VerifiedColumn::<V, C>::valid(bytes@),
+        Column::<V, C>::valid(bytes@),
     ensures
-        <Get<'a, V> as VGet>::svs(out@) == VerifiedColumn::<V, C>::values(bytes@),
+        <Get<'a, V> as VGet>::svs(out@) == Column::<V, C>::values(bytes@),
 {
-    read_all(VerifiedDecoder::<V, C>::new(bytes))
+    read_all(Decoder::<V, C>::new(bytes))
 }
 
 /// What a column saves, a decoder gives back: each value it reads from
@@ -5740,12 +5737,12 @@ fn decode_all<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (out: Vec<Get<'a,
 /// when it runs, and it reads as many as the column has. For every
 /// value type and codec.
 #[allow(dead_code)]
-fn decoded_as_held<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>) -> (r: bool)
+fn decoded_as_held<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>) -> (r: bool)
     ensures
         r,
 {
     let bytes = col.save();
-    let mut dec = VerifiedDecoder::<V, C>::new(bytes.as_slice());
+    let mut dec = Decoder::<V, C>::new(bytes.as_slice());
     let n = col.len();
     let mut i: usize = 0;
     let mut r = true;
@@ -5784,12 +5781,12 @@ fn decoded_as_held<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColum
 /// What an encoder saves, a decoder reads as the values the encoder
 /// was given, one for one. For every value type and codec.
 #[allow(dead_code)]
-fn encoded_then_decoded<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) -> (r: bool)
+fn encoded_then_decoded<'v, V: ColumnValueRef<C>, C: Codec>(input: &Vec<Get<'v, V>>) -> (r: bool)
     ensures
         r,
 {
     let bytes = encoded_as_saved::<V, C>(input);
-    let dec = VerifiedDecoder::<V, C>::new(bytes.as_slice());
+    let dec = Decoder::<V, C>::new(bytes.as_slice());
     let ghost all = dec.items();
     proof {
         dec.lemma_items_len();
@@ -5825,13 +5822,13 @@ fn encoded_then_decoded<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) ->
 /// decoder then gives; and it gives one for every saved column of less
 /// than 4 GiB.
 #[allow(dead_code)]
-fn decode_unknown<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Option<Vec<Get<'a, V>>>)
+fn decode_unknown<'a, V: ColumnValueRef<C>, C: Codec>(bytes: &'a [u8]) -> (r: Option<Vec<Get<'a, V>>>)
     ensures
-        r matches Some(out) ==> VerifiedColumn::<V, C>::valid(bytes@) && <Get<'a, V> as VGet>::svs(out@)
-            == VerifiedColumn::<V, C>::values(bytes@),
-        VerifiedColumn::<V, C>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Some,
+        r matches Some(out) ==> Column::<V, C>::valid(bytes@) && <Get<'a, V> as VGet>::svs(out@)
+            == Column::<V, C>::values(bytes@),
+        Column::<V, C>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Some,
 {
-    match VerifiedDecoder::<V, C>::try_new(bytes) {
+    match Decoder::<V, C>::try_new(bytes) {
         Ok(dec) => Some(read_all(dec)),
         Err(_) => None,
     }
@@ -5843,12 +5840,12 @@ fn decode_unknown<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Option<Ve
 /// load refuses and a decoder is given of are a saved column that a load
 /// is not sure to take (`loadable`).
 #[allow(dead_code)]
-fn decoded_or_loaded<V: VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: bool)
+fn decoded_or_loaded<V: ColumnValueRef<C>, C: Codec>(bytes: &[u8]) -> (r: bool)
     ensures
         r,
 {
-    let col = VerifiedColumn::<V, C>::load(bytes);
-    let dec = VerifiedDecoder::<V, C>::try_new(bytes);
+    let col = Column::<V, C>::load(bytes);
+    let dec = Decoder::<V, C>::try_new(bytes);
     match (col, dec) {
         (Ok(col), Ok(dec)) => {
             assert(dec.rest() == col@);
@@ -5856,8 +5853,8 @@ fn decoded_or_loaded<V: VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: bool)
         },
         (Ok(_), Err(_)) => bytes.len() > 0xffff_ffff,
         (Err(_), Ok(_)) => {
-            assert(VerifiedColumn::<V, C>::valid(bytes@));
-            assert(!VerifiedColumn::<V, C>::loadable(bytes@));
+            assert(Column::<V, C>::valid(bytes@));
+            assert(!Column::<V, C>::loadable(bytes@));
             true
         },
         (Err(_), Err(_)) => true,
@@ -5870,10 +5867,10 @@ fn decoded_or_loaded<V: VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: bool)
 #[allow(dead_code)]
 fn the_sixth(bytes: &[u8]) -> (r: Option<u64>)
     requires
-        VerifiedColumn::<u64>::valid(bytes@),
+        Column::<u64>::valid(bytes@),
     ensures
         ({
-            let vs = VerifiedColumn::<u64>::values(bytes@);
+            let vs = Column::<u64>::values(bytes@);
             if vs.len() > 5 {
                 r == Some(vs[5])
             } else {
@@ -5881,7 +5878,7 @@ fn the_sixth(bytes: &[u8]) -> (r: Option<u64>)
             }
         }),
 {
-    let mut dec = VerifiedDecoder::<u64>::new(bytes);
+    let mut dec = Decoder::<u64>::new(bytes);
     let ghost vs = dec.rest();
     dec.advance_by(2);
     proof {
@@ -5904,15 +5901,15 @@ fn the_sixth(bytes: &[u8]) -> (r: Option<u64>)
 /// For every value type and codec, and for any saved column: also one
 /// of more values than a column holds.
 #[allow(dead_code)]
-fn recoded_by_runs<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Vec<u8>)
+fn recoded_by_runs<'a, V: ColumnValueRef<C>, C: Codec>(bytes: &'a [u8]) -> (r: Vec<u8>)
     requires
-        VerifiedColumn::<V, C>::valid(bytes@),
+        Column::<V, C>::valid(bytes@),
     ensures
         r@ == bytes@,
 {
-    let mut dec = VerifiedDecoder::<V, C>::new(bytes);
+    let mut dec = Decoder::<V, C>::new(bytes);
     let ghost all = dec.rest();
-    let mut enc = VerifiedEncoder::<'a, V, C>::new();
+    let mut enc = Encoder::<'a, V, C>::new();
     proof {
         assert(enc@ + dec.rest() =~= all);
     }
@@ -5946,7 +5943,7 @@ fn recoded_by_runs<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Vec<u8>)
     }
     let r = enc.save();
     proof {
-        VerifiedColumn::<V, C>::lemma_save_unique(r@, bytes@);
+        Column::<V, C>::lemma_save_unique(r@, bytes@);
     }
     r
 }
@@ -5956,7 +5953,7 @@ fn recoded_by_runs<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Vec<u8>)
 /// after it has given no run it gives none. For every value type and
 /// codec.
 #[allow(dead_code)]
-fn runs_differ<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a, V, C>) -> (r: bool)
+fn runs_differ<'a, V: ColumnValueRef<C>, C: Codec>(dec: &mut Decoder<'a, V, C>) -> (r: bool)
     ensures
         r,
 {
@@ -5983,11 +5980,11 @@ fn runs_differ<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a, V, C>)
 /// values is no run, and the decoder stays where it is.
 #[allow(dead_code)]
 fn a_run_in_parts() {
-    let mut enc = VerifiedEncoder::<u64>::new();
+    let mut enc = Encoder::<u64>::new();
     enc.append_n(7, 5);
     enc.append(9);
     let bytes = enc.save();
-    let mut dec = VerifiedDecoder::<u64>::new(bytes.as_slice());
+    let mut dec = Decoder::<u64>::new(bytes.as_slice());
     let ghost o = dec.rest();
     assert(o =~= seq![7u64, 7, 7, 7, 7, 9]);
     assert(o[0] == 7 && o[1] == 7 && o[2] == 7 && o[3] == 7 && o[4] == 7 && o[5] == 9);
@@ -6020,11 +6017,11 @@ fn a_run_in_parts() {
 /// `false` the third is the `false`.
 #[allow(dead_code)]
 fn nulls_and_flags_decoded() {
-    let mut enc = VerifiedEncoder::<Option<u64>>::new();
+    let mut enc = Encoder::<Option<u64>>::new();
     enc.append_n(None, 3);
     enc.append(Some(4));
     let bytes = enc.save();
-    let mut dec = VerifiedDecoder::<Option<u64>>::new(bytes.as_slice());
+    let mut dec = Decoder::<Option<u64>>::new(bytes.as_slice());
     let ghost o = dec.rest();
     assert(o =~= seq![None, None, None, Some(4u64)]);
     assert(o[0] is None && o[1] is None && o[2] is None && o[3] == Some(4u64));
@@ -6036,11 +6033,11 @@ fn nulls_and_flags_decoded() {
     let c = dec.next();
     assert(c is None);
 
-    let mut flags = VerifiedEncoder::<bool>::new();
+    let mut flags = Encoder::<bool>::new();
     flags.append_n(true, 2);
     flags.append(false);
     let bytes = flags.save();
-    let mut dec = VerifiedDecoder::<bool>::new(bytes.as_slice());
+    let mut dec = Decoder::<bool>::new(bytes.as_slice());
     assert(dec.rest() =~= seq![true, true, false]);
     proof {
         dec.lemma_items_len();
@@ -6056,10 +6053,10 @@ fn nulls_and_flags_decoded() {
 #[allow(dead_code)]
 fn first_text<'a>(bytes: &'a [u8]) -> (r: Option<&'a str>)
     requires
-        VerifiedColumn::<String>::valid(bytes@),
+        Column::<String>::valid(bytes@),
     ensures
         ({
-            let vs = VerifiedColumn::<String>::values(bytes@);
+            let vs = Column::<String>::values(bytes@);
             if vs.len() > 0 {
                 r matches Some(s) && s@ == vs[0]
             } else {
@@ -6067,7 +6064,7 @@ fn first_text<'a>(bytes: &'a [u8]) -> (r: Option<&'a str>)
             }
         }),
 {
-    let mut dec = VerifiedDecoder::<String>::new(bytes);
+    let mut dec = Decoder::<String>::new(bytes);
     dec.next()
 }
 
@@ -6076,10 +6073,10 @@ fn first_text<'a>(bytes: &'a [u8]) -> (r: Option<&'a str>)
 #[allow(dead_code)]
 fn first_bytes<'a>(bytes: &'a [u8]) -> (r: Option<Option<&'a [u8]>>)
     requires
-        VerifiedColumn::<Option<Vec<u8>>>::valid(bytes@),
+        Column::<Option<Vec<u8>>>::valid(bytes@),
     ensures
         ({
-            let vs = VerifiedColumn::<Option<Vec<u8>>>::values(bytes@);
+            let vs = Column::<Option<Vec<u8>>>::values(bytes@);
             if vs.len() > 0 {
                 r matches Some(v) && match v {
                     Some(b) => vs[0] == Some(b@),
@@ -6090,7 +6087,7 @@ fn first_bytes<'a>(bytes: &'a [u8]) -> (r: Option<Option<&'a [u8]>>)
             }
         }),
 {
-    let mut dec = VerifiedDecoder::<Option<Vec<u8>>>::new(bytes);
+    let mut dec = Decoder::<Option<Vec<u8>>>::new(bytes);
     dec.next()
 }
 
@@ -6100,22 +6097,22 @@ fn first_bytes<'a>(bytes: &'a [u8]) -> (r: Option<Option<&'a [u8]>>)
 #[allow(dead_code)]
 fn find_decoded(bytes: &[u8], x: u32) -> (r: (usize, usize))
     requires
-        VerifiedColumn::<u32>::valid(bytes@),
-        VerifiedColumn::<u32>::values(bytes@).len() <= usize::MAX,
+        Column::<u32>::valid(bytes@),
+        Column::<u32>::values(bytes@).len() <= usize::MAX,
         ({
-            let vs = VerifiedColumn::<u32>::values(bytes@);
+            let vs = Column::<u32>::values(bytes@);
             forall|i: int, j: int| 0 <= i <= j < vs.len() ==> vs[i] <= vs[j]
         }),
     ensures
         ({
-            let vs = VerifiedColumn::<u32>::values(bytes@);
+            let vs = Column::<u32>::values(bytes@);
             &&& r.0 + r.1 <= vs.len()
             &&& forall|k: int| 0 <= k < r.0 ==> vs[k] < x
             &&& forall|k: int| r.0 <= k < r.0 + r.1 ==> vs[k] == x
             &&& forall|k: int| r.0 + r.1 <= k < vs.len() ==> vs[k] > x
         }),
 {
-    let mut dec = VerifiedDecoder::<u32>::new(bytes);
+    let mut dec = Decoder::<u32>::new(bytes);
     let ghost vs = dec.rest();
     let r = dec.scan_for(x, usize::MAX);
     proof {
@@ -6144,7 +6141,7 @@ fn find_decoded(bytes: &[u8], x: u32) -> (r: (usize, usize))
 /// value type and codec, from what the order is said to be
 /// ([`VSpec::lemma_below`]).
 #[allow(dead_code)]
-fn scanned_as_searched<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, x: Get<'_, V>) -> (r: bool)
+fn scanned_as_searched<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, x: Get<'_, V>) -> (r: bool)
     requires
         sorted::<V>(col@),
     ensures
@@ -6152,7 +6149,7 @@ fn scanned_as_searched<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedC
 {
     let n = col.len();
     let bytes = col.save();
-    let mut dec = VerifiedDecoder::<V, C>::new(bytes.as_slice());
+    let mut dec = Decoder::<V, C>::new(bytes.as_slice());
     let (skipped, count) = dec.scan_for(x, usize::MAX);
     proof {
         lemma_sorted::<V>(col@, x.sv());
@@ -6208,12 +6205,12 @@ fn scanned_as_searched<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedC
 /// its own.
 #[allow(dead_code)]
 fn after_a_scan() {
-    let mut enc = VerifiedEncoder::<u32>::new();
+    let mut enc = Encoder::<u32>::new();
     enc.append_n(1, 2);
     enc.append_n(5, 2);
     enc.append(7);
     let bytes = enc.save();
-    let dec = VerifiedDecoder::<u32>::new(bytes.as_slice());
+    let dec = Decoder::<u32>::new(bytes.as_slice());
     let ghost o = dec.rest();
     assert(o =~= seq![1u32, 1, 5, 5, 7]);
     assert(o[0] == 1 && o[1] == 1 && o[2] == 5 && o[3] == 5 && o[4] == 7);
@@ -6269,14 +6266,14 @@ fn after_a_scan() {
 /// What `new` says by itself: the decoder has the saved column's values
 /// to give.
 #[allow(dead_code)]
-fn told_by_a_decoder<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: VerifiedDecoder<'a, V, C>)
+fn told_by_a_decoder<'a, V: ColumnValueRef<C>, C: Codec>(bytes: &'a [u8]) -> (r: Decoder<'a, V, C>)
     requires
-        VerifiedColumn::<V, C>::valid(bytes@),
+        Column::<V, C>::valid(bytes@),
     ensures
-        r.rest() == VerifiedColumn::<V, C>::values(bytes@),
-        r.items().len() == VerifiedColumn::<V, C>::values(bytes@).len(),
+        r.rest() == Column::<V, C>::values(bytes@),
+        r.items().len() == Column::<V, C>::values(bytes@).len(),
 {
-    let r = VerifiedDecoder::<V, C>::new(bytes);
+    let r = Decoder::<V, C>::new(bytes);
     proof {
         r.lemma_items_len();
     }
@@ -6287,15 +6284,15 @@ fn told_by_a_decoder<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Verifi
 /// column's values to give; and a saved column of less than 4 GiB is
 /// given one.
 #[allow(dead_code)]
-fn told_by_a_try<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Result<VerifiedDecoder<'a, V, C>, PackError>)
+fn told_by_a_try<'a, V: ColumnValueRef<C>, C: Codec>(bytes: &'a [u8]) -> (r: Result<Decoder<'a, V, C>, PackError>)
     ensures
-        r matches Ok(d) ==> VerifiedColumn::<V, C>::valid(bytes@) && d.rest() == VerifiedColumn::<V, C>::values(
+        r matches Ok(d) ==> Column::<V, C>::valid(bytes@) && d.rest() == Column::<V, C>::values(
             bytes@,
         ),
-        VerifiedColumn::<V, C>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
-        r is Err ==> !VerifiedColumn::<V, C>::valid(bytes@) || bytes@.len() > u32::MAX,
+        Column::<V, C>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
+        r is Err ==> !Column::<V, C>::valid(bytes@) || bytes@.len() > u32::MAX,
 {
-    VerifiedDecoder::<V, C>::try_new(bytes)
+    Decoder::<V, C>::try_new(bytes)
 }
 
 /// What `next` says of any decoder, each thing on its own and with no
@@ -6303,7 +6300,7 @@ fn told_by_a_try<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Result<Ver
 /// them and as specifications have them, and those after it are left;
 /// and a decoder that gives nothing had nothing, and has nothing.
 #[allow(dead_code)]
-fn told_by_a_decoded_value<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a, V, C>) -> (r: Option<Get<'a, V>>)
+fn told_by_a_decoded_value<'a, V: ColumnValueRef<C>, C: Codec>(dec: &mut Decoder<'a, V, C>) -> (r: Option<Get<'a, V>>)
     ensures
         match r {
             Some(v) => {
@@ -6329,7 +6326,7 @@ fn told_by_a_decoded_value<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecode
 /// in either form, and those after it left; or nothing, and nothing
 /// left, where it had no more than `n`.
 #[allow(dead_code)]
-fn told_by_a_decoders_nth<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a, V, C>, n: usize) -> (r: Option<
+fn told_by_a_decoders_nth<'a, V: ColumnValueRef<C>, C: Codec>(dec: &mut Decoder<'a, V, C>, n: usize) -> (r: Option<
     Get<'a, V>,
 >)
     ensures
@@ -6354,7 +6351,7 @@ fn told_by_a_decoders_nth<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder
 /// either form; all of them where `n` is 0, and none where the decoder
 /// had fewer.
 #[allow(dead_code)]
-fn told_by_an_advance<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a, V, C>, n: usize)
+fn told_by_an_advance<'a, V: ColumnValueRef<C>, C: Codec>(dec: &mut Decoder<'a, V, C>, n: usize)
     ensures
         n <= old(dec).rest().len() ==> final(dec).rest() == old(dec).rest().skip(n as int),
         n <= old(dec).items().len() ==> final(dec).items() == old(dec).items().skip(n as int),
@@ -6373,7 +6370,7 @@ fn told_by_an_advance<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a,
 /// had, in either form, counted up to `usize::MAX`; what is left is
 /// those less the run; and no run is given only of no values.
 #[allow(dead_code)]
-fn told_by_a_decoded_run<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a, V, C>) -> (r: Option<
+fn told_by_a_decoded_run<'a, V: ColumnValueRef<C>, C: Codec>(dec: &mut Decoder<'a, V, C>) -> (r: Option<
     Run<Get<'a, V>>,
 >)
     ensures
@@ -6408,7 +6405,7 @@ fn told_by_a_decoded_run<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<
 /// no run is given only of no values or for a `max` of 0, which leaves
 /// the decoder as it was.
 #[allow(dead_code)]
-fn told_by_a_bounded_run<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a, V, C>, max: usize) -> (r: Option<
+fn told_by_a_bounded_run<'a, V: ColumnValueRef<C>, C: Codec>(dec: &mut Decoder<'a, V, C>, max: usize) -> (r: Option<
     Run<Get<'a, V>>,
 >)
     ensures
@@ -6440,8 +6437,8 @@ fn told_by_a_bounded_run<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<
 /// values passed are before the target, and where the target was found
 /// the run of it is passed too.
 #[allow(dead_code)]
-fn told_by_a_decoders_scan<'a, V: VValue<C>, C: VCodec>(
-    dec: &mut VerifiedDecoder<'a, V, C>,
+fn told_by_a_decoders_scan<'a, V: ColumnValueRef<C>, C: Codec>(
+    dec: &mut Decoder<'a, V, C>,
     x: Get<'_, V>,
     max: usize,
 ) -> (r: (usize, usize))
@@ -6478,7 +6475,7 @@ fn told_by_a_decoders_scan<'a, V: VValue<C>, C: VCodec>(
 /// What `clone` says: the copy has the same values left, in either
 /// form; and reading the copy leaves the decoder where it was.
 #[allow(dead_code)]
-fn told_by_a_decoders_copy<'a, V: VValue<C>, C: VCodec>(dec: &VerifiedDecoder<'a, V, C>) -> (r: VerifiedDecoder<
+fn told_by_a_decoders_copy<'a, V: ColumnValueRef<C>, C: Codec>(dec: &Decoder<'a, V, C>) -> (r: Decoder<
     'a,
     V,
     C,
@@ -6498,7 +6495,7 @@ fn told_by_a_decoders_copy<'a, V: VValue<C>, C: VCodec>(dec: &VerifiedDecoder<'a
 /// decoder had (Verus's `peek` of an iterator). So this one knows, of
 /// the value it kept, that it is the last.
 #[allow(dead_code)]
-fn told_by_a_decoders_loop<'a, V: VValue<C>, C: VCodec>(dec: VerifiedDecoder<'a, V, C>) -> (last: Option<Get<'a, V>>)
+fn told_by_a_decoders_loop<'a, V: ColumnValueRef<C>, C: Codec>(dec: Decoder<'a, V, C>) -> (last: Option<Get<'a, V>>)
     ensures
         match last {
             Some(v) => dec.items().len() > 0 && v == dec.items().last(),
@@ -6545,11 +6542,11 @@ proof fn the_run_at_the_head<S>(o: Seq<S>, v: S, n: int, w: S, m: int, max: int)
 /// whose sums fit. For every value type that is summed, and every
 /// codec.
 #[allow(dead_code)]
-fn load_with_sums<V: VSummed + VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<VerifiedPrefixColumn<V, C>>)
+fn load_with_sums<V: PrefixValue + ColumnValueRef<C>, C: Codec>(bytes: &[u8]) -> (r: Option<PrefixColumn<V, C>>)
     ensures
-        VerifiedColumn::<V, C>::loadable(bytes@) && sums_fit::<V>(VerifiedColumn::<V, C>::values(bytes@)) ==> r is Some,
-        r matches Some(c) ==> c@ == VerifiedColumn::<V, C>::values(bytes@) && sums_fit::<V>(c@),
-        !sums_fit::<V>(VerifiedColumn::<V, C>::values(bytes@)) ==> r is None,
+        Column::<V, C>::loadable(bytes@) && sums_fit::<V>(Column::<V, C>::values(bytes@)) ==> r is Some,
+        r matches Some(c) ==> c@ == Column::<V, C>::values(bytes@) && sums_fit::<V>(c@),
+        !sums_fit::<V>(Column::<V, C>::values(bytes@)) ==> r is None,
 {
     load_as_a_kind::<V, C, SumIndex>(bytes)
 }
@@ -6558,12 +6555,12 @@ fn load_with_sums<V: VSummed + VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option
 /// values: bytes of so few load as a prefix column where they load as a
 /// plain one.
 #[allow(dead_code)]
-fn load_short_sums<V: VSummed + VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<VerifiedPrefixColumn<V, C>>)
+fn load_short_sums<V: PrefixValue + ColumnValueRef<C>, C: Codec>(bytes: &[u8]) -> (r: Option<PrefixColumn<V, C>>)
     ensures
-        VerifiedColumn::<V, C>::loadable(bytes@) && VerifiedColumn::<V, C>::values(bytes@).len() <= V::safe() ==> r is Some,
+        Column::<V, C>::loadable(bytes@) && Column::<V, C>::values(bytes@).len() <= V::safe() ==> r is Some,
 {
     proof {
-        let vs = VerifiedColumn::<V, C>::values(bytes@);
+        let vs = Column::<V, C>::values(bytes@);
         if vs.len() <= V::safe() {
             lemma_sums_fit::<V>(vs);
         }
@@ -6575,10 +6572,10 @@ fn load_short_sums<V: VSummed + VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Optio
 /// column is long enough to overflow: whatever loads as a plain column
 /// of them loads as a prefix column.
 #[allow(dead_code)]
-fn load_wide_sums(bytes: &[u8], signed: &[u8]) -> (r: (Option<VerifiedPrefixColumn<u64>>, Option<VerifiedPrefixColumn<Option<i64>>>))
+fn load_wide_sums(bytes: &[u8], signed: &[u8]) -> (r: (Option<PrefixColumn<u64>>, Option<PrefixColumn<Option<i64>>>))
     ensures
-        VerifiedColumn::<u64>::loadable(bytes@) ==> r.0 is Some,
-        VerifiedColumn::<Option<i64>>::loadable(signed@) ==> r.1 is Some,
+        Column::<u64>::loadable(bytes@) ==> r.0 is Some,
+        Column::<Option<i64>>::loadable(signed@) ==> r.1 is Some,
 {
     (load_short_sums::<u64, Leb128>(bytes), load_short_sums::<Option<i64>, Leb128>(signed))
 }
@@ -6586,9 +6583,9 @@ fn load_wide_sums(bytes: &[u8], signed: &[u8]) -> (r: (Option<VerifiedPrefixColu
 /// `u32`s are summed in a `u64`: 2^32 + 1 of them cannot overflow it,
 /// and more can.
 #[allow(dead_code)]
-fn load_small_sums(bytes: &[u8]) -> (r: Option<VerifiedPrefixColumn<u32>>)
+fn load_small_sums(bytes: &[u8]) -> (r: Option<PrefixColumn<u32>>)
     ensures
-        VerifiedColumn::<u32>::loadable(bytes@) && VerifiedColumn::<u32>::values(bytes@).len() <= 0x1_0000_0001 ==> r is Some,
+        Column::<u32>::loadable(bytes@) && Column::<u32>::values(bytes@).len() <= 0x1_0000_0001 ==> r is Some,
         r matches Some(c) ==> summed::<u32>(c@) <= u64::MAX,
 {
     let r = load_short_sums::<u32, Leb128>(bytes);
@@ -6607,7 +6604,7 @@ fn load_small_sums(bytes: &[u8]) -> (r: Option<VerifiedPrefixColumn<u32>>)
 /// What a prefix column holds has sums that fit: what the first `k` of
 /// its values add up to is a sum of the type, for every `k`.
 #[allow(dead_code)]
-proof fn the_sums_of_a_column<V: VSummed + VValue<C>, C: VCodec>(tracked col: &VerifiedPrefixColumn<V, C>, k: int)
+proof fn the_sums_of_a_column<V: PrefixValue + ColumnValueRef<C>, C: Codec>(tracked col: &PrefixColumn<V, C>, k: int)
     requires
         0 <= k <= col@.len(),
     ensures
@@ -6619,7 +6616,7 @@ proof fn the_sums_of_a_column<V: VSummed + VValue<C>, C: VCodec>(tracked col: &V
 /// What is pushed onto a prefix column is in it, and adds what it adds
 /// to a sum that still fits.
 #[allow(dead_code)]
-fn push_within_the_sums<V: VSummed + VValue<C>, C: VCodec>(col: &mut VerifiedPrefixColumn<V, C>, v: Get<'_, V>)
+fn push_within_the_sums<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &mut PrefixColumn<V, C>, v: Get<'_, V>)
     ensures
         final(col)@ == old(col)@.push(v.sv()),
         summed::<V>(final(col)@) == summed::<V>(old(col)@) + V::amount(v.sv()),
@@ -6636,7 +6633,7 @@ fn push_within_the_sums<V: VSummed + VValue<C>, C: VCodec>(col: &mut VerifiedPre
 /// A push that would take the sum of a column of `u32`s past a `u64`
 /// does not return.
 #[allow(dead_code)]
-fn a_push_past_the_sums(col: &mut VerifiedPrefixColumn<u32>, v: u32)
+fn a_push_past_the_sums(col: &mut PrefixColumn<u32>, v: u32)
     requires
         summed::<u32>(old(col)@) + v > u64::MAX,
     ensures
@@ -6648,14 +6645,14 @@ fn a_push_past_the_sums(col: &mut VerifiedPrefixColumn<u32>, v: u32)
 /// Nor does a `fill` of more `u32::MAX`s than a `u64` can add up: there
 /// is no such prefix column.
 #[allow(dead_code)]
-fn a_fill_past_the_sums(len: usize) -> (r: VerifiedPrefixColumn<u32>)
+fn a_fill_past_the_sums(len: usize) -> (r: PrefixColumn<u32>)
     requires
         0x1_0000_0001 < len <= i64::MAX,
         len <= usize::MAX - 3,
     ensures
         false,
 {
-    let c = VerifiedPrefixColumn::<u32>::fill(len, u32::MAX);
+    let c = PrefixColumn::<u32>::fill(len, u32::MAX);
     proof {
         the_sums_of_a_column(&c, c@.len() as int);
         assert(c@.take(c@.len() as int) =~= c@);
@@ -6672,7 +6669,7 @@ fn a_fill_past_the_sums(len: usize) -> (r: VerifiedPrefixColumn<u32>)
 /// A prefix column and a plain column of the same values save the same
 /// bytes.
 #[allow(dead_code)]
-fn saved_alike<V: VSummed + VValue<C>, C: VCodec>(plain: &VerifiedColumn<V, C>, sums: &VerifiedPrefixColumn<V, C>) -> (r: (
+fn saved_alike<V: PrefixValue + ColumnValueRef<C>, C: Codec>(plain: &Column<V, C>, sums: &PrefixColumn<V, C>) -> (r: (
     Vec<u8>,
     Vec<u8>,
 ))
@@ -6688,7 +6685,7 @@ fn saved_alike<V: VSummed + VValue<C>, C: VCodec>(plain: &VerifiedColumn<V, C>, 
 /// copy does not return unless their sums fit: where it does, they
 /// fit.
 #[allow(dead_code)]
-fn summed_up<V: VSummed + VValue<C>, C: VCodec>(plain: &VerifiedColumn<V, C>) -> (r: VerifiedPrefixColumn<V, C>)
+fn summed_up<V: PrefixValue + ColumnValueRef<C>, C: Codec>(plain: &Column<V, C>) -> (r: PrefixColumn<V, C>)
     ensures
         r@ == plain@,
         sums_fit::<V>(plain@),
@@ -6704,7 +6701,7 @@ fn summed_up<V: VSummed + VValue<C>, C: VCodec>(plain: &VerifiedColumn<V, C>) ->
 /// values before the position add up to: an integer, whatever the type
 /// it is kept in.
 #[allow(dead_code)]
-fn the_sum_before<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, i: usize) -> (r: V::Sum)
+fn the_sum_before<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>, i: usize) -> (r: V::Sum)
     requires
         i <= col@.len(),
     ensures
@@ -6716,7 +6713,7 @@ fn the_sum_before<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<
 /// The sum through a position is the sum before it and what the value
 /// there adds.
 #[allow(dead_code)]
-fn the_sum_through<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, i: usize) -> (r: (V::Sum, V::Sum))
+fn the_sum_through<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>, i: usize) -> (r: (V::Sum, V::Sum))
     requires
         i < col@.len(),
     ensures
@@ -6733,7 +6730,7 @@ fn the_sum_through<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn
 /// The sum of a range of positions is what the values there add up to,
 /// which is the sum before its end less the sum before its start.
 #[allow(dead_code)]
-fn the_sum_of_a_range<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, start: usize, end: usize) -> (r: (
+fn the_sum_of_a_range<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>, start: usize, end: usize) -> (r: (
     V::Sum,
     V::Sum,
     V::Sum,
@@ -6758,7 +6755,7 @@ fn the_sum_of_a_range<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixCol
 /// the one from the other does not overflow, for what the range adds up
 /// to is a sum of the type.
 #[allow(dead_code)]
-fn a_range_by_its_ends(col: &VerifiedPrefixColumn<i64>, start: usize, end: usize) -> (r: i128)
+fn a_range_by_its_ends(col: &PrefixColumn<i64>, start: usize, end: usize) -> (r: i128)
     requires
         start <= end <= col@.len(),
     ensures
@@ -6778,7 +6775,7 @@ fn a_range_by_its_ends(col: &VerifiedPrefixColumn<i64>, start: usize, end: usize
 /// The sums take any position: past the end they are the sum of all the
 /// values, and a range that holds no position adds up to nothing.
 #[allow(dead_code)]
-fn sums_past_the_end<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>) -> (r: (V::Sum, V::Sum, V::Sum, V::Sum))
+fn sums_past_the_end<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>) -> (r: (V::Sum, V::Sum, V::Sum, V::Sum))
     ensures
         r.0.as_int() == summed::<V>(col@),
         r.1.as_int() == summed::<V>(col@),
@@ -6794,7 +6791,7 @@ fn sums_past_the_end<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColu
 
 /// A push adds to the sum of a prefix column what the value adds.
 #[allow(dead_code)]
-fn a_sum_after_a_push<V: VSummed + VValue<C>, C: VCodec>(col: &mut VerifiedPrefixColumn<V, C>, v: Get<'_, V>) -> (r: (
+fn a_sum_after_a_push<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &mut PrefixColumn<V, C>, v: Get<'_, V>) -> (r: (
     V::Sum,
     V::Sum,
 ))
@@ -6816,8 +6813,8 @@ fn a_sum_after_a_push<V: VSummed + VValue<C>, C: VCodec>(col: &mut VerifiedPrefi
 /// one: no earlier position's do, and if there is none, all the values
 /// add up to less.
 #[allow(dead_code)]
-fn the_place_of_a_sum<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, target: V::Sum) -> (r: Option<usize>)
-    where V::Sum: VCount
+fn the_place_of_a_sum<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>, target: V::Sum) -> (r: Option<usize>)
+    where V::Sum: UnsignedPrefix
     ensures
         match r {
             Some(i) => {
@@ -6843,7 +6840,7 @@ fn the_place_of_a_sum<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixCol
 /// place found for a target is the target or more, and the sum before
 /// the place ahead of it is less.
 #[allow(dead_code)]
-fn a_sum_and_its_place(col: &VerifiedPrefixColumn<u64>, target: u128) -> (r: Option<(u128, u128)>)
+fn a_sum_and_its_place(col: &PrefixColumn<u64>, target: u128) -> (r: Option<(u128, u128)>)
     ensures
         r matches Some((less, more)) ==> less < target <= more,
 {
@@ -6860,7 +6857,7 @@ fn a_sum_and_its_place(col: &VerifiedPrefixColumn<u64>, target: u128) -> (r: Opt
 /// flags before it are. Where there is none, no more than `k` flags of
 /// the column are `true`.
 #[allow(dead_code)]
-fn the_kth_true(col: &VerifiedPrefixColumn<bool>, k: usize) -> (r: Option<usize>)
+fn the_kth_true(col: &PrefixColumn<bool>, k: usize) -> (r: Option<usize>)
     requires
         k < usize::MAX,
     ensures
@@ -6888,8 +6885,8 @@ fn the_kth_true(col: &VerifiedPrefixColumn<bool>, k: usize) -> (r: Option<usize>
 /// a sum through a position is the one ahead of the place for a sum
 /// before a position, and the first place where that is the first.
 #[allow(dead_code)]
-fn the_two_places<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, target: V::Sum) -> (r: (usize, usize))
-    where V::Sum: VCount
+fn the_two_places<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>, target: V::Sum) -> (r: (usize, usize))
+    where V::Sum: UnsignedPrefix
     ensures
         r.0 == 0 ==> r.1 == 0,
         r.0 > 0 ==> r.1 == r.0 - 1,
@@ -6921,7 +6918,7 @@ fn the_two_places<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<
 /// then holds, for each position, what the values through it add up to.
 /// For every summed type and codec.
 #[allow(dead_code)]
-fn running_sums<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>) -> (out: Vec<V::Sum>)
+fn running_sums<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>) -> (out: Vec<V::Sum>)
     ensures
         out@.len() == col@.len(),
         forall|i: int| 0 <= i < out@.len() ==> (#[trigger] out@[i]).as_int() == summed::<V>(col@.take(i + 1)),
@@ -6947,7 +6944,7 @@ fn running_sums<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V,
 /// before it add up to: counted from the column's start, though the
 /// iterator reads only the range.
 #[allow(dead_code)]
-fn sums_in_a_range<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, a: usize, b: usize) -> (out: Vec<
+fn sums_in_a_range<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &'a PrefixColumn<V, C>, a: usize, b: usize) -> (out: Vec<
     (Get<'a, V>, V::Sum),
 >)
     requires
@@ -6982,7 +6979,7 @@ fn sums_in_a_range<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefi
 /// position, what the values before it add up to and what those through
 /// it do, which is more by what the value adds.
 #[allow(dead_code)]
-fn a_value_with_its_sums<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, i: usize) -> (r: (
+fn a_value_with_its_sums<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &'a PrefixColumn<V, C>, i: usize) -> (r: (
     V::Sum,
     Get<'a, V>,
     V::Sum,
@@ -7002,7 +6999,7 @@ fn a_value_with_its_sums<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a Verifie
 /// The sums that come with a value are the sums the column answers
 /// with for its position.
 #[allow(dead_code)]
-fn sums_two_ways<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, i: usize) -> (r: (
+fn sums_two_ways<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>, i: usize) -> (r: (
     (V::Sum, V::Sum),
     (V::Sum, V::Sum),
 ))
@@ -7029,7 +7026,7 @@ fn sums_two_ways<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V
 /// through the value is the running sum after, and the second is more
 /// by what the value adds.
 #[allow(dead_code)]
-fn a_step_with_its_sums<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'a, V, C>) -> (r: Option<
+fn a_step_with_its_sums<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &mut PrefixIter<'a, V, C>) -> (r: Option<
     (V::Sum, Get<'a, V>, V::Sum),
 >)
     ensures
@@ -7060,7 +7057,7 @@ fn a_step_with_its_sums<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut Verified
 /// where the range ends. It is what the column answers with for the
 /// range.
 #[allow(dead_code)]
-fn summed_by_moving<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, a: usize, b: usize) -> (r: (
+fn summed_by_moving<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>, a: usize, b: usize) -> (r: (
     V::Sum,
     V::Sum,
 ))
@@ -7086,7 +7083,7 @@ fn summed_by_moving<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColum
 /// Two values read with one iterator, which steps over the values
 /// before each: the sums through them count the values stepped over.
 #[allow(dead_code)]
-fn two_skips<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, i: usize, j: usize) -> (r: (V::Sum, V::Sum))
+fn two_skips<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>, i: usize, j: usize) -> (r: (V::Sum, V::Sum))
     requires
         i < j < col@.len(),
     ensures
@@ -7104,7 +7101,7 @@ fn two_skips<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>
 /// running sum is past it: no sum before is, and if there is no such
 /// position, no sum of the column is.
 #[allow(dead_code)]
-fn first_over(col: &VerifiedPrefixColumn<u64>, limit: u128) -> (r: Option<usize>)
+fn first_over(col: &PrefixColumn<u64>, limit: u128) -> (r: Option<usize>)
     ensures
         match r {
             Some(i) => {
@@ -7149,7 +7146,7 @@ fn first_over(col: &VerifiedPrefixColumn<u64>, limit: u128) -> (r: Option<usize>
 /// whether it read them or stepped over them, and a move of the window
 /// alone leaves it.
 #[allow(dead_code)]
-fn moved_with_sums(col: &VerifiedPrefixColumn<u64>)
+fn moved_with_sums(col: &PrefixColumn<u64>)
     requires
         col@.len() == 10,
 {
@@ -7214,7 +7211,7 @@ fn moved_with_sums(col: &VerifiedPrefixColumn<u64>)
 /// its sum counts from: the running sum is what the column's values
 /// from there up to the iterator add up to.
 #[allow(dead_code)]
-fn told_of_the_running_sum<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>) -> (r: V::Sum)
+fn told_of_the_running_sum<V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &PrefixIter<'_, V, C>) -> (r: V::Sum)
     ensures
         it.base_pos() <= it.pos() <= it.column().len(),
         r == it.total(),
@@ -7226,7 +7223,7 @@ fn told_of_the_running_sum<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefi
 /// The running sum under its other name: before the value the iterator
 /// is to give next.
 #[allow(dead_code)]
-fn told_of_the_sum_before<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>) -> (r: V::Sum)
+fn told_of_the_sum_before<V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &PrefixIter<'_, V, C>) -> (r: V::Sum)
     ensures
         it.base_pos() <= it.pos() <= it.column().len(),
         r == it.total(),
@@ -7240,7 +7237,7 @@ fn told_of_the_sum_before<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefix
 /// the sums of the column it reads fit, and that it reads the values
 /// of its column.
 #[allow(dead_code)]
-fn told_of_what_is_left<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>)
+fn told_of_what_is_left<V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &PrefixIter<'_, V, C>)
     ensures
         it.items().len() == it.rest().len(),
         forall|i: int|
@@ -7269,7 +7266,7 @@ fn told_of_what_is_left<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIt
 /// iterator reads the column, has all its values left, and its sum
 /// counts from the column's start and is nothing yet.
 #[allow(dead_code)]
-fn told_by_a_prefix_iter<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>) -> (it: VerifiedPrefixIter<
+fn told_by_a_prefix_iter<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &'a PrefixColumn<V, C>) -> (it: PrefixIter<
     'a,
     V,
     C,
@@ -7290,11 +7287,11 @@ fn told_by_a_prefix_iter<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a Verifie
 /// of the range left, and its sum counts from the column's start, so it
 /// is what the values before the range add up to.
 #[allow(dead_code)]
-fn told_by_a_prefix_iter_range<'a, V: VSummed + VValue<C>, C: VCodec>(
-    col: &'a VerifiedPrefixColumn<V, C>,
+fn told_by_a_prefix_iter_range<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(
+    col: &'a PrefixColumn<V, C>,
     start: usize,
     end: usize,
-) -> (it: VerifiedPrefixIter<'a, V, C>)
+) -> (it: PrefixIter<'a, V, C>)
     requires
         start <= end <= col@.len(),
     ensures
@@ -7311,8 +7308,8 @@ fn told_by_a_prefix_iter_range<'a, V: VSummed + VValue<C>, C: VCodec>(
 
 /// What `get_prefixed` says by itself, of any position.
 #[allow(dead_code)]
-fn told_by_a_get_prefixed<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, index: usize) -> (r: Option<
-    VerifiedPrefixedValue<'a, V>,
+fn told_by_a_get_prefixed<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &'a PrefixColumn<V, C>, index: usize) -> (r: Option<
+    PrefixedValue<'a, V>,
 >)
     ensures
         index < col@.len() ==> {
@@ -7331,7 +7328,7 @@ fn told_by_a_get_prefixed<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a Verifi
 /// is the one it holds, and the sum before is that less what the value
 /// adds, in the arithmetic of the sums' type.
 #[allow(dead_code)]
-fn told_by_a_prefixed_value<'a, V: VSummed>(pv: &VerifiedPrefixedValue<'a, V>) -> (r: (V::Sum, V::Sum))
+fn told_by_a_prefixed_value<'a, V: PrefixValue>(pv: &PrefixedValue<'a, V>) -> (r: (V::Sum, V::Sum))
     ensures
         r.0 == pv.total,
         r.1 == V::Sum::of_int(pv.total.as_int() - V::amount(pv.value.sv())),
@@ -7347,8 +7344,8 @@ fn told_by_a_prefixed_value<'a, V: VSummed>(pv: &VerifiedPrefixedValue<'a, V>) -
 /// words of the iterator's own specification, and in those of Verus's
 /// specification of an iterator.
 #[allow(dead_code)]
-fn told_by_a_prefixed_next<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'a, V, C>) -> (r: Option<
-    VerifiedPrefixedValue<'a, V>,
+fn told_by_a_prefixed_next<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &mut PrefixIter<'a, V, C>) -> (r: Option<
+    PrefixedValue<'a, V>,
 >)
     ensures
         match r {
@@ -7383,8 +7380,8 @@ fn told_by_a_prefixed_next<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut Verif
 
 /// What `nth` says by itself of a prefix column's iterator.
 #[allow(dead_code)]
-fn told_by_a_prefixed_nth<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'a, V, C>, n: usize) -> (r: Option<
-    VerifiedPrefixedValue<'a, V>,
+fn told_by_a_prefixed_nth<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &mut PrefixIter<'a, V, C>, n: usize) -> (r: Option<
+    PrefixedValue<'a, V>,
 >)
     ensures
         n < old(it).rest().len() ==> {
@@ -7418,7 +7415,7 @@ fn told_by_a_prefixed_nth<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut Verifi
 /// themselves. Asked where it stands, it says where: within its
 /// window, in its column and not before where its sum counts from.
 #[allow(dead_code)]
-fn told_by_a_prefix_iters_place<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>) -> (r: usize)
+fn told_by_a_prefix_iters_place<V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &PrefixIter<'_, V, C>) -> (r: usize)
     ensures
         r == it.pos(),
         it.base_pos() <= it.pos() <= it.end_pos(),
@@ -7435,7 +7432,7 @@ fn told_by_a_prefix_iters_place<V: VSummed + VValue<C>, C: VCodec>(it: &Verified
 /// an iterator says each: the first counts positions, which may be
 /// past the column, and the second values.
 #[allow(dead_code)]
-fn told_by_a_prefix_iters_count<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>) -> (r: (
+fn told_by_a_prefix_iters_count<V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &PrefixIter<'_, V, C>) -> (r: (
     usize,
     usize,
 ))
@@ -7450,7 +7447,7 @@ fn told_by_a_prefix_iters_count<V: VSummed + VValue<C>, C: VCodec>(it: &Verified
 /// Asked how many values it may yet give, an iterator says exactly how
 /// many it has left, as its least and as its most.
 #[allow(dead_code)]
-fn told_by_a_prefix_size_hint<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>) -> (r: (
+fn told_by_a_prefix_size_hint<V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &PrefixIter<'_, V, C>) -> (r: (
     usize,
     Option<usize>,
 ))
@@ -7464,7 +7461,7 @@ fn told_by_a_prefix_size_hint<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPr
 
 /// Asked for the window's end alone, an iterator says as much.
 #[allow(dead_code)]
-fn told_by_a_prefix_iters_end<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>) -> (r: usize)
+fn told_by_a_prefix_iters_end<V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &PrefixIter<'_, V, C>) -> (r: usize)
     ensures
         r == it.end_pos(),
         it.base_pos() <= it.pos() <= it.end_pos(),
@@ -7480,7 +7477,7 @@ fn told_by_a_prefix_iters_end<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPr
 /// What `reset_prefix` says by itself: the iterator and its window stay,
 /// and its sum counts from where it stands and is nothing yet.
 #[allow(dead_code)]
-fn told_by_a_reset<V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'_, V, C>)
+fn told_by_a_reset<V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &mut PrefixIter<'_, V, C>)
     ensures
         final(it).rest() == old(it).rest(),
         final(it).column() == old(it).column(),
@@ -7495,7 +7492,7 @@ fn told_by_a_reset<V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIte
 
 /// What `set_max` says by itself of a prefix column's iterator.
 #[allow(dead_code)]
-fn told_by_a_prefix_set_max<V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'_, V, C>, end: usize)
+fn told_by_a_prefix_set_max<V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &mut PrefixIter<'_, V, C>, end: usize)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -7514,7 +7511,7 @@ fn told_by_a_prefix_set_max<V: VSummed + VValue<C>, C: VCodec>(it: &mut Verified
 
 /// What `advance_to` says by itself of a prefix column's iterator.
 #[allow(dead_code)]
-fn told_by_a_prefix_advance_to<V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'_, V, C>, target: usize)
+fn told_by_a_prefix_advance_to<V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &mut PrefixIter<'_, V, C>, target: usize)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -7539,7 +7536,7 @@ fn told_by_a_prefix_advance_to<V: VSummed + VValue<C>, C: VCodec>(it: &mut Verif
 
 /// What `advance_by` says by itself of a prefix column's iterator.
 #[allow(dead_code)]
-fn told_by_a_prefix_advance_by<V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'_, V, C>, amount: usize)
+fn told_by_a_prefix_advance_by<V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &mut PrefixIter<'_, V, C>, amount: usize)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -7560,7 +7557,7 @@ fn told_by_a_prefix_advance_by<V: VSummed + VValue<C>, C: VCodec>(it: &mut Verif
 
 /// What `shift` says by itself of a prefix column's iterator.
 #[allow(dead_code)]
-fn told_by_a_prefix_shift<V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'_, V, C>, range: Range<usize>)
+fn told_by_a_prefix_shift<V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &mut PrefixIter<'_, V, C>, range: Range<usize>)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -7603,10 +7600,10 @@ fn told_by_a_prefix_shift<V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPr
 
 /// What `shift_next` says by itself of a prefix column's iterator.
 #[allow(dead_code)]
-fn told_by_a_prefix_shift_next<'a, V: VSummed + VValue<C>, C: VCodec>(
-    it: &mut VerifiedPrefixIter<'a, V, C>,
+fn told_by_a_prefix_shift_next<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(
+    it: &mut PrefixIter<'a, V, C>,
     range: Range<usize>,
-) -> (r: Option<VerifiedPrefixedValue<'a, V>>)
+) -> (r: Option<PrefixedValue<'a, V>>)
     requires
         range.start >= old(it).pos(),
     ensures
@@ -7649,7 +7646,7 @@ fn told_by_a_prefix_shift_next<'a, V: VSummed + VValue<C>, C: VCodec>(
 /// runs' counts have added up to its length. For every summed type and
 /// codec.
 #[allow(dead_code)]
-fn summed_by_runs<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>) -> (r: (V::Sum, usize))
+fn summed_by_runs<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>) -> (r: (V::Sum, usize))
     ensures
         r.0.as_int() == summed::<V>(col@),
         r.1 == col@.len(),
@@ -7684,7 +7681,7 @@ fn summed_by_runs<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<
 /// no more, and the running sum grows by what the run's value adds, as
 /// many times as the run is long.
 #[allow(dead_code)]
-fn a_run_with_its_sums<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'a, V, C>) -> (r: Option<
+fn a_run_with_its_sums<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &mut PrefixIter<'a, V, C>) -> (r: Option<
     (usize, Get<'a, V>, V::Sum),
 >)
     ensures
@@ -7710,14 +7707,14 @@ fn a_run_with_its_sums<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedP
 /// has left are those of the values it has left, and spliced into a new
 /// column they make a column of those values.
 #[allow(dead_code)]
-fn sums_copied_by_runs<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, a: usize, b: usize) -> (r:
-    VerifiedColumn<V, C, LenIndex>)
+fn sums_copied_by_runs<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>, a: usize, b: usize) -> (r:
+    Column<V, C, LenIndex>)
     requires
         a <= b <= col@.len(),
     ensures
         r@ == col@.subrange(a as int, b as int),
 {
-    let mut r = VerifiedColumn::<V, C, LenIndex>::new();
+    let mut r = Column::<V, C, LenIndex>::new();
     let it = col.prefix_iter_range(a, b);
     proof {
         it.plain().lemma_items_len();
@@ -7733,10 +7730,10 @@ fn sums_copied_by_runs<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixCo
 /// index: the values before it add up to `n` at most; and if there is no
 /// such place, all the column's values do.
 #[allow(dead_code)]
-fn found_by_its_sum<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, n: V::Sum) -> (r: Option<
+fn found_by_its_sum<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &'a PrefixColumn<V, C>, n: V::Sum) -> (r: Option<
     (usize, Get<'a, V>),
 >)
-    where V::Sum: VCount
+    where V::Sum: UnsignedPrefix
     ensures
         match r {
             Some((i, v)) => {
@@ -7757,7 +7754,7 @@ fn found_by_its_sum<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPref
 /// In a column of `u64`s, the search by the index finds the place that
 /// reading on finds ([`first_over`]), or none where that finds none.
 #[allow(dead_code)]
-fn first_over_two_ways(col: &VerifiedPrefixColumn<u64>, limit: u128) -> (r: (Option<usize>, Option<usize>))
+fn first_over_two_ways(col: &PrefixColumn<u64>, limit: u128) -> (r: (Option<usize>, Option<usize>))
     ensures
         r.0 == r.1,
 {
@@ -7767,7 +7764,7 @@ fn first_over_two_ways(col: &VerifiedPrefixColumn<u64>, limit: u128) -> (r: (Opt
         None => None,
     };
     proof {
-        <u128 as VCount>::lemma_count();
+        <u128 as UnsignedPrefix>::lemma_count();
         match (read, found) {
             (Some(i), Some(k)) => {
                 if i < k {
@@ -7793,7 +7790,7 @@ fn first_over_two_ways(col: &VerifiedPrefixColumn<u64>, limit: u128) -> (r: (Opt
 /// What the values of a range add up to, said two ways: by `delta`,
 /// asked for the value after the range, and by `sum_range`.
 #[allow(dead_code)]
-fn a_range_two_ways<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, a: usize, b: usize) -> (r: (
+fn a_range_two_ways<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>, a: usize, b: usize) -> (r: (
     V::Sum,
     V::Sum,
 ))
@@ -7817,10 +7814,10 @@ fn a_range_two_ways<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColum
 /// is sure to be given back: where it stood, with the same values left
 /// and the same running sum, counted from the same place.
 #[allow(dead_code)]
-fn handed_over_with_its_sum<'a, V: VSummed + VValue<C>, C: VCodec>(
-    it: VerifiedPrefixIter<'_, V, C>,
-    col: &'a VerifiedPrefixColumn<V, C>,
-) -> (on: VerifiedPrefixIter<'a, V, C>)
+fn handed_over_with_its_sum<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(
+    it: PrefixIter<'_, V, C>,
+    col: &'a PrefixColumn<V, C>,
+) -> (on: PrefixIter<'a, V, C>)
     requires
         it.source() == Some(*col),
     ensures
@@ -7851,7 +7848,7 @@ fn handed_over_with_its_sum<'a, V: VSummed + VValue<C>, C: VCodec>(
 /// edited, it is sure to be given, and its sum goes on to count from
 /// `a`: read to `b`, it is what the values of `a..b` add up to.
 #[allow(dead_code)]
-fn summed_in_two_goes<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, a: usize, m: usize, b: usize) -> (r:
+fn summed_in_two_goes<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixColumn<V, C>, a: usize, m: usize, b: usize) -> (r:
     V::Sum)
     requires
         a <= m <= b <= col@.len(),
@@ -7875,7 +7872,7 @@ fn summed_in_two_goes<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixCol
 /// edits that one does; after a push the column counts one more, and
 /// refuses the state.
 #[allow(dead_code)]
-fn sums_ended_by_a_push<V: VSummed + VValue<C>, C: VCodec>(col: &mut VerifiedPrefixColumn<V, C>, v: Get<'_, V>) -> (r: bool)
+fn sums_ended_by_a_push<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &mut PrefixColumn<V, C>, v: Get<'_, V>) -> (r: bool)
     ensures
         !r,
         final(col)@ == old(col)@.push(v.sv()),
@@ -7892,7 +7889,7 @@ fn sums_ended_by_a_push<V: VSummed + VValue<C>, C: VCodec>(col: &mut VerifiedPre
 /// iterator of no column: what each call leaves, in a column of ten
 /// `u64`s.
 #[allow(dead_code)]
-fn found_with_sums(col: &VerifiedPrefixColumn<u64>)
+fn found_with_sums(col: &PrefixColumn<u64>)
     requires
         col@.len() == 10,
 {
@@ -7921,7 +7918,7 @@ fn found_with_sums(col: &VerifiedPrefixColumn<u64>)
     let f = col.delta(2, 10);
     assert(f is None);
     // an iterator of no column: nothing to give, to find or to pass
-    let mut no = VerifiedPrefixIter::<u64>::default();
+    let mut no = PrefixIter::<u64>::default();
     let (p, e, n, t) = (no.pos(), no.end_pos(), no.len(), no.total());
     assert(p == 0 && e == 0 && n == 0 && t == 0);
     let x = no.next_run();
@@ -7933,8 +7930,8 @@ fn found_with_sums(col: &VerifiedPrefixColumn<u64>)
 
 /// What `next_run` says by itself of a prefix column's iterator.
 #[allow(dead_code)]
-fn told_by_a_prefix_next_run<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'a, V, C>) -> (r: Option<
-    Run<VerifiedPrefixedValue<'a, V>>,
+fn told_by_a_prefix_next_run<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &mut PrefixIter<'a, V, C>) -> (r: Option<
+    Run<PrefixedValue<'a, V>>,
 >)
     ensures
         final(it).column() == old(it).column(),
@@ -7970,7 +7967,7 @@ fn told_by_a_prefix_next_run<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut Ver
 /// iterator it is made of, which is the prefix column's without its
 /// sums, and so stands where that stood with the same values left.
 #[allow(dead_code)]
-fn told_by_a_prefix_runs<'a, V: VSummed + VValue<C>, C: VCodec>(it: VerifiedPrefixIter<'a, V, C>) -> (r: VerifiedRuns<
+fn told_by_a_prefix_runs<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: PrefixIter<'a, V, C>) -> (r: Runs<
     'a,
     V,
     C,
@@ -7989,8 +7986,8 @@ fn told_by_a_prefix_runs<'a, V: VSummed + VValue<C>, C: VCodec>(it: VerifiedPref
 
 /// What `delta_nth` says by itself of a prefix column's iterator.
 #[allow(dead_code)]
-fn told_by_a_delta_nth<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'a, V, C>, n: usize) -> (r: Option<
-    VerifiedPrefixSeek<'a, V>,
+fn told_by_a_delta_nth<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &mut PrefixIter<'a, V, C>, n: usize) -> (r: Option<
+    PrefixSeek<'a, V>,
 >)
     ensures
         n < old(it).rest().len() ==> {
@@ -8026,9 +8023,9 @@ fn told_by_a_delta_nth<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedP
 /// What `advance_prefix` says by itself of a prefix column's iterator,
 /// where sums are never negative.
 #[allow(dead_code)]
-fn told_by_an_advance_prefix<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'a, V, C>, n: V::Sum) -> (r:
-    Option<VerifiedPrefixSeek<'a, V>>)
-    where V::Sum: VCount
+fn told_by_an_advance_prefix<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &mut PrefixIter<'a, V, C>, n: V::Sum) -> (r:
+    Option<PrefixSeek<'a, V>>)
+    where V::Sum: UnsignedPrefix
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -8067,10 +8064,10 @@ fn told_by_an_advance_prefix<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut Ver
 /// What `suspend` says by itself of a prefix column's iterator, and
 /// what its state says of where its sum counts from.
 #[allow(dead_code)]
-fn told_by_a_prefix_suspend<'a, V: VSummed + VValue<C>, C: VCodec>(
-    it: &VerifiedPrefixIter<'a, V, C>,
-    col: &VerifiedPrefixColumn<V, C>,
-) -> (s: VerifiedPrefixIterState<V>)
+fn told_by_a_prefix_suspend<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(
+    it: &PrefixIter<'a, V, C>,
+    col: &PrefixColumn<V, C>,
+) -> (s: PrefixIterState<V>)
     ensures
         s.pos() == it.pos(),
         s.end_pos() == it.end_pos(),
@@ -8089,10 +8086,10 @@ fn told_by_a_prefix_suspend<'a, V: VSummed + VValue<C>, C: VCodec>(
 /// What `try_resume` says by itself, of any state of a prefix column's
 /// iterator and any prefix column, each thing asked for on its own.
 #[allow(dead_code)]
-fn told_by_a_prefix_resume<'a, V: VSummed + VValue<C>, C: VCodec>(
-    s: &VerifiedPrefixIterState<V>,
-    col: &'a VerifiedPrefixColumn<V, C>,
-) -> (r: Result<VerifiedPrefixIter<'a, V, C>, PackError>)
+fn told_by_a_prefix_resume<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(
+    s: &PrefixIterState<V>,
+    col: &'a PrefixColumn<V, C>,
+) -> (r: Result<PrefixIter<'a, V, C>, PackError>)
     ensures
         r is Ok <==> s.fits(col),
         r is Ok ==> s.edits() == col.edits(),
@@ -8111,7 +8108,7 @@ fn told_by_a_prefix_resume<'a, V: VSummed + VValue<C>, C: VCodec>(
 /// edits, and the state is a place in the column as a plain iterator's
 /// state is.
 #[allow(dead_code)]
-fn told_by_a_prefix_states_fit<V: VSummed + VValue<C>, C: VCodec>(s: &VerifiedPrefixIterState<V>, col: &VerifiedPrefixColumn<V, C>)
+fn told_by_a_prefix_states_fit<V: PrefixValue + ColumnValueRef<C>, C: Codec>(s: &PrefixIterState<V>, col: &PrefixColumn<V, C>)
     requires
         s.fits(col),
     ensures
@@ -8127,7 +8124,7 @@ fn told_by_a_prefix_states_fit<V: VSummed + VValue<C>, C: VCodec>(s: &VerifiedPr
 
 /// What `clone` says by itself of a prefix column's iterator.
 #[allow(dead_code)]
-fn told_by_a_prefix_clone<'a, V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'a, V, C>) -> (r: VerifiedPrefixIter<
+fn told_by_a_prefix_clone<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(it: &PrefixIter<'a, V, C>) -> (r: PrefixIter<
     'a,
     V,
     C,
@@ -8147,7 +8144,7 @@ fn told_by_a_prefix_clone<'a, V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPr
 
 /// What `default` says by itself of a prefix column's iterator.
 #[allow(dead_code)]
-fn told_by_a_prefix_default<'a, V: VSummed + VValue<C>, C: VCodec>() -> (r: VerifiedPrefixIter<'a, V, C>)
+fn told_by_a_prefix_default<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>() -> (r: PrefixIter<'a, V, C>)
     ensures
         r.items().len() == 0,
         r.rest().len() == 0,
@@ -8158,13 +8155,13 @@ fn told_by_a_prefix_default<'a, V: VSummed + VValue<C>, C: VCodec>() -> (r: Veri
         r.base_pos() == 0,
         r.total().as_int() == 0,
 {
-    VerifiedPrefixIter::<V, C>::default()
+    PrefixIter::<V, C>::default()
 }
 
 /// What `delta` says by itself, of any two positions in order.
 #[allow(dead_code)]
-fn told_by_a_column_delta<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, from: usize, to: usize) -> (r:
-    Option<VerifiedPrefixSeek<'a, V>>)
+fn told_by_a_column_delta<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &'a PrefixColumn<V, C>, from: usize, to: usize) -> (r:
+    Option<PrefixSeek<'a, V>>)
     requires
         from <= to,
     ensures
@@ -8185,7 +8182,7 @@ fn told_by_a_column_delta<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a Verifi
 /// What a value found says of itself: its parts are there to read, and
 /// a copy of it is the same.
 #[allow(dead_code)]
-fn told_by_a_prefix_seek<'a, V: VSummed>(seek: &VerifiedPrefixSeek<'a, V>) -> (r: (usize, V::Sum, VerifiedPrefixedValue<'a, V>))
+fn told_by_a_prefix_seek<'a, V: PrefixValue>(seek: &PrefixSeek<'a, V>) -> (r: (usize, V::Sum, PrefixedValue<'a, V>))
     ensures
         r.0 == seek.pos,
         r.1 == seek.delta,
@@ -8286,7 +8283,7 @@ fn a_meta(kind: u8, len: u64) -> (r: Meta)
 /// What one, two and three values add up to: a client's own unfolding
 /// of [`summed`], which it can read.
 #[allow(dead_code)]
-proof fn the_sum_of_three<V: VSummed>(a: <V as VSpec>::S, b: <V as VSpec>::S, c: <V as VSpec>::S)
+proof fn the_sum_of_three<V: PrefixValue>(a: <V as VSpec>::S, b: <V as VSpec>::S, c: <V as VSpec>::S)
     ensures
         summed::<V>(seq![a]) == V::amount(a),
         summed::<V>(seq![a, b]) == V::amount(a) + V::amount(b),
@@ -8309,7 +8306,7 @@ fn lengths_added_up(a: Meta, b: Meta, c: Meta) -> (r: (u64, u64))
         r.0 == length_of(a) + length_of(b),
         r.1 == length_of(a) + length_of(b) + length_of(c),
 {
-    let mut col = VerifiedPrefixColumn::<Meta>::new();
+    let mut col = PrefixColumn::<Meta>::new();
     col.push(a);
     col.push(b);
     col.push(c);
@@ -8328,7 +8325,7 @@ fn a_null_has_no_length(a: Meta, b: Meta) -> (r: u64)
     ensures
         r == length_of(a) + length_of(b),
 {
-    let mut col = VerifiedPrefixColumn::<Option<Meta>>::new();
+    let mut col = PrefixColumn::<Option<Meta>>::new();
     col.push(Some(a));
     col.push(None);
     col.push(Some(b));
@@ -8345,9 +8342,9 @@ fn a_null_has_no_length(a: Meta, b: Meta) -> (r: u64)
 /// plain one. And whatever loads as one has lengths that add up to a
 /// `u64`.
 #[allow(dead_code)]
-fn load_lengths(bytes: &[u8]) -> (r: Option<VerifiedPrefixColumn<Meta>>)
+fn load_lengths(bytes: &[u8]) -> (r: Option<PrefixColumn<Meta>>)
     ensures
-        VerifiedColumn::<Meta>::loadable(bytes@) && VerifiedColumn::<Meta>::values(bytes@).len() <= 16 ==> r is Some,
+        Column::<Meta>::loadable(bytes@) && Column::<Meta>::values(bytes@).len() <= 16 ==> r is Some,
         r matches Some(c) ==> summed::<Meta>(c@) <= u64::MAX,
 {
     let r = load_short_sums::<Meta, Leb128>(bytes);
@@ -8366,7 +8363,7 @@ fn load_lengths(bytes: &[u8]) -> (r: Option<VerifiedPrefixColumn<Meta>>)
 /// A push that would take the lengths of a column past a `u64` does
 /// not return.
 #[allow(dead_code)]
-fn a_length_past_the_sums(col: &mut VerifiedPrefixColumn<Meta>, v: Meta)
+fn a_length_past_the_sums(col: &mut PrefixColumn<Meta>, v: Meta)
     requires
         summed::<Meta>(old(col)@) + length_of(v) > u64::MAX,
     ensures
@@ -8380,7 +8377,7 @@ fn a_length_past_the_sums(col: &mut VerifiedPrefixColumn<Meta>, v: Meta)
 /// most, and with it they are longer. Where there is none, all the
 /// values are together `n` long at most.
 #[allow(dead_code)]
-fn the_value_at(col: &VerifiedPrefixColumn<Meta>, n: u64) -> (r: Option<usize>)
+fn the_value_at(col: &PrefixColumn<Meta>, n: u64) -> (r: Option<usize>)
     requires
         n < u64::MAX,
     ensures
@@ -8406,8 +8403,8 @@ fn the_value_at(col: &VerifiedPrefixColumn<Meta>, n: u64) -> (r: Option<usize>)
 /// of a sum in it, and a column of nulls and values summed run by run.
 #[allow(dead_code)]
 fn sums_of_the_clients_own(
-    col: &VerifiedPrefixColumn<Meta>,
-    nullable: &VerifiedPrefixColumn<Option<Meta>>,
+    col: &PrefixColumn<Meta>,
+    nullable: &PrefixColumn<Option<Meta>>,
     target: u64,
 ) -> (r: (Vec<u64>, Option<usize>, (u64, usize)))
     ensures
@@ -8726,7 +8723,7 @@ fn marks_added_up(a: Mark, b: Mark, c: Mark) -> (r: (Flags, Flags))
         r.0 == Flags(flag_of(a) ^ flag_of(b)),
         r.1 == Flags(flag_of(a) ^ flag_of(b) ^ flag_of(c)),
 {
-    let mut col = VerifiedAccColumn::<Mark>::new();
+    let mut col = AccColumn::<Mark>::new();
     col.push(a);
     col.push(b);
     col.push(c);
@@ -8745,7 +8742,7 @@ fn a_null_adds_no_mark(a: Mark, b: Mark) -> (r: Flags)
     ensures
         r == Flags(flag_of(a) ^ flag_of(b)),
 {
-    let mut col = VerifiedAccColumn::<Option<Mark>>::new();
+    let mut col = AccColumn::<Option<Mark>>::new();
     col.push(Some(a));
     col.push(None);
     col.push(Some(b));
@@ -8764,7 +8761,7 @@ fn a_null_adds_no_mark(a: Mark, b: Mark) -> (r: Flags)
 /// where the position is past the end. For every type an accumulator
 /// column holds, and every codec.
 #[allow(dead_code)]
-fn told_by_an_acc_prefix<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, index: usize) -> (r:
+fn told_by_an_acc_prefix<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, index: usize) -> (r:
     V::Acc)
     ensures
         index <= col@.len() ==> r == accumulated::<V>(col@.take(index as int)),
@@ -8776,7 +8773,7 @@ fn told_by_an_acc_prefix<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedA
 /// What `get_total` says, on its own: what the values through the
 /// position add up to.
 #[allow(dead_code)]
-fn told_by_an_acc_total<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, index: usize) -> (r:
+fn told_by_an_acc_total<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, index: usize) -> (r:
     V::Acc)
     ensures
         index < col@.len() ==> r == accumulated::<V>(col@.take(index + 1)),
@@ -8789,8 +8786,8 @@ fn told_by_an_acc_total<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAc
 /// up to, of those of them that the column has, and nothing where there
 /// are none.
 #[allow(dead_code)]
-fn told_by_an_acc_range<V: VAccumulated + VValue<C>, C: VCodec>(
-    col: &VerifiedAccColumn<V, C>,
+fn told_by_an_acc_range<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+    col: &AccColumn<V, C>,
     start: usize,
     end: usize,
 ) -> (r: V::Acc)
@@ -8885,8 +8882,8 @@ fn added_then_taken_away<A: VAccum>(a: &A, b: &A) -> (r: A)
 /// range do, is what those before its end do: the three answers of a
 /// column agree, whatever the accumulator and in the order it adds.
 #[allow(dead_code)]
-fn a_range_added_after<V: VAccumulated + VValue<C>, C: VCodec>(
-    col: &VerifiedAccColumn<V, C>,
+fn a_range_added_after<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+    col: &AccColumn<V, C>,
     start: usize,
     end: usize,
 ) -> (r: (V::Acc, V::Acc, V::Acc))
@@ -8907,8 +8904,8 @@ fn a_range_added_after<V: VAccumulated + VValue<C>, C: VCodec>(
 /// It is what `sum_range` answers, by the laws of the accumulator
 /// alone.
 #[allow(dead_code)]
-fn a_range_by_taking_away<V: VAccumulated + VValue<C>, C: VCodec>(
-    col: &VerifiedAccColumn<V, C>,
+fn a_range_by_taking_away<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+    col: &AccColumn<V, C>,
     start: usize,
     end: usize,
 ) -> (r: V::Acc)
@@ -8932,10 +8929,10 @@ fn a_range_by_taking_away<V: VAccumulated + VValue<C>, C: VCodec>(
 /// wherever they load as a plain column, with the values a plain column
 /// would have of them.
 #[allow(dead_code)]
-fn load_as_an_acc<V: VAccumulated + VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<VerifiedAccColumn<V, C>>)
+fn load_as_an_acc<V: VAccumulated + ColumnValueRef<C>, C: Codec>(bytes: &[u8]) -> (r: Option<AccColumn<V, C>>)
     ensures
-        VerifiedColumn::<V, C>::loadable(bytes@) ==> r is Some,
-        r matches Some(c) ==> c@ == VerifiedColumn::<V, C>::values(bytes@),
+        Column::<V, C>::loadable(bytes@) ==> r is Some,
+        r matches Some(c) ==> c@ == Column::<V, C>::values(bytes@),
 {
     load_as_a_kind::<V, C, AccIndex>(bytes)
 }
@@ -8943,7 +8940,7 @@ fn load_as_an_acc<V: VAccumulated + VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: O
 /// A plain column's values as an accumulator column, made of its runs:
 /// there is one of any values.
 #[allow(dead_code)]
-fn added_up<V: VAccumulated + VValue<C>, C: VCodec>(plain: &VerifiedColumn<V, C>) -> (r: VerifiedAccColumn<V, C>)
+fn added_up<V: VAccumulated + ColumnValueRef<C>, C: Codec>(plain: &Column<V, C>) -> (r: AccColumn<V, C>)
     ensures
         r@ == plain@,
 {
@@ -8954,7 +8951,7 @@ fn added_up<V: VAccumulated + VValue<C>, C: VCodec>(plain: &VerifiedColumn<V, C>
 /// are those that were open before the position, with the mark's kind
 /// opened, or closed where it was open.
 #[allow(dead_code)]
-fn a_mark_put_in(col: &mut VerifiedAccColumn<Mark>, at: usize, v: Mark) -> (r: Flags)
+fn a_mark_put_in(col: &mut AccColumn<Mark>, at: usize, v: Mark) -> (r: Flags)
     requires
         at <= old(col)@.len(),
     ensures
@@ -8974,7 +8971,7 @@ fn a_mark_put_in(col: &mut VerifiedAccColumn<Mark>, at: usize, v: Mark) -> (r: F
 /// the accumulator's to do in one step where it has a shorter way. For
 /// every type of a client's that says what its values add.
 #[allow(dead_code)]
-fn added_by_runs<T: VAdds, C: VCodec>(col: &VerifiedAccColumn<T, C>) -> (r: <T as VAdds>::Acc)
+fn added_by_runs<T: VAdds, C: Codec>(col: &AccColumn<T, C>) -> (r: <T as VAdds>::Acc)
     ensures
         r == accumulated::<T>(col@),
 {
@@ -9034,10 +9031,10 @@ fn steps_in_order() -> (r: (Board, Board))
 {
     let turn = Step(3);
     let light = Step(4);
-    let mut one = VerifiedAccColumn::<Step>::new();
+    let mut one = AccColumn::<Step>::new();
     one.push(turn);
     one.push(light);
-    let mut other = VerifiedAccColumn::<Step>::new();
+    let mut other = AccColumn::<Step>::new();
     other.push(light);
     other.push(turn);
     proof {
@@ -9061,7 +9058,7 @@ fn steps_in_order() -> (r: (Board, Board))
 /// it add up to. For every type an accumulator column holds, and every
 /// codec.
 #[allow(dead_code)]
-fn running_accs<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>) -> (out: Vec<V::Acc>)
+fn running_accs<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>) -> (out: Vec<V::Acc>)
     ensures
         out@.len() == col@.len(),
         forall|i: int| 0 <= i < out@.len() ==> #[trigger] out@[i] == accumulated::<V>(col@.take(i + 1)),
@@ -9087,7 +9084,7 @@ fn running_accs<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<
 /// values before it add up to: counted from the column's start, though
 /// the iterator reads only the range.
 #[allow(dead_code)]
-fn accs_in_a_range<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, a: usize, b: usize) -> (out:
+fn accs_in_a_range<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, a: usize, b: usize) -> (out:
     Vec<(Get<'a, V>, V::Acc)>)
     requires
         a <= b <= col@.len(),
@@ -9121,7 +9118,7 @@ fn accs_in_a_range<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a Verified
 /// position, what the values before it add up to and what those through
 /// it do, which is the first and then what the value adds.
 #[allow(dead_code)]
-fn a_value_with_its_accs<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, i: usize) -> (r: (
+fn a_value_with_its_accs<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, i: usize) -> (r: (
     V::Acc,
     Get<'a, V>,
     V::Acc,
@@ -9141,7 +9138,7 @@ fn a_value_with_its_accs<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a Ve
 /// The sums that come with a value are the sums the column answers
 /// with for its position.
 #[allow(dead_code)]
-fn accs_two_ways<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, i: usize) -> (r: (
+fn accs_two_ways<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, i: usize) -> (r: (
     (V::Acc, V::Acc),
     (V::Acc, V::Acc),
 ))
@@ -9159,7 +9156,7 @@ fn accs_two_ways<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn
 /// through the value is the running sum after, and the second is the
 /// first and then what the value adds.
 #[allow(dead_code)]
-fn a_step_with_its_accs<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'a, V, C>) -> (r: Option<
+fn a_step_with_its_accs<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>) -> (r: Option<
     (V::Acc, Get<'a, V>, V::Acc),
 >)
     ensures
@@ -9190,7 +9187,7 @@ fn a_step_with_its_accs<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut Ver
 /// where the range ends. It is what the column answers with for the
 /// range.
 #[allow(dead_code)]
-fn added_by_moving<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, a: usize, b: usize) -> (r: (
+fn added_by_moving<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, a: usize, b: usize) -> (r: (
     V::Acc,
     V::Acc,
 ))
@@ -9210,7 +9207,7 @@ fn added_by_moving<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColu
 /// Two values read with one iterator, which steps over the values
 /// before each: the sums through them count the values stepped over.
 #[allow(dead_code)]
-fn two_skips_added<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, i: usize, j: usize) -> (r: (
+fn two_skips_added<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, i: usize, j: usize) -> (r: (
     V::Acc,
     V::Acc,
 ))
@@ -9229,9 +9226,9 @@ fn two_skips_added<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColu
 /// The running sum of an iterator whose sum counts from the column's
 /// start is what the column answers with for where it stands.
 #[allow(dead_code)]
-fn a_running_acc_two_ways<V: VAccumulated + VValue<C>, C: VCodec>(
-    it: &VerifiedAccIter<'_, V, C>,
-    col: &VerifiedAccColumn<V, C>,
+fn a_running_acc_two_ways<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+    it: &AccIter<'_, V, C>,
+    col: &AccColumn<V, C>,
 ) -> (r: (V::Acc, V::Acc))
     requires
         it.source() == Some(*col),
@@ -9251,7 +9248,7 @@ fn a_running_acc_two_ways<V: VAccumulated + VValue<C>, C: VCodec>(
 /// and a move of the window alone leaves it. In a column of ten
 /// [`Step`]s, whose sums depend on the order.
 #[allow(dead_code)]
-fn moved_with_accs(col: &VerifiedAccColumn<Step>)
+fn moved_with_accs(col: &AccColumn<Step>)
     requires
         col@.len() == 10,
 {
@@ -9316,7 +9313,7 @@ fn moved_with_accs(col: &VerifiedAccColumn<Step>)
 /// its sum counts from: the running sum is what the column's values
 /// from there up to the iterator add up to.
 #[allow(dead_code)]
-fn told_of_the_running_acc<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: V::Acc)
+fn told_of_the_running_acc<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: V::Acc)
     ensures
         it.base_pos() <= it.pos() <= it.column().len(),
         r == it.total(),
@@ -9328,7 +9325,7 @@ fn told_of_the_running_acc<V: VAccumulated + VValue<C>, C: VCodec>(it: &Verified
 /// The running sum under its other name: before the value the iterator
 /// is to give next.
 #[allow(dead_code)]
-fn told_of_the_acc_before<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: V::Acc)
+fn told_of_the_acc_before<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: V::Acc)
     ensures
         it.base_pos() <= it.pos() <= it.column().len(),
         r == it.total(),
@@ -9341,7 +9338,7 @@ fn told_of_the_acc_before<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedA
 /// the values left, with the sums before it and through it; and that it
 /// reads the values of its column.
 #[allow(dead_code)]
-fn told_of_the_accs_left<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>)
+fn told_of_the_accs_left<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>)
     ensures
         it.items().len() == it.rest().len(),
         forall|i: int|
@@ -9369,7 +9366,7 @@ fn told_of_the_accs_left<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAc
 /// iterator reads the column, has all its values left, and its sum
 /// counts from the column's start and is what no values add up to.
 #[allow(dead_code)]
-fn told_by_an_acc_iter<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>) -> (it: VerifiedAccIter<
+fn told_by_an_acc_iter<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>) -> (it: AccIter<
     'a,
     V,
     C,
@@ -9390,11 +9387,11 @@ fn told_by_an_acc_iter<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a Veri
 /// of the range left, and its sum counts from the column's start, so it
 /// is what the values before the range add up to.
 #[allow(dead_code)]
-fn told_by_an_acc_iter_range<'a, V: VAccumulated + VValue<C>, C: VCodec>(
-    col: &'a VerifiedAccColumn<V, C>,
+fn told_by_an_acc_iter_range<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+    col: &'a AccColumn<V, C>,
     start: usize,
     end: usize,
-) -> (it: VerifiedAccIter<'a, V, C>)
+) -> (it: AccIter<'a, V, C>)
     requires
         start <= end <= col@.len(),
     ensures
@@ -9412,8 +9409,8 @@ fn told_by_an_acc_iter_range<'a, V: VAccumulated + VValue<C>, C: VCodec>(
 /// What `get_prefixed` says by itself of an accumulator column, of any
 /// position.
 #[allow(dead_code)]
-fn told_by_an_acc_get_prefixed<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, index: usize) -> (r:
-    Option<VerifiedAccValue<'a, V>>)
+fn told_by_an_acc_get_prefixed<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, index: usize) -> (r:
+    Option<AccValue<'a, V>>)
     ensures
         index < col@.len() ==> {
             &&& r matches Some(pv)
@@ -9430,7 +9427,7 @@ fn told_by_an_acc_get_prefixed<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: 
 /// What a value with its sums says of the sum through it: a copy of the
 /// one it holds.
 #[allow(dead_code)]
-fn told_by_an_acc_values_total<'a, V: VAccumulated>(pv: &VerifiedAccValue<'a, V>) -> (r: V::Acc)
+fn told_by_an_acc_values_total<'a, V: VAccumulated>(pv: &AccValue<'a, V>) -> (r: V::Acc)
     ensures
         r == pv.total,
         r == pv.total(),
@@ -9442,7 +9439,7 @@ fn told_by_an_acc_values_total<'a, V: VAccumulated>(pv: &VerifiedAccValue<'a, V>
 /// through it, and then what undoes what the value adds, which is what
 /// gives nothing when added after that.
 #[allow(dead_code)]
-fn told_by_an_acc_values_prefix<'a, V: VAccumulated>(pv: &VerifiedAccValue<'a, V>) -> (r: V::Acc)
+fn told_by_an_acc_values_prefix<'a, V: VAccumulated>(pv: &AccValue<'a, V>) -> (r: V::Acc)
     ensures
         r == pv.prefix(),
         r == <V::Acc as VGroup>::plus(
@@ -9455,7 +9452,7 @@ fn told_by_an_acc_values_prefix<'a, V: VAccumulated>(pv: &VerifiedAccValue<'a, V
 
 /// What a copy of a value with its sums is: the same.
 #[allow(dead_code)]
-fn told_by_an_acc_values_clone<'a, V: VAccumulated>(pv: &VerifiedAccValue<'a, V>) -> (r: VerifiedAccValue<'a, V>)
+fn told_by_an_acc_values_clone<'a, V: VAccumulated>(pv: &AccValue<'a, V>) -> (r: AccValue<'a, V>)
     ensures
         r == *pv,
         r.value == pv.value,
@@ -9468,7 +9465,7 @@ fn told_by_an_acc_values_clone<'a, V: VAccumulated>(pv: &VerifiedAccValue<'a, V>
 /// adds, that sum is the one before the value: of any value with its
 /// sums, a client's own as well.
 #[allow(dead_code)]
-proof fn told_of_the_sum_undone<'a, V: VAccumulated>(pv: VerifiedAccValue<'a, V>, p: V::Acc)
+proof fn told_of_the_sum_undone<'a, V: VAccumulated>(pv: AccValue<'a, V>, p: V::Acc)
     requires
         pv.total() == <V::Acc as VGroup>::plus(p, V::adds(pv.value.sv())),
     ensures
@@ -9481,8 +9478,8 @@ proof fn told_of_the_sum_undone<'a, V: VAccumulated>(pv: VerifiedAccValue<'a, V>
 /// the words of the iterator's own specification, and in those of
 /// Verus's specification of an iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_next<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'a, V, C>) -> (r: Option<
-    VerifiedAccValue<'a, V>,
+fn told_by_an_acc_next<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>) -> (r: Option<
+    AccValue<'a, V>,
 >)
     ensures
         match r {
@@ -9517,8 +9514,8 @@ fn told_by_an_acc_next<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut Veri
 
 /// What `nth` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_nth<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'a, V, C>, n: usize) -> (r: Option<
-    VerifiedAccValue<'a, V>,
+fn told_by_an_acc_nth<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>, n: usize) -> (r: Option<
+    AccValue<'a, V>,
 >)
     ensures
         n < old(it).rest().len() ==> {
@@ -9552,7 +9549,7 @@ fn told_by_an_acc_nth<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut Verif
 /// themselves. Asked where it stands, it says where: within its
 /// window, in its column and not before where its sum counts from.
 #[allow(dead_code)]
-fn told_by_an_acc_iters_place<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: usize)
+fn told_by_an_acc_iters_place<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: usize)
     ensures
         r == it.pos(),
         it.base_pos() <= it.pos() <= it.end_pos(),
@@ -9568,7 +9565,7 @@ fn told_by_an_acc_iters_place<V: VAccumulated + VValue<C>, C: VCodec>(it: &Verif
 /// Asked how far its window reaches, an iterator says how many
 /// positions, which may be past the column.
 #[allow(dead_code)]
-fn told_by_an_acc_iters_reach<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: usize)
+fn told_by_an_acc_iters_reach<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: usize)
     ensures
         r == it.end_pos() - it.pos(),
 {
@@ -9577,7 +9574,7 @@ fn told_by_an_acc_iters_reach<V: VAccumulated + VValue<C>, C: VCodec>(it: &Verif
 
 /// Asked how many values it has left, an iterator says how many.
 #[allow(dead_code)]
-fn told_by_an_acc_iters_len<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: usize)
+fn told_by_an_acc_iters_len<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: usize)
     ensures
         r == it.rest().len(),
         r == it.items().len(),
@@ -9588,7 +9585,7 @@ fn told_by_an_acc_iters_len<V: VAccumulated + VValue<C>, C: VCodec>(it: &Verifie
 /// Asked how many values it may yet give, an iterator says exactly how
 /// many it has left, as its least and as its most.
 #[allow(dead_code)]
-fn told_by_an_acc_size_hint<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: (
+fn told_by_an_acc_size_hint<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: (
     usize,
     Option<usize>,
 ))
@@ -9602,7 +9599,7 @@ fn told_by_an_acc_size_hint<V: VAccumulated + VValue<C>, C: VCodec>(it: &Verifie
 
 /// Asked for the window's end alone, an iterator says as much.
 #[allow(dead_code)]
-fn told_by_an_acc_iters_end<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: usize)
+fn told_by_an_acc_iters_end<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: usize)
     ensures
         r == it.end_pos(),
         it.base_pos() <= it.pos() <= it.end_pos(),
@@ -9619,7 +9616,7 @@ fn told_by_an_acc_iters_end<V: VAccumulated + VValue<C>, C: VCodec>(it: &Verifie
 /// and its sum counts from where it stands and is what no values add
 /// up to.
 #[allow(dead_code)]
-fn told_by_an_acc_reset<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'_, V, C>)
+fn told_by_an_acc_reset<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>)
     ensures
         final(it).rest() == old(it).rest(),
         final(it).column() == old(it).column(),
@@ -9634,7 +9631,7 @@ fn told_by_an_acc_reset<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut Verifie
 
 /// What `set_max` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_set_max<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'_, V, C>, end: usize)
+fn told_by_an_acc_set_max<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>, end: usize)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -9653,7 +9650,7 @@ fn told_by_an_acc_set_max<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut Verif
 
 /// What `advance_to` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_advance_to<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'_, V, C>, target: usize)
+fn told_by_an_acc_advance_to<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>, target: usize)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -9678,7 +9675,7 @@ fn told_by_an_acc_advance_to<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut Ve
 
 /// What `advance_by` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_advance_by<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'_, V, C>, amount: usize)
+fn told_by_an_acc_advance_by<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>, amount: usize)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -9699,7 +9696,7 @@ fn told_by_an_acc_advance_by<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut Ve
 
 /// What `shift` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_shift<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'_, V, C>, range: Range<usize>)
+fn told_by_an_acc_shift<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>, range: Range<usize>)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -9743,10 +9740,10 @@ fn told_by_an_acc_shift<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut Verifie
 /// What `shift_next` says by itself of an accumulator column's
 /// iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_shift_next<'a, V: VAccumulated + VValue<C>, C: VCodec>(
-    it: &mut VerifiedAccIter<'a, V, C>,
+fn told_by_an_acc_shift_next<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+    it: &mut AccIter<'a, V, C>,
     range: Range<usize>,
-) -> (r: Option<VerifiedAccValue<'a, V>>)
+) -> (r: Option<AccValue<'a, V>>)
     requires
         range.start >= old(it).pos(),
     ensures
@@ -9789,7 +9786,7 @@ fn told_by_an_acc_shift_next<'a, V: VAccumulated + VValue<C>, C: VCodec>(
 /// runs' counts have added up to its length. For every type an
 /// accumulator column holds, and every codec.
 #[allow(dead_code)]
-fn added_by_run_moves<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>) -> (r: (V::Acc, usize))
+fn added_by_run_moves<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>) -> (r: (V::Acc, usize))
     ensures
         r.0 == accumulated::<V>(col@),
         r.1 == col@.len(),
@@ -9824,7 +9821,7 @@ fn added_by_run_moves<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccC
 /// long and no more, and the running sum is as it was and then what the
 /// run's value adds, as many times over as the run is long.
 #[allow(dead_code)]
-fn a_run_with_its_accs<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'a, V, C>) -> (r: Option<
+fn a_run_with_its_accs<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>) -> (r: Option<
     (usize, Get<'a, V>, V::Acc),
 >)
     ensures
@@ -9851,7 +9848,7 @@ fn a_run_with_its_accs<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut Veri
 /// kind or close it, by what the client proved of its accumulator added
 /// many times over ([`lemma_flags_times`]).
 #[allow(dead_code)]
-fn a_run_of_marks(it: &mut VerifiedAccIter<'_, Mark>) -> (r: Option<(usize, Mark, Flags)>)
+fn a_run_of_marks(it: &mut AccIter<'_, Mark>) -> (r: Option<(usize, Mark, Flags)>)
     ensures
         match r {
             Some((n, v, through)) => {
@@ -9879,14 +9876,14 @@ fn a_run_of_marks(it: &mut VerifiedAccIter<'_, Mark>) -> (r: Option<(usize, Mark
 /// iterator has left are those of the values it has left, and spliced
 /// into a new column they make a column of those values.
 #[allow(dead_code)]
-fn accs_copied_by_runs<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, a: usize, b: usize) -> (r:
-    VerifiedColumn<V, C, LenIndex>)
+fn accs_copied_by_runs<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, a: usize, b: usize) -> (r:
+    Column<V, C, LenIndex>)
     requires
         a <= b <= col@.len(),
     ensures
         r@ == col@.subrange(a as int, b as int),
 {
-    let mut r = VerifiedColumn::<V, C, LenIndex>::new();
+    let mut r = Column::<V, C, LenIndex>::new();
     let it = col.prefix_iter_range(a, b);
     proof {
         it.plain().lemma_items_len();
@@ -9900,7 +9897,7 @@ fn accs_copied_by_runs<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAcc
 /// What the values of a range add up to, said two ways: by `delta`,
 /// asked for the value after the range, and by `sum_range`.
 #[allow(dead_code)]
-fn a_range_added_two_ways<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, a: usize, b: usize) -> (r: (
+fn a_range_added_two_ways<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, a: usize, b: usize) -> (r: (
     V::Acc,
     V::Acc,
 ))
@@ -9919,10 +9916,10 @@ fn a_range_added_two_ways<V: VAccumulated + VValue<C>, C: VCodec>(col: &Verified
 /// column, it is sure to be given back: where it stood, with the same
 /// values left and the same running sum, counted from the same place.
 #[allow(dead_code)]
-fn handed_over_with_its_acc<'a, V: VAccumulated + VValue<C>, C: VCodec>(
-    it: VerifiedAccIter<'_, V, C>,
-    col: &'a VerifiedAccColumn<V, C>,
-) -> (on: VerifiedAccIter<'a, V, C>)
+fn handed_over_with_its_acc<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+    it: AccIter<'_, V, C>,
+    col: &'a AccColumn<V, C>,
+) -> (on: AccIter<'a, V, C>)
     requires
         it.source() == Some(*col),
     ensures
@@ -9946,7 +9943,7 @@ fn handed_over_with_its_acc<'a, V: VAccumulated + VValue<C>, C: VCodec>(
 /// edited, it is sure to be given, and its sum goes on to count from
 /// `a`: read to `b`, it is what the values of `a..b` add up to.
 #[allow(dead_code)]
-fn added_in_two_goes<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, a: usize, m: usize, b: usize) -> (r:
+fn added_in_two_goes<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, a: usize, m: usize, b: usize) -> (r:
     V::Acc)
     requires
         a <= m <= b <= col@.len(),
@@ -9970,7 +9967,7 @@ fn added_in_two_goes<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccCo
 /// edits that one does; after a push the column counts one more, and
 /// refuses the state.
 #[allow(dead_code)]
-fn accs_ended_by_a_push<V: VAccumulated + VValue<C>, C: VCodec>(col: &mut VerifiedAccColumn<V, C>, v: Get<'_, V>) -> (r: bool)
+fn accs_ended_by_a_push<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &mut AccColumn<V, C>, v: Get<'_, V>) -> (r: bool)
     ensures
         !r,
         final(col)@ == old(col)@.push(v.sv()),
@@ -9987,7 +9984,7 @@ fn accs_ended_by_a_push<V: VAccumulated + VValue<C>, C: VCodec>(col: &mut Verifi
 /// iterator of no column: what each call leaves, in a column of ten
 /// [`Mark`]s.
 #[allow(dead_code)]
-fn found_with_accs(col: &VerifiedAccColumn<Mark>)
+fn found_with_accs(col: &AccColumn<Mark>)
     requires
         col@.len() == 10,
 {
@@ -10016,7 +10013,7 @@ fn found_with_accs(col: &VerifiedAccColumn<Mark>)
     let f = col.delta(2, 10);
     assert(f is None);
     // an iterator of no column: nothing to give, to find or to pass
-    let mut no = VerifiedAccIter::<Mark>::default();
+    let mut no = AccIter::<Mark>::default();
     let (p, e, n, t) = (no.pos(), no.end_pos(), no.len(), no.total());
     assert(p == 0 && e == 0 && n == 0 && t == Flags(0));
     let x = no.next_run();
@@ -10038,10 +10035,10 @@ fn steps_read_in_order() -> (r: ((Board, Board), (Board, Board)))
 {
     let turn = Step(3);
     let light = Step(4);
-    let mut one = VerifiedAccColumn::<Step>::new();
+    let mut one = AccColumn::<Step>::new();
     one.push(turn);
     one.push(light);
-    let mut other = VerifiedAccColumn::<Step>::new();
+    let mut other = AccColumn::<Step>::new();
     other.push(light);
     other.push(turn);
     proof {
@@ -10063,8 +10060,8 @@ fn steps_read_in_order() -> (r: ((Board, Board), (Board, Board)))
 
 /// What `next_run` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_next_run<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'a, V, C>) -> (r: Option<
-    Run<VerifiedAccValue<'a, V>>,
+fn told_by_an_acc_next_run<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>) -> (r: Option<
+    Run<AccValue<'a, V>>,
 >)
     ensures
         final(it).column() == old(it).column(),
@@ -10103,7 +10100,7 @@ fn told_by_an_acc_next_run<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut 
 /// iterator it is made of, which is the accumulator column's without
 /// its sums, and so stands where that stood with the same values left.
 #[allow(dead_code)]
-fn told_by_an_acc_runs<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: VerifiedAccIter<'a, V, C>) -> (r: VerifiedRuns<
+fn told_by_an_acc_runs<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: AccIter<'a, V, C>) -> (r: Runs<
     'a,
     V,
     C,
@@ -10122,8 +10119,8 @@ fn told_by_an_acc_runs<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: VerifiedA
 
 /// What `delta_nth` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_delta_nth<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'a, V, C>, n: usize) -> (r:
-    Option<VerifiedAccSeek<'a, V>>)
+fn told_by_an_acc_delta_nth<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>, n: usize) -> (r:
+    Option<AccSeek<'a, V>>)
     ensures
         n < old(it).rest().len() ==> {
             &&& r matches Some(seek)
@@ -10158,10 +10155,10 @@ fn told_by_an_acc_delta_nth<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut
 /// What `suspend` says by itself of an accumulator column's iterator,
 /// and what its state says of where its sum counts from.
 #[allow(dead_code)]
-fn told_by_an_acc_suspend<'a, V: VAccumulated + VValue<C>, C: VCodec>(
-    it: &VerifiedAccIter<'a, V, C>,
-    col: &VerifiedAccColumn<V, C>,
-) -> (s: VerifiedAccIterState<V>)
+fn told_by_an_acc_suspend<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+    it: &AccIter<'a, V, C>,
+    col: &AccColumn<V, C>,
+) -> (s: AccIterState<V>)
     ensures
         s.pos() == it.pos(),
         s.end_pos() == it.end_pos(),
@@ -10181,10 +10178,10 @@ fn told_by_an_acc_suspend<'a, V: VAccumulated + VValue<C>, C: VCodec>(
 /// column's iterator and any accumulator column, each thing asked for
 /// on its own.
 #[allow(dead_code)]
-fn told_by_an_acc_resume<'a, V: VAccumulated + VValue<C>, C: VCodec>(
-    s: &VerifiedAccIterState<V>,
-    col: &'a VerifiedAccColumn<V, C>,
-) -> (r: Result<VerifiedAccIter<'a, V, C>, PackError>)
+fn told_by_an_acc_resume<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+    s: &AccIterState<V>,
+    col: &'a AccColumn<V, C>,
+) -> (r: Result<AccIter<'a, V, C>, PackError>)
     ensures
         r is Ok <==> s.fits(col),
         r is Ok ==> s.edits() == col.edits(),
@@ -10203,7 +10200,7 @@ fn told_by_an_acc_resume<'a, V: VAccumulated + VValue<C>, C: VCodec>(
 /// edits, and the state is a place in the column as a plain iterator's
 /// state is.
 #[allow(dead_code)]
-fn told_by_an_acc_states_fit<V: VAccumulated + VValue<C>, C: VCodec>(s: &VerifiedAccIterState<V>, col: &VerifiedAccColumn<V, C>)
+fn told_by_an_acc_states_fit<V: VAccumulated + ColumnValueRef<C>, C: Codec>(s: &AccIterState<V>, col: &AccColumn<V, C>)
     requires
         s.fits(col),
     ensures
@@ -10219,7 +10216,7 @@ fn told_by_an_acc_states_fit<V: VAccumulated + VValue<C>, C: VCodec>(s: &Verifie
 
 /// What `clone` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_clone<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'a, V, C>) -> (r: VerifiedAccIter<
+fn told_by_an_acc_clone<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'a, V, C>) -> (r: AccIter<
     'a,
     V,
     C,
@@ -10239,7 +10236,7 @@ fn told_by_an_acc_clone<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &Verifie
 
 /// What `default` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_default<'a, V: VAccumulated + VValue<C>, C: VCodec>() -> (r: VerifiedAccIter<'a, V, C>)
+fn told_by_an_acc_default<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>() -> (r: AccIter<'a, V, C>)
     ensures
         r.items().len() == 0,
         r.rest().len() == 0,
@@ -10250,14 +10247,14 @@ fn told_by_an_acc_default<'a, V: VAccumulated + VValue<C>, C: VCodec>() -> (r: V
         r.base_pos() == 0,
         r.total() == <V::Acc as VGroup>::zero(),
 {
-    VerifiedAccIter::<V, C>::default()
+    AccIter::<V, C>::default()
 }
 
 /// What `delta` says by itself of an accumulator column, of any two
 /// positions in order.
 #[allow(dead_code)]
-fn told_by_an_acc_delta<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, from: usize, to: usize) -> (r:
-    Option<VerifiedAccSeek<'a, V>>)
+fn told_by_an_acc_delta<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, from: usize, to: usize) -> (r:
+    Option<AccSeek<'a, V>>)
     requires
         from <= to,
     ensures
@@ -10277,7 +10274,7 @@ fn told_by_an_acc_delta<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a Ver
 
 /// What a copy of a value found is: the same, part for part.
 #[allow(dead_code)]
-fn told_by_an_acc_seek<'a, V: VAccumulated>(seek: &VerifiedAccSeek<'a, V>) -> (r: VerifiedAccSeek<'a, V>)
+fn told_by_an_acc_seek<'a, V: VAccumulated>(seek: &AccSeek<'a, V>) -> (r: AccSeek<'a, V>)
     ensures
         r == *seek,
         r.pos == seek.pos,
@@ -10290,7 +10287,7 @@ fn told_by_an_acc_seek<'a, V: VAccumulated>(seek: &VerifiedAccSeek<'a, V>) -> (r
 /// The parts of a value found are there to take: where it is, what was
 /// passed over, the value and the sum through it.
 #[allow(dead_code)]
-fn the_parts_of_a_find<'a, V: VAccumulated>(seek: VerifiedAccSeek<'a, V>) -> (r: (usize, V::Acc, Get<'a, V>, V::Acc))
+fn the_parts_of_a_find<'a, V: VAccumulated>(seek: AccSeek<'a, V>) -> (r: (usize, V::Acc, Get<'a, V>, V::Acc))
     ensures
         r.0 == seek.pos,
         r.1 == seek.delta,
@@ -10307,9 +10304,9 @@ fn the_parts_of_a_find<'a, V: VAccumulated>(seek: VerifiedAccSeek<'a, V>) -> (r:
 /// them.
 #[allow(dead_code)]
 fn accs_of_the_clients_own(
-    col: &VerifiedAccColumn<Mark>,
-    nullable: &VerifiedAccColumn<Option<Mark>>,
-    steps: &VerifiedAccColumn<Step>,
+    col: &AccColumn<Mark>,
+    nullable: &AccColumn<Option<Mark>>,
+    steps: &AccColumn<Step>,
     a: usize,
     b: usize,
 ) -> (r: (Vec<Flags>, (Flags, usize), (Board, Board)))
@@ -10335,27 +10332,27 @@ fn accs_of_the_clients_own(
 /// A delta column built from values holds those values: for every type a
 /// delta column holds, and every codec.
 #[allow(dead_code)]
-fn delta_built<T: VDeltaValue<C>, C: VCodec>(values: &[T]) -> (col: VerifiedDeltaColumn<T, C>)
+fn delta_built<T: DeltaValue<C>, C: Codec>(values: &[T]) -> (col: DeltaColumn<T, C>)
     requires
         all_fit(values@),
     ensures
         col@ == values@,
 {
-    VerifiedDeltaColumn::from_values(values)
+    DeltaColumn::from_values(values)
 }
 
 /// A new delta column is empty.
 #[allow(dead_code)]
-fn delta_new<T: VDeltaValue<C>, C: VCodec>() -> (col: VerifiedDeltaColumn<T, C>)
+fn delta_new<T: DeltaValue<C>, C: Codec>() -> (col: DeltaColumn<T, C>)
     ensures
         col@.len() == 0,
 {
-    VerifiedDeltaColumn::new()
+    DeltaColumn::new()
 }
 
 /// How many values a delta column holds.
 #[allow(dead_code)]
-fn delta_len<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (n: usize)
+fn delta_len<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (n: usize)
     ensures
         n == col@.len(),
 {
@@ -10364,7 +10361,7 @@ fn delta_len<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (
 
 /// Whether a delta column holds none.
 #[allow(dead_code)]
-fn delta_is_empty<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: bool)
+fn delta_is_empty<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (r: bool)
     ensures
         r == (col@.len() == 0),
 {
@@ -10374,7 +10371,7 @@ fn delta_is_empty<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>)
 /// Reading a delta column gives the value kept at an index, and nothing
 /// past the end.
 #[allow(dead_code)]
-fn delta_read<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, i: usize) -> (r: Option<T>)
+fn delta_read<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, i: usize) -> (r: Option<T>)
     ensures
         i < col@.len() ==> r == Some(col@[i as int]),
         i >= col@.len() ==> r is None,
@@ -10385,7 +10382,7 @@ fn delta_read<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, i: 
 /// A value read from a delta column is one a delta column can hold, so
 /// it can go into another.
 #[allow(dead_code)]
-fn delta_read_fits<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, i: usize) -> (r: Option<T>)
+fn delta_read_fits<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, i: usize) -> (r: Option<T>)
     ensures
         r matches Some(v) ==> v.fits(),
 {
@@ -10398,7 +10395,7 @@ fn delta_read_fits<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>
 /// A splice replaces `del` values at `at` by the given ones and leaves
 /// the rest as they were.
 #[allow(dead_code)]
-fn delta_spliced<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, del: usize, values: &[T])
+fn delta_spliced<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, at: usize, del: usize, values: &[T])
     requires
         at <= old(col)@.len(),
         del <= old(col)@.len() - at,
@@ -10411,7 +10408,7 @@ fn delta_spliced<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, 
 
 /// One value put in place of another.
 #[allow(dead_code)]
-fn delta_set<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, i: usize, v: T)
+fn delta_set<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, i: usize, v: T)
     requires
         i < old(col)@.len(),
         v.fits(),
@@ -10427,7 +10424,7 @@ fn delta_set<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, 
 /// A `u64` up to `i64::MAX` goes at the end of a column of them; a
 /// larger one a delta column cannot hold.
 #[allow(dead_code)]
-fn delta_push_u64(col: &mut VerifiedDeltaColumn<u64>, v: u64)
+fn delta_push_u64(col: &mut DeltaColumn<u64>, v: u64)
     requires
         v <= 0x7fff_ffff_ffff_ffff,
     ensures
@@ -10442,7 +10439,7 @@ fn delta_push_u64(col: &mut VerifiedDeltaColumn<u64>, v: u64)
 
 /// A column of `Option<i32>` takes a null, and any `i32`.
 #[allow(dead_code)]
-fn delta_push_opt(col: &mut VerifiedDeltaColumn<Option<i32>>, v: Option<i32>)
+fn delta_push_opt(col: &mut DeltaColumn<Option<i32>>, v: Option<i32>)
     ensures
         final(col)@ == old(col)@.push(v),
 {
@@ -10455,7 +10452,7 @@ fn delta_push_opt(col: &mut VerifiedDeltaColumn<Option<i32>>, v: Option<i32>)
 
 /// The values of a delta column, read one at a time into a `Vec`.
 #[allow(dead_code)]
-fn delta_values<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (out: Vec<T>)
+fn delta_values<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (out: Vec<T>)
     ensures
         out@ == col@,
 {
@@ -10481,7 +10478,7 @@ fn delta_values<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -
 
 /// The default delta column is empty.
 #[allow(dead_code)]
-fn delta_default<T: VDeltaValue<C>, C: VCodec>() -> (r: VerifiedDeltaColumn<T, C>)
+fn delta_default<T: DeltaValue<C>, C: Codec>() -> (r: DeltaColumn<T, C>)
     ensures
         r@.len() == 0,
 {
@@ -10493,7 +10490,7 @@ fn delta_default<T: VDeltaValue<C>, C: VCodec>() -> (r: VerifiedDeltaColumn<T, C
 /// A value pushed onto a delta column and popped again comes back, and
 /// leaves the column's values as they were. The column counts two edits.
 #[allow(dead_code)]
-fn delta_push_pop<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, v: T) -> (r: Option<T>)
+fn delta_push_pop<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, v: T) -> (r: Option<T>)
     requires
         v.fits(),
     ensures
@@ -10516,11 +10513,11 @@ fn delta_push_pop<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T,
 
 /// A pop of an empty delta column gives nothing and is no edit.
 #[allow(dead_code)]
-fn delta_pop_empty<T: VDeltaValue<C>, C: VCodec>() -> (r: Option<T>)
+fn delta_pop_empty<T: DeltaValue<C>, C: Codec>() -> (r: Option<T>)
     ensures
         r is None,
 {
-    let mut col = VerifiedDeltaColumn::<T, C>::new();
+    let mut col = DeltaColumn::<T, C>::new();
     let ghost e = col.edits();
     let r = col.pop();
     assert(col.edits() == e);
@@ -10530,7 +10527,7 @@ fn delta_pop_empty<T: VDeltaValue<C>, C: VCodec>() -> (r: Option<T>)
 /// A value inserted and then removed where it was put leaves the column
 /// as it was, but for the two edits it counts.
 #[allow(dead_code)]
-fn delta_insert_remove<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, v: T)
+fn delta_insert_remove<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, at: usize, v: T)
     requires
         at <= old(col)@.len(),
         v.fits(),
@@ -10550,7 +10547,7 @@ fn delta_insert_remove<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColu
 /// A value inserted is read where it was put, and the values after it
 /// are read one further on.
 #[allow(dead_code)]
-fn delta_inserted<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, v: T, i: usize) -> (r:
+fn delta_inserted<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, at: usize, v: T, i: usize) -> (r:
     Option<T>)
     requires
         at <= old(col)@.len(),
@@ -10569,7 +10566,7 @@ fn delta_inserted<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T,
 /// To remove past the end of a delta column does nothing, and is no
 /// edit: a suspended reader of the column would still be good.
 #[allow(dead_code)]
-fn delta_remove_past<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>)
+fn delta_remove_past<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>)
     ensures
         final(col)@ == old(col)@,
         final(col).edits() == old(col).edits(),
@@ -10581,7 +10578,7 @@ fn delta_remove_past<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn
 /// A delta column truncated is no longer than asked, and keeps its
 /// first values.
 #[allow(dead_code)]
-fn delta_truncated<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, len: usize, i: usize) -> (r:
+fn delta_truncated<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, len: usize, i: usize) -> (r:
     Option<T>)
     ensures
         final(col)@.len() <= len,
@@ -10598,7 +10595,7 @@ fn delta_truncated<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T
 /// A range removed from a delta column: what was after it follows what
 /// was before it.
 #[allow(dead_code)]
-fn delta_remove_range<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, n: usize)
+fn delta_remove_range<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, at: usize, n: usize)
     requires
         at <= old(col)@.len(),
         n <= old(col)@.len() - at,
@@ -10616,8 +10613,8 @@ fn delta_remove_range<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColum
 /// is no edit, and any other is one: the column no longer counts what it
 /// did.
 #[allow(dead_code)]
-fn delta_splice_counts<T: VDeltaValue<C>, C: VCodec>(
-    col: &mut VerifiedDeltaColumn<T, C>,
+fn delta_splice_counts<T: DeltaValue<C>, C: Codec>(
+    col: &mut DeltaColumn<T, C>,
     at: usize,
     del: usize,
     values: &[T],
@@ -10635,7 +10632,7 @@ fn delta_splice_counts<T: VDeltaValue<C>, C: VCodec>(
 
 /// A delta column cleared is empty and can be filled again.
 #[allow(dead_code)]
-fn delta_cleared<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, values: &[T])
+fn delta_cleared<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, values: &[T])
     requires
         all_fit(values@),
     ensures
@@ -10649,7 +10646,7 @@ fn delta_cleared<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, 
 /// To clear a delta column is an edit of one that has values, and none
 /// of an empty one.
 #[allow(dead_code)]
-fn delta_clear_counts<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>)
+fn delta_clear_counts<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>)
     ensures
         old(col)@.len() > 0 ==> final(col).edits() != old(col).edits(),
         old(col)@.len() == 0 ==> final(col).edits() == old(col).edits(),
@@ -10660,7 +10657,7 @@ fn delta_clear_counts<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColum
 /// The first and the last value of a delta column are the ones read at
 /// its ends.
 #[allow(dead_code)]
-fn delta_ends<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: (Option<T>, Option<T>))
+fn delta_ends<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (r: (Option<T>, Option<T>))
     ensures
         col@.len() == 0 ==> r.0 is None && r.1 is None,
         col@.len() > 0 ==> r.0 == Some(col@[0]) && r.1 == Some(col@[col@.len() - 1]),
@@ -10671,7 +10668,7 @@ fn delta_ends<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> 
 /// All the values of a delta column at once are the values read one by
 /// one.
 #[allow(dead_code)]
-fn delta_all<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, i: usize) -> (r: bool)
+fn delta_all<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, i: usize) -> (r: bool)
     requires
         i < col@.len(),
     ensures
@@ -10684,20 +10681,20 @@ fn delta_all<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, i: u
 
 /// A column built from values gives those values back.
 #[allow(dead_code)]
-fn delta_round_trip<T: VDeltaValue<C>, C: VCodec>(values: &[T]) -> (r: Vec<T>)
+fn delta_round_trip<T: DeltaValue<C>, C: Codec>(values: &[T]) -> (r: Vec<T>)
     requires
         all_fit(values@),
     ensures
         r@ == values@,
 {
-    let col = VerifiedDeltaColumn::<T, C>::from_values(values);
+    let col = DeltaColumn::<T, C>::from_values(values);
     col.to_vec()
 }
 
 /// A clone of a delta column has its values and counts its edits, and
 /// an edit of the clone is none of the column.
 #[allow(dead_code)]
-fn delta_cloned<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, v: T) -> (r: VerifiedDeltaColumn<T, C>)
+fn delta_cloned<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, v: T) -> (r: DeltaColumn<T, C>)
     requires
         v.fits(),
     ensures
@@ -10712,13 +10709,13 @@ fn delta_cloned<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, v
 /// A delta column of small slabs holds what one of the usual slabs
 /// does.
 #[allow(dead_code)]
-fn delta_small_slabs<T: VDeltaValue<C>, C: VCodec>(values: &[T]) -> (r: VerifiedDeltaColumn<T, C>)
+fn delta_small_slabs<T: DeltaValue<C>, C: Codec>(values: &[T]) -> (r: DeltaColumn<T, C>)
     requires
         all_fit(values@),
     ensures
         r@ == values@,
 {
-    let mut col = VerifiedDeltaColumn::<T, C>::with_max_segments(2);
+    let mut col = DeltaColumn::<T, C>::with_max_segments(2);
     col.splice(0, 0, values);
     assert(Seq::<T>::empty().take(0) + values@ + Seq::<T>::empty().skip(0) =~= values@);
     col
@@ -10727,7 +10724,7 @@ fn delta_small_slabs<T: VDeltaValue<C>, C: VCodec>(values: &[T]) -> (r: Verified
 /// The last value of one delta column moved to the end of another: what
 /// a column gives is a value a column can hold.
 #[allow(dead_code)]
-fn delta_move_last<T: VDeltaValue<C>, C: VCodec>(a: &mut VerifiedDeltaColumn<T, C>, b: &mut VerifiedDeltaColumn<T, C>)
+fn delta_move_last<T: DeltaValue<C>, C: Codec>(a: &mut DeltaColumn<T, C>, b: &mut DeltaColumn<T, C>)
     ensures
         old(a)@.len() == 0 ==> final(a)@ == old(a)@ && final(b)@ == old(b)@,
         old(a)@.len() > 0 ==> final(a)@ == old(a)@.drop_last() && final(b)@ == old(b)@.push(old(a)@.last()),
@@ -10749,11 +10746,11 @@ fn delta_move_last<T: VDeltaValue<C>, C: VCodec>(a: &mut VerifiedDeltaColumn<T, 
 /// values, and the one encoding of them. For every type a delta column
 /// holds, and every codec.
 #[allow(dead_code)]
-fn delta_saved<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: Vec<u8>)
+fn delta_saved<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (r: Vec<u8>)
     ensures
-        VerifiedDeltaColumn::<T, C>::valid(r@),
-        VerifiedDeltaColumn::<T, C>::values(r@) == col@,
-        r@ == VerifiedDeltaColumn::<T, C>::encoding(col@),
+        DeltaColumn::<T, C>::valid(r@),
+        DeltaColumn::<T, C>::values(r@) == col@,
+        r@ == DeltaColumn::<T, C>::encoding(col@),
 {
     col.save()
 }
@@ -10761,14 +10758,14 @@ fn delta_saved<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) ->
 /// What a saved delta column loads as, where it loads, is the column
 /// saved.
 #[allow(dead_code)]
-fn delta_save_then_load<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: Option<
-    VerifiedDeltaColumn<T, C>,
+fn delta_save_then_load<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (r: Option<
+    DeltaColumn<T, C>,
 >)
     ensures
         r matches Some(c) ==> c@ == col@,
 {
     let bytes = col.save();
-    match VerifiedDeltaColumn::<T, C>::load(bytes.as_slice()) {
+    match DeltaColumn::<T, C>::load(bytes.as_slice()) {
         Ok(c) => Some(c),
         Err(_) => None,
     }
@@ -10778,10 +10775,10 @@ fn delta_save_then_load<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<
 /// from: no two byte strings load as the same delta column. For any
 /// bytes, of any provenance.
 #[allow(dead_code)]
-fn delta_load_then_save<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8]) {
-    if let Ok(col) = VerifiedDeltaColumn::<T, C>::load(bytes) {
+fn delta_load_then_save<T: DeltaValue<C>, C: Codec>(bytes: &[u8]) {
+    if let Ok(col) = DeltaColumn::<T, C>::load(bytes) {
         proof {
-            VerifiedDeltaColumn::<T, C>::lemma_encoding(bytes@);
+            DeltaColumn::<T, C>::lemma_encoding(bytes@);
         }
         let again = col.save();
         assert(again@ == bytes@);
@@ -10791,9 +10788,9 @@ fn delta_load_then_save<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8]) {
 /// Two delta columns of the same values save to the same bytes, however
 /// each came to hold them; two of different values to different bytes.
 #[allow(dead_code)]
-fn delta_same_values_same_bytes<T: VDeltaValue<C>, C: VCodec>(
-    a: &VerifiedDeltaColumn<T, C>,
-    b: &VerifiedDeltaColumn<T, C>,
+fn delta_same_values_same_bytes<T: DeltaValue<C>, C: Codec>(
+    a: &DeltaColumn<T, C>,
+    b: &DeltaColumn<T, C>,
 ) -> (r: (Vec<u8>, Vec<u8>))
     ensures
         (a@ == b@) == (r.0@ == r.1@),
@@ -10803,31 +10800,31 @@ fn delta_same_values_same_bytes<T: VDeltaValue<C>, C: VCodec>(
 
 /// A delta column that holds no values saves to no bytes.
 #[allow(dead_code)]
-fn delta_empty_saves_nothing<T: VDeltaValue<C>, C: VCodec>() -> (r: Vec<u8>)
+fn delta_empty_saves_nothing<T: DeltaValue<C>, C: Codec>() -> (r: Vec<u8>)
     ensures
         r@.len() == 0,
 {
-    let col = VerifiedDeltaColumn::<T, C>::new();
+    let col = DeltaColumn::<T, C>::new();
     let r = col.save();
     proof {
-        VerifiedDeltaColumn::<T, C>::lemma_no_bytes();
+        DeltaColumn::<T, C>::lemma_no_bytes();
         assert(col@ =~= Seq::<T>::empty());
-        VerifiedDeltaColumn::<T, C>::lemma_save_unique(r@, Seq::<u8>::empty());
+        DeltaColumn::<T, C>::lemma_save_unique(r@, Seq::<u8>::empty());
     }
     r
 }
 
 /// And what no bytes load as, where they load, holds no values.
 #[allow(dead_code)]
-fn delta_load_no_bytes<T: VDeltaValue<C>, C: VCodec>() -> (r: Option<VerifiedDeltaColumn<T, C>>)
+fn delta_load_no_bytes<T: DeltaValue<C>, C: Codec>() -> (r: Option<DeltaColumn<T, C>>)
     ensures
         r matches Some(c) ==> c@.len() == 0,
 {
     let none: Vec<u8> = Vec::new();
     proof {
-        VerifiedDeltaColumn::<T, C>::lemma_no_bytes();
+        DeltaColumn::<T, C>::lemma_no_bytes();
     }
-    match VerifiedDeltaColumn::<T, C>::load(none.as_slice()) {
+    match DeltaColumn::<T, C>::load(none.as_slice()) {
         Ok(c) => Some(c),
         Err(_) => None,
     }
@@ -10836,18 +10833,18 @@ fn delta_load_no_bytes<T: VDeltaValue<C>, C: VCodec>() -> (r: Option<VerifiedDel
 /// A delta column saved after what a buffer holds: the buffer is what it
 /// was and then the column's encoding, and the range returned is where.
 #[allow(dead_code)]
-fn delta_saved_after<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, out: &mut Vec<u8>) -> (r: Range<
+fn delta_saved_after<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, out: &mut Vec<u8>) -> (r: Range<
     usize,
 >)
     ensures
         final(out)@.take(old(out)@.len() as int) == old(out)@,
-        final(out)@.subrange(r.start as int, r.end as int) == VerifiedDeltaColumn::<T, C>::encoding(col@),
-        VerifiedDeltaColumn::<T, C>::valid(final(out)@.subrange(r.start as int, r.end as int)),
-        VerifiedDeltaColumn::<T, C>::values(final(out)@.subrange(r.start as int, r.end as int)) == col@,
+        final(out)@.subrange(r.start as int, r.end as int) == DeltaColumn::<T, C>::encoding(col@),
+        DeltaColumn::<T, C>::valid(final(out)@.subrange(r.start as int, r.end as int)),
+        DeltaColumn::<T, C>::values(final(out)@.subrange(r.start as int, r.end as int)) == col@,
 {
     let r = col.save_to(out);
     proof {
-        let e = VerifiedDeltaColumn::<T, C>::encoding(col@);
+        let e = DeltaColumn::<T, C>::encoding(col@);
         assert((old(out)@ + e).take(old(out)@.len() as int) =~= old(out)@);
         assert((old(out)@ + e).subrange(r.start as int, r.end as int) =~= e);
     }
@@ -10857,10 +10854,10 @@ fn delta_saved_after<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, 
 /// Two delta columns saved into one buffer, and the second loaded from
 /// where its range says it is: where it loads, it is the second.
 #[allow(dead_code)]
-fn delta_saved_in_one_buffer<T: VDeltaValue<C>, C: VCodec>(
-    a: &VerifiedDeltaColumn<T, C>,
-    b: &VerifiedDeltaColumn<T, C>,
-) -> (r: Option<VerifiedDeltaColumn<T, C>>)
+fn delta_saved_in_one_buffer<T: DeltaValue<C>, C: Codec>(
+    a: &DeltaColumn<T, C>,
+    b: &DeltaColumn<T, C>,
+) -> (r: Option<DeltaColumn<T, C>>)
     ensures
         r matches Some(c) ==> c@ == b@,
 {
@@ -10871,10 +10868,10 @@ fn delta_saved_in_one_buffer<T: VDeltaValue<C>, C: VCodec>(
     let s = out.as_slice();
     let part = vstd::slice::slice_subrange(s, rb.start, rb.end);
     proof {
-        let e = VerifiedDeltaColumn::<T, C>::encoding(b@);
+        let e = DeltaColumn::<T, C>::encoding(b@);
         assert((mid + e).subrange(rb.start as int, rb.end as int) =~= e);
     }
-    match VerifiedDeltaColumn::<T, C>::load(part) {
+    match DeltaColumn::<T, C>::load(part) {
         Ok(c) => Some(c),
         Err(_) => None,
     }
@@ -10883,7 +10880,7 @@ fn delta_saved_in_one_buffer<T: VDeltaValue<C>, C: VCodec>(
 /// Whether a delta column holds one value only: so it does when empty,
 /// whatever the value.
 #[allow(dead_code)]
-fn delta_only<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, v: T) -> (r: bool)
+fn delta_only<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, v: T) -> (r: bool)
     requires
         v.fits(),
     ensures
@@ -10897,13 +10894,13 @@ fn delta_only<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, v: 
 /// A column of one value only, and one that is not: what `is_only` says
 /// of each, and that a column of the one value alone is not written.
 #[allow(dead_code)]
-fn delta_one_value_only<T: VDeltaValue<C>, C: VCodec>(a: T, b: T)
+fn delta_one_value_only<T: DeltaValue<C>, C: Codec>(a: T, b: T)
     requires
         a.fits(),
         b.fits(),
         a != b,
 {
-    let mut col = VerifiedDeltaColumn::<T, C>::new();
+    let mut col = DeltaColumn::<T, C>::new();
     // an empty column holds no value that is not `a`
     let none = col.is_only(a);
     assert(none);
@@ -10930,12 +10927,12 @@ fn delta_one_value_only<T: VDeltaValue<C>, C: VCodec>(a: T, b: T)
     assert(!mixed) by {
         assert(col@[2] != a);
     }
-    let ghost e = VerifiedDeltaColumn::<T, C>::encoding(col@);
+    let ghost e = DeltaColumn::<T, C>::encoding(col@);
     let r = col.save_to_unless(&mut out, a);
     assert(out@ == seq![7u8] + e);
     assert(r.start == 1 && r.end == 1 + e.len());
-    assert(VerifiedDeltaColumn::<T, C>::valid(e));
-    assert(VerifiedDeltaColumn::<T, C>::values(e) =~= seq![a, a, b]);
+    assert(DeltaColumn::<T, C>::valid(e));
+    assert(DeltaColumn::<T, C>::values(e) =~= seq![a, a, b]);
 }
 
 /// A column of nulls only is not written where the null is the value
@@ -10945,10 +10942,10 @@ fn delta_only_nulls(n: u32, out: &mut Vec<u8>) -> (r: (Range<usize>, Range<usize
     ensures
         r.0.start == old(out)@.len(),
         r.0.end == old(out)@.len(),
-        final(out)@ == old(out)@ + VerifiedDeltaColumn::<Option<u32>>::encoding(seq![None::<u32>, None::<u32>]),
+        final(out)@ == old(out)@ + DeltaColumn::<Option<u32>>::encoding(seq![None::<u32>, None::<u32>]),
 {
     let nulls: [Option<u32>; 2] = [None, None];
-    let col = VerifiedDeltaColumn::<Option<u32>>::from_values(nulls.as_slice());
+    let col = DeltaColumn::<Option<u32>>::from_values(nulls.as_slice());
     assert(col@ =~= seq![None::<u32>, None::<u32>]);
     assert(only(col@, None::<u32>));
     let r0 = col.save_to_unless(out, None);
@@ -10966,7 +10963,7 @@ fn delta_loaded_fits(bytes: &[u8], i: usize) -> (r: Option<u64>)
     ensures
         r matches Some(v) ==> v <= 0x7fff_ffff_ffff_ffff,
 {
-    match VerifiedDeltaColumn::<u64>::load(bytes) {
+    match DeltaColumn::<u64>::load(bytes) {
         Ok(col) => {
             proof {
                 col.lemma_fits();
@@ -10980,11 +10977,11 @@ fn delta_loaded_fits(bytes: &[u8], i: usize) -> (r: Option<u64>)
 /// And so what loads can be edited as any delta column is: a value read
 /// from it put back where it was read is no change to its values.
 #[allow(dead_code)]
-fn delta_loaded_edits<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<VerifiedDeltaColumn<T, C>>)
+fn delta_loaded_edits<T: DeltaValue<C>, C: Codec>(bytes: &[u8]) -> (r: Option<DeltaColumn<T, C>>)
     ensures
-        r matches Some(c) ==> c@ == VerifiedDeltaColumn::<T, C>::values(bytes@),
+        r matches Some(c) ==> c@ == DeltaColumn::<T, C>::values(bytes@),
 {
-    match VerifiedDeltaColumn::<T, C>::load(bytes) {
+    match DeltaColumn::<T, C>::load(bytes) {
         Ok(mut col) => {
             let ghost was = col@;
             proof {
@@ -11009,7 +11006,7 @@ fn delta_loaded_edits<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<
 /// A run put at the end of a column of `u32`: three numbers after 10,
 /// each two more than the one before it. And the column counts an edit.
 #[allow(dead_code)]
-fn delta_run_of_three<C: VCodec>(col: &mut VerifiedDeltaColumn<u32, C>)
+fn delta_run_of_three<C: Codec>(col: &mut DeltaColumn<u32, C>)
     ensures
         final(col)@ == old(col)@ + seq![12u32, 14u32, 16u32],
         final(col).edits() == after_edit(old(col).edits()),
@@ -11033,7 +11030,7 @@ fn delta_run_of_three<C: VCodec>(col: &mut VerifiedDeltaColumn<u32, C>)
 
 /// A run that falls, at the front of a column of `i32`: -5 and then -10.
 #[allow(dead_code)]
-fn delta_run_falls(col: &mut VerifiedDeltaColumn<i32>)
+fn delta_run_falls(col: &mut DeltaColumn<i32>)
     ensures
         final(col)@ == seq![-5i32, -10i32] + old(col)@,
 {
@@ -11056,8 +11053,8 @@ fn delta_run_falls(col: &mut VerifiedDeltaColumn<i32>)
 /// the check of the old API goes into the column, and its values are
 /// the run's; another is left out, and the column is what it was.
 #[allow(dead_code)]
-fn delta_run_checked<T: VDeltaValue<C>, C: VCodec>(
-    col: &mut VerifiedDeltaColumn<T, C>,
+fn delta_run_checked<T: DeltaValue<C>, C: Codec>(
+    col: &mut DeltaColumn<T, C>,
     at: usize,
     run: DeltaRun,
 ) -> (r: bool)
@@ -11068,7 +11065,7 @@ fn delta_run_checked<T: VDeltaValue<C>, C: VCodec>(
         r ==> final(col)@ == old(col)@.take(at as int) + delta_run_values::<T>(run) + old(col)@.skip(at as int),
         !r ==> final(col)@ == old(col)@,
 {
-    if VerifiedDeltaColumn::<T, C>::run_fits(&run) {
+    if DeltaColumn::<T, C>::run_fits(&run) {
         let mut runs: Vec<DeltaRun> = Vec::new();
         runs.push(run);
         proof {
@@ -11085,8 +11082,8 @@ fn delta_run_checked<T: VDeltaValue<C>, C: VCodec>(
 /// Two runs put in at once, in place of `del` values: the values of the
 /// first and then those of the second.
 #[allow(dead_code)]
-fn delta_two_runs<T: VDeltaValue<C>, C: VCodec>(
-    col: &mut VerifiedDeltaColumn<T, C>,
+fn delta_two_runs<T: DeltaValue<C>, C: Codec>(
+    col: &mut DeltaColumn<T, C>,
     at: usize,
     del: usize,
     a: DeltaRun,
@@ -11120,8 +11117,8 @@ fn delta_two_runs<T: VDeltaValue<C>, C: VCodec>(
 /// deleted either, the column is what it was and counts no edit. A run
 /// of no values passes the check whatever it is of.
 #[allow(dead_code)]
-fn delta_no_runs<T: VDeltaValue<C>, C: VCodec>(
-    col: &mut VerifiedDeltaColumn<T, C>,
+fn delta_no_runs<T: DeltaValue<C>, C: Codec>(
+    col: &mut DeltaColumn<T, C>,
     at: usize,
     prefix: i64,
     delta: Option<i64>,
@@ -11141,7 +11138,7 @@ fn delta_no_runs<T: VDeltaValue<C>, C: VCodec>(
     col.splice_runs(at, 0, none.as_slice());
     assert(col@ =~= old(col)@);
 
-    let ok = VerifiedDeltaColumn::<T, C>::run_fits(&run);
+    let ok = DeltaColumn::<T, C>::run_fits(&run);
     assert(ok);
     let mut runs: Vec<DeltaRun> = Vec::new();
     runs.push(run);
@@ -11157,14 +11154,14 @@ fn delta_no_runs<T: VDeltaValue<C>, C: VCodec>(
 /// nulls, whatever its prefix. A column of `i64` has no null, and the
 /// check refuses the run for it.
 #[allow(dead_code)]
-fn delta_null_run(col: &mut VerifiedDeltaColumn<Option<i64>>, prefix: i64)
+fn delta_null_run(col: &mut DeltaColumn<Option<i64>>, prefix: i64)
     ensures
         final(col)@ == seq![None::<i64>, None] + old(col)@,
 {
     let run = DeltaRun { prefix, delta: None, count: 2 };
-    let ok = VerifiedDeltaColumn::<Option<i64>>::run_fits(&run);
+    let ok = DeltaColumn::<Option<i64>>::run_fits(&run);
     assert(ok);
-    let no = VerifiedDeltaColumn::<i64>::run_fits(&run);
+    let no = DeltaColumn::<i64>::run_fits(&run);
     assert(!no);
     let mut runs: Vec<DeltaRun> = Vec::new();
     runs.push(run);
@@ -11181,14 +11178,14 @@ fn delta_null_run(col: &mut VerifiedDeltaColumn<Option<i64>>, prefix: i64)
 /// old API: the number after the greatest is the least. The check passes
 /// every run of numbers for such a column.
 #[allow(dead_code)]
-fn delta_run_wraps(col: &mut VerifiedDeltaColumn<i64>, run: DeltaRun) -> (r: bool)
+fn delta_run_wraps(col: &mut DeltaColumn<i64>, run: DeltaRun) -> (r: bool)
     ensures
         r == (run.delta is Some || run.count == 0),
         run == (DeltaRun { prefix: i64::MAX, delta: Some(1), count: 1 }) ==> final(col)@ == old(col)@.push(i64::MIN),
         !r ==> final(col)@ == old(col)@,
 {
     let n = col.len();
-    if VerifiedDeltaColumn::<i64>::run_fits(&run) {
+    if DeltaColumn::<i64>::run_fits(&run) {
         let mut runs: Vec<DeltaRun> = Vec::new();
         runs.push(run);
         proof {
@@ -11215,7 +11212,7 @@ fn delta_run_wraps(col: &mut VerifiedDeltaColumn<i64>, run: DeltaRun) -> (r: boo
 /// values are 2, 4 and 6. (That the load succeeds is not said: what it
 /// is, where it does.)
 #[allow(dead_code)]
-fn delta_load_a_fill<C: VCodec>() -> (r: Option<VerifiedDeltaColumn<u64, C>>)
+fn delta_load_a_fill<C: Codec>() -> (r: Option<DeltaColumn<u64, C>>)
     ensures
         r matches Some(c) ==> c@ == seq![2u64, 4, 6],
 {
@@ -11227,7 +11224,7 @@ fn delta_load_a_fill<C: VCodec>() -> (r: Option<VerifiedDeltaColumn<u64, C>>)
         lemma_delta_run_exact(run, 2);
         assert(delta_run_values::<u64>(run) =~= seq![2u64, 4, 6]);
     }
-    match VerifiedDeltaColumn::<u64, C>::load_with(none.as_slice(), LoadOpts::new().with_length(3).with_fill(2i64)) {
+    match DeltaColumn::<u64, C>::load_with(none.as_slice(), LoadOpts::new().with_length(3).with_fill(2i64)) {
         Ok(c) => Some(c),
         Err(_) => None,
     }
@@ -11236,7 +11233,7 @@ fn delta_load_a_fill<C: VCodec>() -> (r: Option<VerifiedDeltaColumn<u64, C>>)
 /// A fill of nulls, for a type that has them: no bytes load as that
 /// many nulls.
 #[allow(dead_code)]
-fn delta_load_null_fill() -> (r: Option<VerifiedDeltaColumn<Option<u32>>>)
+fn delta_load_null_fill() -> (r: Option<DeltaColumn<Option<u32>>>)
     ensures
         r matches Some(c) ==> c@ == seq![None::<u32>, None, None],
 {
@@ -11245,7 +11242,7 @@ fn delta_load_null_fill() -> (r: Option<VerifiedDeltaColumn<Option<u32>>>)
     proof {
         assert(delta_run_values::<Option<u32>>(run) =~= seq![None::<u32>, None, None]);
     }
-    match VerifiedDeltaColumn::<Option<u32>>::load_with(
+    match DeltaColumn::<Option<u32>>::load_with(
         none.as_slice(),
         LoadOpts::new().with_max_segments(4).with_length(3).with_fill(None::<i64>),
     ) {
@@ -11258,22 +11255,22 @@ fn delta_load_null_fill() -> (r: Option<VerifiedDeltaColumn<Option<u32>>>)
 /// loads is what the bytes hold, and has the length. With a fill it has
 /// the length too, and is what the bytes hold unless they are empty.
 #[allow(dead_code)]
-fn delta_load_with_length<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8], len: usize, fill: T::Fill) -> (r: (
-    Option<VerifiedDeltaColumn<T, C>>,
-    Option<VerifiedDeltaColumn<T, C>>,
+fn delta_load_with_length<T: DeltaValue<C>, C: Codec>(bytes: &[u8], len: usize, fill: T::Fill) -> (r: (
+    Option<DeltaColumn<T, C>>,
+    Option<DeltaColumn<T, C>>,
 ))
     ensures
-        r.0 matches Some(c) ==> VerifiedDeltaColumn::<T, C>::valid(bytes@) && c@ == VerifiedDeltaColumn::<T, C>::values(
+        r.0 matches Some(c) ==> DeltaColumn::<T, C>::valid(bytes@) && c@ == DeltaColumn::<T, C>::values(
             bytes@,
         ) && c@.len() == len,
         r.1 matches Some(c) ==> c@.len() == len,
-        r.1 matches Some(c) ==> bytes@.len() > 0 ==> c@ == VerifiedDeltaColumn::<T, C>::values(bytes@),
+        r.1 matches Some(c) ==> bytes@.len() > 0 ==> c@ == DeltaColumn::<T, C>::values(bytes@),
 {
-    let a = match VerifiedDeltaColumn::<T, C>::load_with(bytes, LoadOpts::new().with_length(len)) {
+    let a = match DeltaColumn::<T, C>::load_with(bytes, LoadOpts::new().with_length(len)) {
         Ok(c) => Some(c),
         Err(_) => None,
     };
-    let b = match VerifiedDeltaColumn::<T, C>::load_with(bytes, LoadOpts::new().with_length(len).with_fill(fill)) {
+    let b = match DeltaColumn::<T, C>::load_with(bytes, LoadOpts::new().with_length(len).with_fill(fill)) {
         Ok(c) => Some(c),
         Err(_) => None,
     };
@@ -11284,21 +11281,21 @@ fn delta_load_with_length<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8], len: usize
 /// says; and no bytes load, where they do, as the length 0 alone unless
 /// there is a fill.
 #[allow(dead_code)]
-fn delta_load_with_defaults<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8], len: usize) -> (r: Option<
-    VerifiedDeltaColumn<T, C>,
+fn delta_load_with_defaults<T: DeltaValue<C>, C: Codec>(bytes: &[u8], len: usize) -> (r: Option<
+    DeltaColumn<T, C>,
 >)
     ensures
-        r matches Some(c) ==> VerifiedDeltaColumn::<T, C>::valid(bytes@) && c@ == VerifiedDeltaColumn::<T, C>::values(
+        r matches Some(c) ==> DeltaColumn::<T, C>::valid(bytes@) && c@ == DeltaColumn::<T, C>::values(
             bytes@,
         ),
 {
     let none: Vec<u8> = Vec::new();
     proof {
-        VerifiedDeltaColumn::<T, C>::lemma_no_bytes();
+        DeltaColumn::<T, C>::lemma_no_bytes();
     }
-    let r = VerifiedDeltaColumn::<T, C>::load_with(none.as_slice(), LoadOpts::new().with_length(len));
+    let r = DeltaColumn::<T, C>::load_with(none.as_slice(), LoadOpts::new().with_length(len));
     assert(r is Ok ==> len == 0);
-    match VerifiedDeltaColumn::<T, C>::load_with(bytes, LoadOpts::new()) {
+    match DeltaColumn::<T, C>::load_with(bytes, LoadOpts::new()) {
         Ok(c) => Some(c),
         Err(_) => None,
     }
@@ -11307,16 +11304,16 @@ fn delta_load_with_defaults<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8], len: usi
 /// What a fill loads as is the run of it, put into a new column: both
 /// columns, where the run passes the check and the fill loads.
 #[allow(dead_code)]
-fn delta_fill_is_a_run(len: usize, d: i64) -> (r: Option<(VerifiedDeltaColumn<u64>, VerifiedDeltaColumn<u64>)>)
+fn delta_fill_is_a_run(len: usize, d: i64) -> (r: Option<(DeltaColumn<u64>, DeltaColumn<u64>)>)
     ensures
         r matches Some((a, b)) ==> a@ == b@ && a@.len() == len,
 {
     let none: Vec<u8> = Vec::new();
     let run = DeltaRun { prefix: 0, delta: Some(d), count: len };
-    if len as u64 <= i64::MAX as u64 && len <= usize::MAX - 3 && VerifiedDeltaColumn::<u64>::run_fits(&run) {
-        match VerifiedDeltaColumn::<u64>::load_with(none.as_slice(), LoadOpts::new().with_length(len).with_fill(d)) {
+    if len as u64 <= i64::MAX as u64 && len <= usize::MAX - 3 && DeltaColumn::<u64>::run_fits(&run) {
+        match DeltaColumn::<u64>::load_with(none.as_slice(), LoadOpts::new().with_length(len).with_fill(d)) {
             Ok(c) => {
-                let mut col = VerifiedDeltaColumn::<u64>::new();
+                let mut col = DeltaColumn::<u64>::new();
                 let mut runs: Vec<DeltaRun> = Vec::new();
                 runs.push(run);
                 proof {
@@ -11384,7 +11381,7 @@ proof fn delta_runs_ends<T: VDelta>(r: DeltaRun)
 /// values, in order: here each goes into a `Vec`, which then holds what
 /// the column does. For every type a delta column holds, and every codec.
 #[allow(dead_code)]
-fn delta_read_in_a_loop<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (out: Vec<T>)
+fn delta_read_in_a_loop<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (out: Vec<T>)
     ensures
         out@ == col@,
 {
@@ -11410,7 +11407,7 @@ fn delta_read_in_a_loop<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<
 /// A `for` loop over a delta column itself: whether its numbers are in
 /// order, none less than one before it.
 #[allow(dead_code)]
-fn delta_ascending(col: &VerifiedDeltaColumn<u64>) -> (r: bool)
+fn delta_ascending(col: &DeltaColumn<u64>) -> (r: bool)
     ensures
         r == forall|i: int, j: int| 0 <= i <= j < col@.len() ==> col@[i] <= col@[j],
 {
@@ -11439,7 +11436,7 @@ fn delta_ascending(col: &VerifiedDeltaColumn<u64>) -> (r: bool)
 /// Two delta columns read side by side, with the standard library's
 /// `zip`: whether they hold the same numbers.
 #[allow(dead_code)]
-fn delta_agree(a: &VerifiedDeltaColumn<i64>, b: &VerifiedDeltaColumn<i64>) -> (r: bool)
+fn delta_agree(a: &DeltaColumn<i64>, b: &DeltaColumn<i64>) -> (r: bool)
     requires
         a@.len() == b@.len(),
     ensures
@@ -11468,11 +11465,11 @@ fn delta_agree(a: &VerifiedDeltaColumn<i64>, b: &VerifiedDeltaColumn<i64>) -> (r
 /// a delta column takes, since each is a value the column held: for
 /// every type and codec.
 #[allow(dead_code)]
-fn delta_copied_by_iter<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: VerifiedDeltaColumn<T, C>)
+fn delta_copied_by_iter<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (r: DeltaColumn<T, C>)
     ensures
         r@ == col@,
 {
-    let mut r: VerifiedDeltaColumn<T, C> = VerifiedDeltaColumn::new();
+    let mut r: DeltaColumn<T, C> = DeltaColumn::new();
     proof {
         col.lemma_fits();
         assert(r@ =~= col@.take(0));
@@ -11498,7 +11495,7 @@ fn delta_copied_by_iter<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<
 /// many places on and leaves the iterator behind it, and an iterator
 /// knows how many values it has left.
 #[allow(dead_code)]
-fn delta_every_other(col: &VerifiedDeltaColumn<i64>)
+fn delta_every_other(col: &DeltaColumn<i64>)
     requires
         col@.len() == 5,
 {
@@ -11522,7 +11519,7 @@ fn delta_every_other(col: &VerifiedDeltaColumn<i64>)
 /// The value two places on, if a delta column is that long: for every
 /// type and codec.
 #[allow(dead_code)]
-fn delta_the_third<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: Option<T>)
+fn delta_the_third<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (r: Option<T>)
     ensures
         match r {
             Some(v) => col@.len() > 2 && v == col@[2],
@@ -11537,7 +11534,7 @@ fn delta_the_third<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>
 /// is, and each then goes its own way; and an iterator of no column
 /// gives nothing. For every type and codec.
 #[allow(dead_code)]
-fn delta_two_readers<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>)
+fn delta_two_readers<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>)
     requires
         col@.len() == 3,
 {
@@ -11553,7 +11550,7 @@ fn delta_two_readers<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, 
     let left_a = a.len();
     let left_b = b.len();
     assert(left_a == 0 && left_b == 1);
-    let mut none = VerifiedDeltaIter::<T, C>::default();
+    let mut none = DeltaIter::<T, C>::default();
     let n = none.next();
     assert(n is None);
 }
@@ -11562,7 +11559,7 @@ fn delta_two_readers<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, 
 /// column: a `for` loop then reads the column's values there. For every
 /// type and codec.
 #[allow(dead_code)]
-fn delta_in_the_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (out: Vec<T>)
+fn delta_in_the_range<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, a: usize, b: usize) -> (out: Vec<T>)
     requires
         a <= b <= col@.len(),
     ensures
@@ -11595,7 +11592,7 @@ fn delta_in_the_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T,
 /// step moves the one, `set_max` the other, and what is left is the
 /// column's values between the two.
 #[allow(dead_code)]
-fn delta_where_it_stands(col: &VerifiedDeltaColumn<u64>)
+fn delta_where_it_stands(col: &DeltaColumn<u64>)
     requires
         col@.len() == 10,
 {
@@ -11629,7 +11626,7 @@ fn delta_where_it_stands(col: &VerifiedDeltaColumn<u64>)
 /// end of what it gave, and its window ends there: where the range
 /// ended, or the column if that came first. For every type and codec.
 #[allow(dead_code)]
-fn delta_read_out<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (r: (usize, usize, usize))
+fn delta_read_out<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, a: usize, b: usize) -> (r: (usize, usize, usize))
     requires
         a <= b,
         a <= col@.len(),
@@ -11677,7 +11674,7 @@ fn delta_read_out<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>,
 /// whose window moves from the one to the other, and how many values the
 /// second window then has left: for every type and codec.
 #[allow(dead_code)]
-fn delta_at_two_places<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, i: usize, j: usize, n: usize) -> (r: (
+fn delta_at_two_places<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, i: usize, j: usize, n: usize) -> (r: (
     T,
     T,
     usize,
@@ -11705,7 +11702,7 @@ fn delta_at_two_places<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T
 /// How long the window of a delta column's iterator is: that many values
 /// it has left, unless the window ends past the column and it has fewer.
 #[allow(dead_code)]
-fn delta_window_len<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'_, T, C>) -> (r: usize)
+fn delta_window_len<T: DeltaValue<C>, C: Codec>(it: &DeltaIter<'_, T, C>) -> (r: usize)
     ensures
         r >= it.rest().len(),
         it.end_pos() <= it.column().len() ==> r == it.rest().len(),
@@ -11719,7 +11716,7 @@ fn delta_window_len<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'_, T, 
 /// not at all; and where a copy, an iterator over a whole column and an
 /// iterator of no column stand.
 #[allow(dead_code)]
-fn delta_moved_past(col: &VerifiedDeltaColumn<u64>)
+fn delta_moved_past(col: &DeltaColumn<u64>)
     requires
         col@.len() == 10,
 {
@@ -11779,7 +11776,7 @@ fn delta_moved_past(col: &VerifiedDeltaColumn<u64>)
     let (p, e, n) = (it.pos(), it.end_pos(), it.len());
     assert(v is None && p == 10 && e == 10 && n == 0);
     // an iterator of no column
-    let mut d = VerifiedDeltaIter::<u64>::default();
+    let mut d = DeltaIter::<u64>::default();
     let (p, e) = (d.pos(), d.end_pos());
     assert(p == 0 && e == 0);
     d.set_max(4);
@@ -11791,7 +11788,7 @@ fn delta_moved_past(col: &VerifiedDeltaColumn<u64>)
 /// which column a new iterator or a copy reads, where it stands and
 /// where its window ends, and what a move leaves it to give.
 #[allow(dead_code)]
-fn delta_told_by_the_call(col: &VerifiedDeltaColumn<u64>)
+fn delta_told_by_the_call(col: &DeltaColumn<u64>)
     requires
         col@.len() == 10,
 {
@@ -11806,7 +11803,7 @@ fn delta_told_by_the_call(col: &VerifiedDeltaColumn<u64>)
     assert(b.pos() == 1 && b.end_pos() == 20 && b.column() == col@);
     assert(b.source() == it.source());
     // an iterator of no column
-    let d = VerifiedDeltaIter::<u64>::default();
+    let d = DeltaIter::<u64>::default();
     assert(d.pos() == 0 && d.end_pos() == 0);
     // a move on, and two moves of the window: to one with values, and
     // to one with none
@@ -11824,7 +11821,7 @@ fn delta_told_by_the_call(col: &VerifiedDeltaColumn<u64>)
 /// iterator that reads a column has that column's values for its own,
 /// and one that reads none has none.
 #[allow(dead_code)]
-fn delta_told_by_the_source<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'_, T, C>, col: &VerifiedDeltaColumn<T, C>)
+fn delta_told_by_the_source<T: DeltaValue<C>, C: Codec>(it: &DeltaIter<'_, T, C>, col: &DeltaColumn<T, C>)
     ensures
         it.source() == Some(*col) ==> it.column() == col@,
         it.source() is None ==> it.column().len() == 0,
@@ -11837,7 +11834,7 @@ fn delta_told_by_the_source<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter
 /// What `iter` says by itself of a delta column: the iterator has all
 /// the column's values left, and stands at its start.
 #[allow(dead_code)]
-fn delta_told_by_iter<'a, T: VDeltaValue<C>, C: VCodec>(col: &'a VerifiedDeltaColumn<T, C>) -> (it: VerifiedDeltaIter<'a, T, C>)
+fn delta_told_by_iter<'a, T: DeltaValue<C>, C: Codec>(col: &'a DeltaColumn<T, C>) -> (it: DeltaIter<'a, T, C>)
     ensures
         it.rest() == col@,
         it.column() == col@,
@@ -11850,7 +11847,7 @@ fn delta_told_by_iter<'a, T: VDeltaValue<C>, C: VCodec>(col: &'a VerifiedDeltaCo
 
 /// What a `for` loop over a delta column starts from: the same.
 #[allow(dead_code)]
-fn delta_told_by_into_iter<'a, T: VDeltaValue<C>, C: VCodec>(col: &'a VerifiedDeltaColumn<T, C>) -> (it: VerifiedDeltaIter<'a, T, C>)
+fn delta_told_by_into_iter<'a, T: DeltaValue<C>, C: Codec>(col: &'a DeltaColumn<T, C>) -> (it: DeltaIter<'a, T, C>)
     ensures
         it.rest() == col@,
         it.column() == col@,
@@ -11864,8 +11861,8 @@ fn delta_told_by_into_iter<'a, T: VDeltaValue<C>, C: VCodec>(col: &'a VerifiedDe
 /// What `iter_range` says by itself: the iterator has the values of the
 /// range left, and its window is the range.
 #[allow(dead_code)]
-fn delta_told_by_iter_range<'a, T: VDeltaValue<C>, C: VCodec>(col: &'a VerifiedDeltaColumn<T, C>, start: usize, end: usize) -> (it:
-    VerifiedDeltaIter<'a, T, C>)
+fn delta_told_by_iter_range<'a, T: DeltaValue<C>, C: Codec>(col: &'a DeltaColumn<T, C>, start: usize, end: usize) -> (it:
+    DeltaIter<'a, T, C>)
     requires
         start <= end <= col@.len(),
     ensures
@@ -11882,7 +11879,7 @@ fn delta_told_by_iter_range<'a, T: VDeltaValue<C>, C: VCodec>(col: &'a VerifiedD
 /// of the iterator's own specification, and in those of Verus's
 /// specification of an iterator.
 #[allow(dead_code)]
-fn delta_told_by_next<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>) -> (r: Option<T>)
+fn delta_told_by_next<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C>) -> (r: Option<T>)
     ensures
         match r {
             Some(v) => {
@@ -11909,7 +11906,7 @@ fn delta_told_by_next<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'
 
 /// What `nth` says by itself of a delta column's iterator.
 #[allow(dead_code)]
-fn delta_told_by_nth<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, n: usize) -> (r: Option<T>)
+fn delta_told_by_nth<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C>, n: usize) -> (r: Option<T>)
     ensures
         n < old(it).rest().len() ==> {
             &&& r == Some(old(it).rest()[n as int])
@@ -11934,7 +11931,7 @@ fn delta_told_by_nth<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_
 /// and in its column, with the column's values between there and the
 /// window's end left.
 #[allow(dead_code)]
-fn delta_told_by_an_iters_place<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'_, T, C>) -> (r: usize)
+fn delta_told_by_an_iters_place<T: DeltaValue<C>, C: Codec>(it: &DeltaIter<'_, T, C>) -> (r: usize)
     ensures
         r == it.pos(),
         it.pos() <= it.end_pos(),
@@ -11946,7 +11943,7 @@ fn delta_told_by_an_iters_place<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDelta
 
 /// Asked for the window's end alone, an iterator says as much.
 #[allow(dead_code)]
-fn delta_told_by_an_iters_end<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'_, T, C>) -> (r: usize)
+fn delta_told_by_an_iters_end<T: DeltaValue<C>, C: Codec>(it: &DeltaIter<'_, T, C>) -> (r: usize)
     ensures
         r == it.end_pos(),
         it.pos() <= it.end_pos(),
@@ -11958,7 +11955,7 @@ fn delta_told_by_an_iters_end<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIt
 
 /// Asked how many values it has left, an iterator says how many.
 #[allow(dead_code)]
-fn delta_told_by_an_iters_len<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'_, T, C>) -> (r: usize)
+fn delta_told_by_an_iters_len<T: DeltaValue<C>, C: Codec>(it: &DeltaIter<'_, T, C>) -> (r: usize)
     ensures
         r == it.rest().len(),
 {
@@ -11968,7 +11965,7 @@ fn delta_told_by_an_iters_len<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIt
 /// Asked how many values it may yet give, an iterator says exactly how
 /// many it has left, as its least and as its most.
 #[allow(dead_code)]
-fn delta_told_by_a_size_hint<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'_, T, C>) -> (r: (usize, Option<usize>))
+fn delta_told_by_a_size_hint<T: DeltaValue<C>, C: Codec>(it: &DeltaIter<'_, T, C>) -> (r: (usize, Option<usize>))
     ensures
         r.0 == it.rest().len(),
         r.1 == Some(r.0),
@@ -11979,7 +11976,7 @@ fn delta_told_by_a_size_hint<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIte
 /// What `set_max` says by itself: the iterator stays, and its window
 /// ends where asked, or where the iterator stands if that is further on.
 #[allow(dead_code)]
-fn delta_told_by_set_max<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, end: usize)
+fn delta_told_by_set_max<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C>, end: usize)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -11997,7 +11994,7 @@ fn delta_told_by_set_max<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIte
 /// What `advance_to` says by itself: of a place behind the iterator, in
 /// what it has left, and past it.
 #[allow(dead_code)]
-fn delta_told_by_advance_to<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, target: usize)
+fn delta_told_by_advance_to<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C>, target: usize)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -12021,7 +12018,7 @@ fn delta_told_by_advance_to<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDelta
 /// What `advance_by` says by itself: of no more values than the iterator
 /// has left, and of more.
 #[allow(dead_code)]
-fn delta_told_by_advance_by<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, amount: usize)
+fn delta_told_by_advance_by<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C>, amount: usize)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -12042,7 +12039,7 @@ fn delta_told_by_advance_by<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDelta
 /// iterator, of one ahead of it in the column, and of one that starts
 /// past its own end or the column's.
 #[allow(dead_code)]
-fn delta_told_by_shift<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, range: Range<usize>)
+fn delta_told_by_shift<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C>, range: Range<usize>)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -12084,7 +12081,7 @@ fn delta_told_by_shift<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<
 /// What `shift_next` says by itself: of a window with a value, and of
 /// one with none.
 #[allow(dead_code)]
-fn delta_told_by_shift_next<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, range: Range<usize>) -> (r: Option<T>)
+fn delta_told_by_shift_next<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C>, range: Range<usize>) -> (r: Option<T>)
     requires
         range.start >= old(it).pos(),
     ensures
@@ -12119,7 +12116,7 @@ fn delta_told_by_shift_next<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDelta
 /// reads the same column, stands at the same place, and has the same
 /// values left.
 #[allow(dead_code)]
-fn delta_told_by_an_iters_clone<'a, T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'a, T, C>) -> (r: VerifiedDeltaIter<'a, T, C>)
+fn delta_told_by_an_iters_clone<'a, T: DeltaValue<C>, C: Codec>(it: &DeltaIter<'a, T, C>) -> (r: DeltaIter<'a, T, C>)
     ensures
         r.rest() == it.rest(),
         r.column() == it.column(),
@@ -12133,7 +12130,7 @@ fn delta_told_by_an_iters_clone<'a, T: VDeltaValue<C>, C: VCodec>(it: &VerifiedD
 /// What `default` says by itself: an iterator of no column, with nothing
 /// to give.
 #[allow(dead_code)]
-fn delta_told_by_an_iters_default<'a, T: VDeltaValue<C>, C: VCodec>() -> (r: VerifiedDeltaIter<'a, T, C>)
+fn delta_told_by_an_iters_default<'a, T: DeltaValue<C>, C: Codec>() -> (r: DeltaIter<'a, T, C>)
     ensures
         r.rest().len() == 0,
         r.column().len() == 0,
@@ -12141,7 +12138,7 @@ fn delta_told_by_an_iters_default<'a, T: VDeltaValue<C>, C: VCodec>() -> (r: Ver
         r.pos() == 0,
         r.end_pos() == 0,
 {
-    VerifiedDeltaIter::default()
+    DeltaIter::default()
 }
 
 // ── Delta columns: runs of differences, and a suspended iterator ────────────
@@ -12151,7 +12148,7 @@ fn delta_told_by_an_iters_default<'a, T: VDeltaValue<C>, C: VCodec>() -> (r: Ver
 /// the column's differences; their values are the column's; and each is
 /// a run the column's type can keep. For every type and codec.
 #[allow(dead_code)]
-fn delta_in_runs<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (out: Vec<DeltaRun>)
+fn delta_in_runs<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (out: Vec<DeltaRun>)
     ensures
         out@ == delta_runs_at(col@, 0, runs_of(deltas(col@))),
         delta_runs_values::<T>(out@) == col@,
@@ -12183,12 +12180,12 @@ fn delta_in_runs<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) 
 /// A delta column copied by its runs: what `runs()` gives is what
 /// `splice_runs` takes, and the copy holds the column's values.
 #[allow(dead_code)]
-fn delta_copied_by_runs<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: VerifiedDeltaColumn<T, C>)
+fn delta_copied_by_runs<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (r: DeltaColumn<T, C>)
     ensures
         r@ == col@,
 {
     let runs = delta_in_runs(col);
-    let mut r: VerifiedDeltaColumn<T, C> = VerifiedDeltaColumn::new();
+    let mut r: DeltaColumn<T, C> = DeltaColumn::new();
     r.splice_runs(0, 0, runs.as_slice());
     assert(r@ =~= col@);
     r
@@ -12199,14 +12196,14 @@ fn delta_copied_by_runs<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<
 /// values the iterator moved past, it is one the type can keep, and it
 /// is at least one value long, so the loop ends.
 #[allow(dead_code)]
-fn delta_copied_run_by_run<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: VerifiedDeltaColumn<
+fn delta_copied_run_by_run<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (r: DeltaColumn<
     T,
     C,
 >)
     ensures
         r@ == col@,
 {
-    let mut r: VerifiedDeltaColumn<T, C> = VerifiedDeltaColumn::new();
+    let mut r: DeltaColumn<T, C> = DeltaColumn::new();
     let mut it = col.iter();
     assert(r@ + it.rest() =~= col@);
     loop
@@ -12251,11 +12248,11 @@ fn delta_copied_run_by_run<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColu
 /// of any column of the type, since a run says what its values are and
 /// not where they came from.
 #[allow(dead_code)]
-fn delta_moved_by_runs<T: VDeltaValue<C>, C: VCodec>(
-    src: &VerifiedDeltaColumn<T, C>,
+fn delta_moved_by_runs<T: DeltaValue<C>, C: Codec>(
+    src: &DeltaColumn<T, C>,
     a: usize,
     b: usize,
-    dst: &mut VerifiedDeltaColumn<T, C>,
+    dst: &mut DeltaColumn<T, C>,
     at: usize,
 )
     requires
@@ -12336,7 +12333,7 @@ proof fn delta_diffs_with_a_null()
 /// alone, from 0; then two values each 2 more than the one before, from
 /// 5; then one value the same as the one before it, 9; and then none.
 #[allow(dead_code)]
-fn delta_runs_of_four(col: &VerifiedDeltaColumn<u64>)
+fn delta_runs_of_four(col: &DeltaColumn<u64>)
     requires
         col@ == seq![5u64, 7u64, 9u64, 9u64],
 {
@@ -12383,7 +12380,7 @@ fn delta_runs_of_four(col: &VerifiedDeltaColumn<u64>)
 /// run after it counts from the last number before them: here from
 /// none, so from 0.
 #[allow(dead_code)]
-fn delta_nulls_in_a_run(col: &VerifiedDeltaColumn<Option<u32>>)
+fn delta_nulls_in_a_run(col: &DeltaColumn<Option<u32>>)
     requires
         col@ == seq![None, None, Some(3u32)],
 {
@@ -12425,7 +12422,7 @@ fn delta_nulls_in_a_run(col: &VerifiedDeltaColumn<Option<u32>>)
 /// its `prefix`, or 0 where there is none; and its `delta` is how much
 /// the `i`-th value is more, as an `i64`.
 #[allow(dead_code)]
-fn delta_the_number_before(col: &VerifiedDeltaColumn<i64>, i: usize) -> (r: Option<DeltaRun>)
+fn delta_the_number_before(col: &DeltaColumn<i64>, i: usize) -> (r: Option<DeltaRun>)
     requires
         i < col@.len(),
     ensures
@@ -12457,7 +12454,7 @@ fn delta_the_number_before(col: &VerifiedDeltaColumn<i64>, i: usize) -> (r: Opti
 /// run's number before it is the one at the place where the first
 /// ended.
 #[allow(dead_code)]
-fn delta_two_runs_differ<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>) -> (r: (
+fn delta_two_runs_differ<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C>) -> (r: (
     Option<DeltaRun>,
     Option<DeltaRun>,
 ))
@@ -12540,7 +12537,7 @@ proof fn delta_runs_from<T: VDelta>(vs: Seq<T>, a: int, r: Run<Option<i64>>, rs:
 /// resumed from the state gives the rest. Nothing edits the column
 /// between, so the state is one the column takes.
 #[allow(dead_code)]
-fn delta_read_in_two_goes<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, k: usize) -> (out: Vec<T>)
+fn delta_read_in_two_goes<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, k: usize) -> (out: Vec<T>)
     ensures
         out@ == col@,
 {
@@ -12595,8 +12592,8 @@ fn delta_read_in_two_goes<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColum
 /// the column: the one resumed stands where the suspended one stood,
 /// reads the same column, and has the values left that it had.
 #[allow(dead_code)]
-fn delta_resumed<'a, T: VDeltaValue<C>, C: VCodec>(col: &'a VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (r:
-    Option<VerifiedDeltaIter<'a, T, C>>)
+fn delta_resumed<'a, T: DeltaValue<C>, C: Codec>(col: &'a DeltaColumn<T, C>, a: usize, b: usize) -> (r:
+    Option<DeltaIter<'a, T, C>>)
     requires
         a <= b <= col@.len(),
     ensures
@@ -12618,7 +12615,7 @@ fn delta_resumed<'a, T: VDeltaValue<C>, C: VCodec>(col: &'a VerifiedDeltaColumn<
 /// edit more, and a state fits only a column that counts the edits it
 /// does (`lemma_fits`).
 #[allow(dead_code)]
-fn delta_ended_by_an_edit<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, v: T) -> (r: bool)
+fn delta_ended_by_an_edit<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, v: T) -> (r: bool)
     requires
         v.fits(),
     ensures
@@ -12637,7 +12634,7 @@ fn delta_ended_by_an_edit<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaC
 /// but 0. The column's count after `k` edits, for any `k` a `usize`
 /// holds, is not what it was (`lemma_after_edits`).
 #[allow(dead_code)]
-fn delta_ended_by_many<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, v: T, k: usize) -> (r: bool)
+fn delta_ended_by_many<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, v: T, k: usize) -> (r: bool)
     requires
         v.fits(),
         k > 0,
@@ -12673,7 +12670,7 @@ fn delta_ended_by_many<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColu
 /// state of the column, and the column, which nothing has edited, gives
 /// an iterator for it still.
 #[allow(dead_code)]
-fn delta_a_copy_edited<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, v: T) -> (r: (bool, bool))
+fn delta_a_copy_edited<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, v: T) -> (r: (bool, bool))
     requires
         v.fits(),
     ensures
@@ -12696,9 +12693,9 @@ fn delta_a_copy_edited<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T
 /// gives that column's values in the state's window. For every type and
 /// codec.
 #[allow(dead_code)]
-fn delta_resumed_elsewhere<T: VDeltaValue<C>, C: VCodec>(
-    s: &VerifiedDeltaIterState,
-    other: &VerifiedDeltaColumn<T, C>,
+fn delta_resumed_elsewhere<T: DeltaValue<C>, C: Codec>(
+    s: &DeltaIterState,
+    other: &DeltaColumn<T, C>,
 ) -> (r: Option<Vec<T>>)
     ensures
         r is Some <==> s.fits(other),
@@ -12731,7 +12728,7 @@ fn delta_resumed_elsewhere<T: VDeltaValue<C>, C: VCodec>(
 /// the one resumed has none left either, and its window ends where it
 /// stands.
 #[allow(dead_code)]
-fn delta_resumed_at_the_end<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize)
+fn delta_resumed_at_the_end<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, a: usize, b: usize)
     requires
         a <= b <= col@.len(),
 {
@@ -12753,7 +12750,7 @@ fn delta_resumed_at_the_end<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaCol
 /// What `next_run` says by itself of a delta column's iterator, each
 /// thing asked for on its own and with no lemma.
 #[allow(dead_code)]
-fn delta_told_by_next_run<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>) -> (r: Option<DeltaRun>)
+fn delta_told_by_next_run<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C>) -> (r: Option<DeltaRun>)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -12779,7 +12776,7 @@ fn delta_told_by_next_run<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIt
 /// What `runs` says by itself: the iterator of runs is of the iterator
 /// it was made of, as that stood.
 #[allow(dead_code)]
-fn delta_told_by_runs<'a, T: VDeltaValue<C>, C: VCodec>(it: VerifiedDeltaIter<'a, T, C>) -> (r: VerifiedDeltaRuns<
+fn delta_told_by_runs<'a, T: DeltaValue<C>, C: Codec>(it: DeltaIter<'a, T, C>) -> (r: DeltaRuns<
     'a,
     T,
     C,
@@ -12793,7 +12790,7 @@ fn delta_told_by_runs<'a, T: VDeltaValue<C>, C: VCodec>(it: VerifiedDeltaIter<'a
 /// What `next` says by itself of an iterator of a delta column's runs:
 /// what `next_run` says of the iterator of values it is of.
 #[allow(dead_code)]
-fn delta_told_by_a_runs_next<T: VDeltaValue<C>, C: VCodec>(rs: &mut VerifiedDeltaRuns<'_, T, C>) -> (r: Option<
+fn delta_told_by_a_runs_next<T: DeltaValue<C>, C: Codec>(rs: &mut DeltaRuns<'_, T, C>) -> (r: Option<
     DeltaRun,
 >)
     ensures
@@ -12822,10 +12819,10 @@ fn delta_told_by_a_runs_next<T: VDeltaValue<C>, C: VCodec>(rs: &mut VerifiedDelt
 /// and its window's end, the iterator's values left are its column's
 /// between the two, and the state fits the column the iterator reads.
 #[allow(dead_code)]
-fn delta_told_by_suspend<T: VDeltaValue<C>, C: VCodec>(
-    it: &VerifiedDeltaIter<'_, T, C>,
-    col: &VerifiedDeltaColumn<T, C>,
-) -> (s: VerifiedDeltaIterState)
+fn delta_told_by_suspend<T: DeltaValue<C>, C: Codec>(
+    it: &DeltaIter<'_, T, C>,
+    col: &DeltaColumn<T, C>,
+) -> (s: DeltaIterState)
     ensures
         s.pos() == it.pos(),
         s.end_pos() == it.end_pos(),
@@ -12841,10 +12838,10 @@ fn delta_told_by_suspend<T: VDeltaValue<C>, C: VCodec>(
 /// its window ends where the state's does, or, at the column's end,
 /// where it stands.
 #[allow(dead_code)]
-fn delta_told_by_try_resume<'a, T: VDeltaValue<C>, C: VCodec>(
-    s: &VerifiedDeltaIterState,
-    col: &'a VerifiedDeltaColumn<T, C>,
-) -> (r: Result<VerifiedDeltaIter<'a, T, C>, PackError>)
+fn delta_told_by_try_resume<'a, T: DeltaValue<C>, C: Codec>(
+    s: &DeltaIterState,
+    col: &'a DeltaColumn<T, C>,
+) -> (r: Result<DeltaIter<'a, T, C>, PackError>)
     ensures
         r is Ok <==> s.fits(col),
         r is Ok ==> s.edits() == col.edits(),
@@ -12860,9 +12857,9 @@ fn delta_told_by_try_resume<'a, T: VDeltaValue<C>, C: VCodec>(
 /// What `lemma_fits` says by itself of a state: one that fits a column
 /// counts the edits the column does.
 #[allow(dead_code)]
-proof fn delta_told_by_a_states_fit<T: VDeltaValue<C>, C: VCodec>(
-    s: &VerifiedDeltaIterState,
-    col: &VerifiedDeltaColumn<T, C>,
+proof fn delta_told_by_a_states_fit<T: DeltaValue<C>, C: Codec>(
+    s: &DeltaIterState,
+    col: &DeltaColumn<T, C>,
 )
     requires
         s.fits(col),
@@ -12878,7 +12875,7 @@ proof fn delta_told_by_a_states_fit<T: VDeltaValue<C>, C: VCodec>(
 /// said of the column's values alone: a scan of an iterator over that
 /// window. For every type and codec.
 #[allow(dead_code)]
-fn delta_first_place_in<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T, a: usize, b: usize) -> (r:
+fn delta_first_place_in<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, x: T, a: usize, b: usize) -> (r:
     Option<usize>)
     requires
         a <= b <= col@.len(),
@@ -12913,7 +12910,7 @@ fn delta_first_place_in<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<
 /// where the last one stopped: the places come in rising order, each
 /// holds `x`, and no other place does. For every type and codec.
 #[allow(dead_code)]
-fn delta_all_places<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T) -> (out: Vec<usize>)
+fn delta_all_places<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, x: T) -> (out: Vec<usize>)
     ensures
         forall|i: int, j: int| 0 <= i < j < out@.len() ==> out@[i] < out@[j],
         forall|i: int| 0 <= i < out@.len() ==> out@[i] < col@.len() && col@[out@[i] as int] == x,
@@ -12978,7 +12975,7 @@ fn delta_all_places<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C
 /// A number too large for a delta column is at no place of one: a scan
 /// for it finds nothing, whatever the column holds.
 #[allow(dead_code)]
-fn delta_scan_unfitting(col: &VerifiedDeltaColumn<u64>) -> (r: Option<usize>)
+fn delta_scan_unfitting(col: &DeltaColumn<u64>) -> (r: Option<usize>)
     ensures
         r is None,
 {
@@ -12998,7 +12995,7 @@ fn delta_scan_unfitting(col: &VerifiedDeltaColumn<u64>) -> (r: Option<usize>)
 /// The first null of a column that has nulls: a scan for the null
 /// value.
 #[allow(dead_code)]
-fn delta_first_null(col: &VerifiedDeltaColumn<Option<i64>>) -> (r: Option<usize>)
+fn delta_first_null(col: &DeltaColumn<Option<i64>>) -> (r: Option<usize>)
     ensures
         match r {
             Some(k) => k < col@.len() && col@[k as int] is None && forall|i: int| 0 <= i < k ==> col@[i] is Some,
@@ -13013,7 +13010,7 @@ fn delta_first_null(col: &VerifiedDeltaColumn<Option<i64>>) -> (r: Option<usize>
 /// said of the numbers alone: the bounds of a scan, written as a range
 /// of Rust's, are plain inequalities for a column of plain numbers.
 #[allow(dead_code)]
-fn delta_first_in_bounds(col: &VerifiedDeltaColumn<u64>, lo: u64, hi: u64) -> (r: Option<(usize, u64)>)
+fn delta_first_in_bounds(col: &DeltaColumn<u64>, lo: u64, hi: u64) -> (r: Option<(usize, u64)>)
     ensures
         match r {
             Some((k, v)) => {
@@ -13032,7 +13029,7 @@ fn delta_first_in_bounds(col: &VerifiedDeltaColumn<u64>, lo: u64, hi: u64) -> (r
 /// The first of a column's numbers that is at least `lo`: a range with
 /// no upper bound, of signed numbers.
 #[allow(dead_code)]
-fn delta_first_at_least(col: &VerifiedDeltaColumn<i64>, lo: i64) -> (r: Option<(usize, i64)>)
+fn delta_first_at_least(col: &DeltaColumn<i64>, lo: i64) -> (r: Option<(usize, i64)>)
     ensures
         match r {
             Some((k, v)) => k < col@.len() && col@[k as int] == v && v >= lo && forall|i: int| 0 <= i < k ==> col@[i] < lo,
@@ -13046,7 +13043,7 @@ fn delta_first_at_least(col: &VerifiedDeltaColumn<i64>, lo: i64) -> (r: Option<(
 /// The first of a column's numbers greater than `a` and at most `b`:
 /// bounds given as a pair, the lower one excluded.
 #[allow(dead_code)]
-fn delta_first_between(col: &VerifiedDeltaColumn<i32>, a: i32, b: i32) -> (r: Option<(usize, i32)>)
+fn delta_first_between(col: &DeltaColumn<i32>, a: i32, b: i32) -> (r: Option<(usize, i32)>)
     ensures
         match r {
             Some((k, v)) => {
@@ -13066,7 +13063,7 @@ fn delta_first_between(col: &VerifiedDeltaColumn<i32>, a: i32, b: i32) -> (r: Op
 /// within no bounds, so the scan passes over the nulls though a null
 /// comes before every number.
 #[allow(dead_code)]
-fn delta_first_below(col: &VerifiedDeltaColumn<Option<u32>>, hi: u32) -> (r: Option<(usize, u32)>)
+fn delta_first_below(col: &DeltaColumn<Option<u32>>, hi: u32) -> (r: Option<(usize, u32)>)
     ensures
         match r {
             Some((k, n)) => {
@@ -13093,7 +13090,7 @@ fn delta_first_below(col: &VerifiedDeltaColumn<Option<u32>>, hi: u32) -> (r: Opt
 /// The first number of a column that has nulls: every number is within
 /// the bounds of the range that has none, and no null is.
 #[allow(dead_code)]
-fn delta_any_number(col: &VerifiedDeltaColumn<Option<i64>>) -> (r: Option<(usize, Option<i64>)>)
+fn delta_any_number(col: &DeltaColumn<Option<i64>>) -> (r: Option<(usize, Option<i64>)>)
     ensures
         match r {
             Some((k, v)) => {
@@ -13112,7 +13109,7 @@ fn delta_any_number(col: &VerifiedDeltaColumn<Option<i64>>) -> (r: Option<(usize
 /// A null is within no bounds, not even those that are the null value
 /// at both ends: such a scan finds nothing, whatever the column holds.
 #[allow(dead_code)]
-fn delta_null_in_no_bounds(col: &VerifiedDeltaColumn<Option<u64>>) -> (r: Option<(usize, Option<u64>)>)
+fn delta_null_in_no_bounds(col: &DeltaColumn<Option<u64>>) -> (r: Option<(usize, Option<u64>)>)
     ensures
         r is None,
 {
@@ -13125,7 +13122,7 @@ fn delta_null_in_no_bounds(col: &VerifiedDeltaColumn<Option<u64>>) -> (r: Option
 /// greater ones after, and the iterator then gives the first `x`, if
 /// the column has one.
 #[allow(dead_code)]
-fn delta_seek_then_read(col: &VerifiedDeltaColumn<u64>, x: u64) -> (r: Range<usize>)
+fn delta_seek_then_read(col: &DeltaColumn<u64>, x: u64) -> (r: Range<usize>)
     requires
         forall|i: int, j: int| 0 <= i <= j < col@.len() ==> col@[i] <= col@[j],
     ensures
@@ -13167,7 +13164,7 @@ fn delta_seek_then_read(col: &VerifiedDeltaColumn<u64>, x: u64) -> (r: Range<usi
 /// the same range, and the iterator is left at its start with the
 /// values up to `b` to give. For every type and codec.
 #[allow(dead_code)]
-fn delta_sought_between<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T, a: usize, b: usize) -> (r:
+fn delta_sought_between<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, x: T, a: usize, b: usize) -> (r:
     Range<usize>)
     requires
         a <= b <= col@.len(),
@@ -13202,7 +13199,7 @@ fn delta_sought_between<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<
 /// where `x` would stand; and, for an `x` a delta column can hold, with
 /// the same end to its window. For every type and codec.
 #[allow(dead_code)]
-fn delta_find_in_the_rest<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, x: T) -> (r: Range<usize>)
+fn delta_find_in_the_rest<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C>, x: T) -> (r: Range<usize>)
     requires
         sorted::<T>(old(it).rest()),
     ensures
@@ -13239,7 +13236,7 @@ fn delta_find_in_the_rest<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIt
 /// The nulls of a column in order are its first values: the search for
 /// the null value gives the range of them, which starts the column.
 #[allow(dead_code)]
-fn delta_seek_nulls_first(col: &VerifiedDeltaColumn<Option<u64>>) -> (r: Range<usize>)
+fn delta_seek_nulls_first(col: &DeltaColumn<Option<u64>>) -> (r: Range<usize>)
     requires
         sorted::<Option<u64>>(col@),
     ensures
@@ -13266,7 +13263,7 @@ fn delta_seek_nulls_first(col: &VerifiedDeltaColumn<Option<u64>>) -> (r: Range<u
 /// of one: the search for it among numbers in order gives the empty
 /// range at their end.
 #[allow(dead_code)]
-fn delta_seek_unfitting(col: &VerifiedDeltaColumn<u64>) -> (r: Range<usize>)
+fn delta_seek_unfitting(col: &DeltaColumn<u64>) -> (r: Range<usize>)
     requires
         forall|i: int, j: int| 0 <= i <= j < col@.len() ==> col@[i] <= col@[j],
     ensures
@@ -13293,7 +13290,7 @@ fn delta_seek_unfitting(col: &VerifiedDeltaColumn<u64>) -> (r: Range<usize>)
 /// iterator's search, in order or not: the iterator is left where the
 /// search ends, with nothing to give. For every type and codec.
 #[allow(dead_code)]
-fn delta_sought_unfitting<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, x: T, range: Range<usize>) -> (r:
+fn delta_sought_unfitting<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C>, x: T, range: Range<usize>) -> (r:
     Range<usize>)
     requires
         !x.fits(),
@@ -13320,7 +13317,7 @@ fn delta_sought_unfitting<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIt
 /// search moves the iterator there, if that is ahead of it and in the
 /// column, and finds nothing. For every type and codec.
 #[allow(dead_code)]
-fn delta_sought_backwards<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, x: T, range: Range<usize>) -> (r:
+fn delta_sought_backwards<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C>, x: T, range: Range<usize>) -> (r:
     Range<usize>)
     requires
         range.start > range.end,
@@ -13342,7 +13339,7 @@ fn delta_sought_backwards<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIt
 /// What `scan_to_value` says by itself of a delta column's iterator,
 /// each thing asked for on its own and with no lemma.
 #[allow(dead_code)]
-fn delta_told_by_scan_to_value<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, x: T) -> (r: Option<usize>)
+fn delta_told_by_scan_to_value<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C>, x: T) -> (r: Option<usize>)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -13363,8 +13360,8 @@ fn delta_told_by_scan_to_value<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDe
 /// What `scan_to_range` says by itself of a delta column's iterator and
 /// any bounds, each thing asked for on its own and with no lemma.
 #[allow(dead_code)]
-fn delta_told_by_scan_to_range<T: VDeltaValue<C>, C: VCodec, R: RangeBounds<T>>(
-    it: &mut VerifiedDeltaIter<'_, T, C>,
+fn delta_told_by_scan_to_range<T: DeltaValue<C>, C: Codec, R: RangeBounds<T>>(
+    it: &mut DeltaIter<'_, T, C>,
     range: R,
 ) -> (r: Option<(usize, T)>)
     ensures
@@ -13419,8 +13416,8 @@ spec fn delta_sought_from(p: int, n: int, range: Range<usize>) -> int {
 /// places of the column are searched, where `x` stands among their
 /// values if those are in order, and where that leaves the iterator.
 #[allow(dead_code)]
-fn delta_told_by_seek_to_value<T: VDeltaValue<C>, C: VCodec>(
-    it: &mut VerifiedDeltaIter<'_, T, C>,
+fn delta_told_by_seek_to_value<T: DeltaValue<C>, C: Codec>(
+    it: &mut DeltaIter<'_, T, C>,
     x: T,
     range: Range<usize>,
 ) -> (r: Range<usize>)
@@ -13474,8 +13471,8 @@ fn delta_told_by_seek_to_value<T: VDeltaValue<C>, C: VCodec>(
 /// What `scope_to_value` says by itself of a delta column, each thing
 /// asked for on its own and with no lemma.
 #[allow(dead_code)]
-fn delta_told_by_scope_to_value<T: VDeltaValue<C>, C: VCodec>(
-    col: &VerifiedDeltaColumn<T, C>,
+fn delta_told_by_scope_to_value<T: DeltaValue<C>, C: Codec>(
+    col: &DeltaColumn<T, C>,
     x: T,
     start: usize,
     end: usize,
@@ -13503,7 +13500,7 @@ fn delta_told_by_scope_to_value<T: VDeltaValue<C>, C: VCodec>(
 /// in rising order, each holds `x`, and no other place does. For every
 /// type and codec.
 #[allow(dead_code)]
-fn delta_found_all<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T) -> (out: Vec<usize>)
+fn delta_found_all<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, x: T) -> (out: Vec<usize>)
     requires
         x.dv() is Some,
     ensures
@@ -13550,7 +13547,7 @@ fn delta_found_all<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>
 /// of a find, written as a range of Rust's, are plain inequalities for
 /// a column of plain numbers.
 #[allow(dead_code)]
-fn delta_found_between(col: &VerifiedDeltaColumn<u64>, lo: u64, hi: u64) -> (out: Vec<usize>)
+fn delta_found_between(col: &DeltaColumn<u64>, lo: u64, hi: u64) -> (out: Vec<usize>)
     ensures
         forall|i: int, j: int| 0 <= i < j < out@.len() ==> out@[i] < out@[j],
         forall|i: int| 0 <= i < out@.len() ==> out@[i] < col@.len() && lo <= col@[out@[i] as int] < hi,
@@ -13591,7 +13588,7 @@ fn delta_found_between(col: &VerifiedDeltaColumn<u64>, lo: u64, hi: u64) -> (out
 /// has nulls: a null is within no bounds, so no null is found though a
 /// null comes before every number.
 #[allow(dead_code)]
-fn delta_found_at_most(col: &VerifiedDeltaColumn<Option<i32>>, hi: i32) -> (r: Option<usize>)
+fn delta_found_at_most(col: &DeltaColumn<Option<i32>>, hi: i32) -> (r: Option<usize>)
     ensures
         match r {
             Some(k) => {
@@ -13617,7 +13614,7 @@ fn delta_found_at_most(col: &VerifiedDeltaColumn<Option<i32>>, hi: i32) -> (r: O
 /// calls of a finder: the second call goes on from where the first one
 /// found `x`. For every type and codec.
 #[allow(dead_code)]
-fn delta_found_twice<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T) -> (r: (
+fn delta_found_twice<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, x: T) -> (r: (
     Option<usize>,
     Option<usize>,
 ))
@@ -13666,7 +13663,7 @@ fn delta_found_twice<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, 
 /// A null is found nowhere, though the column may hold nulls: neither
 /// by `find_first` nor by a finder.
 #[allow(dead_code)]
-fn delta_find_null(col: &VerifiedDeltaColumn<Option<u64>>) -> (r: (Option<usize>, Option<usize>))
+fn delta_find_null(col: &DeltaColumn<Option<u64>>) -> (r: (Option<usize>, Option<usize>))
     ensures
         r.0 is None,
         r.1 is None,
@@ -13685,7 +13682,7 @@ fn delta_find_null(col: &VerifiedDeltaColumn<Option<u64>>) -> (r: (Option<usize>
 
 /// A number no delta column can hold is found nowhere.
 #[allow(dead_code)]
-fn delta_find_unfitting(col: &VerifiedDeltaColumn<u64>) -> (r: Option<usize>)
+fn delta_find_unfitting(col: &DeltaColumn<u64>) -> (r: Option<usize>)
     ensures
         r is None,
 {
@@ -13699,7 +13696,7 @@ fn delta_find_unfitting(col: &VerifiedDeltaColumn<u64>) -> (r: Option<usize>)
 /// The first place of `x` in a delta column of plain numbers, said of
 /// the numbers alone.
 #[allow(dead_code)]
-fn delta_find_first_number(col: &VerifiedDeltaColumn<i64>, x: i64) -> (r: Option<usize>)
+fn delta_find_first_number(col: &DeltaColumn<i64>, x: i64) -> (r: Option<usize>)
     ensures
         match r {
             Some(k) => k < col@.len() && col@[k as int] == x && forall|i: int| 0 <= i < k ==> col@[i] != x,
@@ -13715,17 +13712,17 @@ fn delta_find_nothing() -> (r: Option<usize>)
     ensures
         r is None,
 {
-    let mut finder: VerifiedFindByRange<'static, u64> = VerifiedFindByRange::default();
+    let mut finder: FindByRange<'static, u64> = FindByRange::default();
     finder.next()
 }
 
 /// What `find_by_range` says by itself of a delta column and any
 /// bounds.
 #[allow(dead_code)]
-fn delta_told_by_find_by_range<T: VDeltaValue<C>, C: VCodec, R: RangeBounds<T>>(
-    col: &VerifiedDeltaColumn<T, C>,
+fn delta_told_by_find_by_range<T: DeltaValue<C>, C: Codec, R: RangeBounds<T>>(
+    col: &DeltaColumn<T, C>,
     range: R,
-) -> (r: VerifiedFindByRange<'_, T, C>)
+) -> (r: FindByRange<'_, T, C>)
     ensures
         r.finds() == delta_finds::<T>(col@, range.spec_start_bound(), range.spec_end_bound(), 0),
 {
@@ -13734,8 +13731,8 @@ fn delta_told_by_find_by_range<T: VDeltaValue<C>, C: VCodec, R: RangeBounds<T>>(
 
 /// What `find_by_value` says by itself of a delta column.
 #[allow(dead_code)]
-fn delta_told_by_find_by_value<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T) -> (r:
-    VerifiedFindByRange<'_, T, C>)
+fn delta_told_by_find_by_value<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, x: T) -> (r:
+    FindByRange<'_, T, C>)
     ensures
         r.finds() == delta_finds::<T>(col@, Bound::Included(&x), Bound::Included(&x), 0),
 {
@@ -13745,7 +13742,7 @@ fn delta_told_by_find_by_value<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDelta
 /// What `find_first` says by itself of a delta column, each thing asked
 /// for on its own and with no lemma.
 #[allow(dead_code)]
-fn delta_told_by_find_first<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T) -> (r: Option<usize>)
+fn delta_told_by_find_first<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, x: T) -> (r: Option<usize>)
     ensures
         r matches Some(k) ==> k < col@.len(),
         r matches Some(k) ==> col@[k as int] == x,
@@ -13759,7 +13756,7 @@ fn delta_told_by_find_first<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaCol
 /// What a finder's `next` says by itself: the first of the places it
 /// had left, which leaves the rest; and nothing where none was left.
 #[allow(dead_code)]
-fn delta_told_by_find_next<T: VDeltaValue<C>, C: VCodec>(finder: &mut VerifiedFindByRange<'_, T, C>) -> (r: Option<usize>)
+fn delta_told_by_find_next<T: DeltaValue<C>, C: Codec>(finder: &mut FindByRange<'_, T, C>) -> (r: Option<usize>)
     ensures
         old(finder).finds().len() > 0 ==> r == Some(old(finder).finds()[0]),
         old(finder).finds().len() > 0 ==> final(finder).finds() == old(finder).finds().drop_first(),
@@ -13771,11 +13768,11 @@ fn delta_told_by_find_next<T: VDeltaValue<C>, C: VCodec>(finder: &mut VerifiedFi
 
 /// What `default` says by itself of a finder.
 #[allow(dead_code)]
-fn delta_told_by_find_default<T: VDeltaValue<C>, C: VCodec>() -> (r: VerifiedFindByRange<'static, T, C>)
+fn delta_told_by_find_default<T: DeltaValue<C>, C: Codec>() -> (r: FindByRange<'static, T, C>)
     ensures
         r.finds() == Seq::<usize>::empty(),
 {
-    VerifiedFindByRange::default()
+    FindByRange::default()
 }
 
 
@@ -13784,9 +13781,9 @@ fn delta_told_by_find_default<T: VDeltaValue<C>, C: VCodec>() -> (r: VerifiedFin
 /// What `new` and `default` say of the delta encoder they give: it is
 /// one to use (`wf`), and was given nothing.
 #[allow(dead_code)]
-fn delta_told_by_a_new_encoder<'a, T: VDeltaValue<C>, C: VCodec>() -> (r: (
-    VerifiedDeltaEncoder<'a, T, C>,
-    VerifiedDeltaEncoder<'a, T, C>,
+fn delta_told_by_a_new_encoder<'a, T: DeltaValue<C>, C: Codec>() -> (r: (
+    DeltaEncoder<'a, T, C>,
+    DeltaEncoder<'a, T, C>,
 ))
     ensures
         r.0.wf(),
@@ -13794,15 +13791,15 @@ fn delta_told_by_a_new_encoder<'a, T: VDeltaValue<C>, C: VCodec>() -> (r: (
         r.0@.len() == 0,
         r.1@.len() == 0,
 {
-    let a = VerifiedDeltaEncoder::<T, C>::new();
-    let b = VerifiedDeltaEncoder::<T, C>::default();
+    let a = DeltaEncoder::<T, C>::new();
+    let b = DeltaEncoder::<T, C>::default();
     (a, b)
 }
 
 /// What a delta encoder's `len` and `is_empty` say: the number of
 /// values it was given.
 #[allow(dead_code)]
-fn delta_told_by_an_encoders_count<'a, T: VDeltaValue<C>, C: VCodec>(enc: &VerifiedDeltaEncoder<'a, T, C>) -> (r: (
+fn delta_told_by_an_encoders_count<'a, T: DeltaValue<C>, C: Codec>(enc: &DeltaEncoder<'a, T, C>) -> (r: (
     usize,
     bool,
 ))
@@ -13819,8 +13816,8 @@ fn delta_told_by_an_encoders_count<'a, T: VDeltaValue<C>, C: VCodec>(enc: &Verif
 /// those the encoder had, which is still one to use. Each value given
 /// must be one a delta column holds (`fits`).
 #[allow(dead_code)]
-fn delta_told_by_an_encoders_appends<'a, T: VDeltaValue<C>, C: VCodec>(
-    enc: &mut VerifiedDeltaEncoder<'a, T, C>,
+fn delta_told_by_an_encoders_appends<'a, T: DeltaValue<C>, C: Codec>(
+    enc: &mut DeltaEncoder<'a, T, C>,
     v: T,
     w: T,
     n: usize,
@@ -13846,8 +13843,8 @@ fn delta_told_by_an_encoders_appends<'a, T: VDeltaValue<C>, C: VCodec>(
 /// What a delta encoder's `extend` says of a vector handed over, whose
 /// values fit: its values, after those the encoder had.
 #[allow(dead_code)]
-fn delta_told_by_an_encoders_extend<'a, T: VDeltaValue<C>, C: VCodec>(
-    enc: &mut VerifiedDeltaEncoder<'a, T, C>,
+fn delta_told_by_an_encoders_extend<'a, T: DeltaValue<C>, C: Codec>(
+    enc: &mut DeltaEncoder<'a, T, C>,
     vs: Vec<T>,
 )
     requires
@@ -13864,8 +13861,8 @@ fn delta_told_by_an_encoders_extend<'a, T: VDeltaValue<C>, C: VCodec>(
 /// are known to fit (`delta_iter_fits`), and, of one that keeps the
 /// laws Verus has for an iterator, that what it had to give was given.
 #[allow(dead_code)]
-fn delta_told_by_an_extend_of_any<'a, T: VDeltaValue<C>, C: VCodec, I: Iterator<Item = T>>(
-    enc: &mut VerifiedDeltaEncoder<'a, T, C>,
+fn delta_told_by_an_extend_of_any<'a, T: DeltaValue<C>, C: Codec, I: Iterator<Item = T>>(
+    enc: &mut DeltaEncoder<'a, T, C>,
     iter: I,
 )
     requires
@@ -13883,13 +13880,13 @@ fn delta_told_by_an_extend_of_any<'a, T: VDeltaValue<C>, C: VCodec, I: Iterator<
 /// two numbers given are 2^63 or more apart, the encoder panicking for
 /// such.
 #[allow(dead_code)]
-fn delta_told_by_an_encoders_save<'a, T: VDeltaValue<C>, C: VCodec>(enc: VerifiedDeltaEncoder<'a, T, C>) -> (r: Vec<u8>)
+fn delta_told_by_an_encoders_save<'a, T: DeltaValue<C>, C: Codec>(enc: DeltaEncoder<'a, T, C>) -> (r: Vec<u8>)
     requires
         enc.wf(),
     ensures
-        VerifiedDeltaColumn::<T, C>::valid(r@),
-        VerifiedDeltaColumn::<T, C>::values(r@) == enc@,
-        r@ == VerifiedDeltaColumn::<T, C>::encoding(enc@),
+        DeltaColumn::<T, C>::valid(r@),
+        DeltaColumn::<T, C>::values(r@) == enc@,
+        r@ == DeltaColumn::<T, C>::encoding(enc@),
         delta_span_ok(enc@),
 {
     enc.save()
@@ -13899,22 +13896,22 @@ fn delta_told_by_an_encoders_save<'a, T: VDeltaValue<C>, C: VCodec>(enc: Verifie
 /// then the encoding of the values given, which is a saved delta column
 /// of them, and the range returned is where.
 #[allow(dead_code)]
-fn delta_told_by_an_encoders_save_to<'a, T: VDeltaValue<C>, C: VCodec>(
-    enc: VerifiedDeltaEncoder<'a, T, C>,
+fn delta_told_by_an_encoders_save_to<'a, T: DeltaValue<C>, C: Codec>(
+    enc: DeltaEncoder<'a, T, C>,
     out: &mut Vec<u8>,
 ) -> (r: Range<usize>)
     requires
         enc.wf(),
     ensures
-        final(out)@ == old(out)@ + VerifiedDeltaColumn::<T, C>::encoding(enc@),
-        VerifiedDeltaColumn::<T, C>::valid(VerifiedDeltaColumn::<T, C>::encoding(enc@)),
-        VerifiedDeltaColumn::<T, C>::values(VerifiedDeltaColumn::<T, C>::encoding(enc@)) == enc@,
+        final(out)@ == old(out)@ + DeltaColumn::<T, C>::encoding(enc@),
+        DeltaColumn::<T, C>::valid(DeltaColumn::<T, C>::encoding(enc@)),
+        DeltaColumn::<T, C>::values(DeltaColumn::<T, C>::encoding(enc@)) == enc@,
         delta_span_ok(enc@),
         r.start == old(out)@.len(),
         r.end == final(out)@.len(),
-        final(out)@.subrange(r.start as int, r.end as int) == VerifiedDeltaColumn::<T, C>::encoding(enc@),
+        final(out)@.subrange(r.start as int, r.end as int) == DeltaColumn::<T, C>::encoding(enc@),
 {
-    let ghost d = VerifiedDeltaColumn::<T, C>::encoding(enc@);
+    let ghost d = DeltaColumn::<T, C>::encoding(enc@);
     let r = enc.save_to(out);
     assert(out@.subrange(r.start as int, r.end as int) =~= d);
     r
@@ -13925,8 +13922,8 @@ fn delta_told_by_an_encoders_save_to<'a, T: VDeltaValue<C>, C: VCodec>(
 /// `save_to` writes is, where one is not. The value need not fit: none
 /// given is one that does not.
 #[allow(dead_code)]
-fn delta_told_by_an_encoders_save_to_unless<'a, T: VDeltaValue<C>, C: VCodec>(
-    enc: VerifiedDeltaEncoder<'a, T, C>,
+fn delta_told_by_an_encoders_save_to_unless<'a, T: DeltaValue<C>, C: Codec>(
+    enc: DeltaEncoder<'a, T, C>,
     out: &mut Vec<u8>,
     v: T,
 ) -> (r: Range<usize>)
@@ -13935,9 +13932,9 @@ fn delta_told_by_an_encoders_save_to_unless<'a, T: VDeltaValue<C>, C: VCodec>(
     ensures
         (forall|i: int| 0 <= i < enc@.len() ==> enc@[i] == v) ==> final(out)@ == old(out)@,
         (exists|i: int| 0 <= i < enc@.len() && enc@[i] != v) ==> {
-            &&& final(out)@ == old(out)@ + VerifiedDeltaColumn::<T, C>::encoding(enc@)
-            &&& VerifiedDeltaColumn::<T, C>::valid(VerifiedDeltaColumn::<T, C>::encoding(enc@))
-            &&& VerifiedDeltaColumn::<T, C>::values(VerifiedDeltaColumn::<T, C>::encoding(enc@)) == enc@
+            &&& final(out)@ == old(out)@ + DeltaColumn::<T, C>::encoding(enc@)
+            &&& DeltaColumn::<T, C>::valid(DeltaColumn::<T, C>::encoding(enc@))
+            &&& DeltaColumn::<T, C>::values(DeltaColumn::<T, C>::encoding(enc@)) == enc@
             &&& delta_span_ok(enc@)
         },
         r.start == old(out)@.len(),
@@ -13951,8 +13948,8 @@ fn delta_told_by_an_encoders_save_to_unless<'a, T: VDeltaValue<C>, C: VCodec>(
 /// `save_to_unless` of such a value writes what an encoder has, if it
 /// was given anything.
 #[allow(dead_code)]
-fn delta_unless_a_misfit<'a, T: VDeltaValue<C>, C: VCodec>(
-    enc: VerifiedDeltaEncoder<'a, T, C>,
+fn delta_unless_a_misfit<'a, T: DeltaValue<C>, C: Codec>(
+    enc: DeltaEncoder<'a, T, C>,
     out: &mut Vec<u8>,
     v: T,
 ) -> (r: Range<usize>)
@@ -13962,7 +13959,7 @@ fn delta_unless_a_misfit<'a, T: VDeltaValue<C>, C: VCodec>(
         enc@.len() > 0,
     ensures
         all_fit(enc@),
-        final(out)@ == old(out)@ + VerifiedDeltaColumn::<T, C>::encoding(enc@),
+        final(out)@ == old(out)@ + DeltaColumn::<T, C>::encoding(enc@),
 {
     let ghost vs = enc@;
     proof {
@@ -13978,16 +13975,16 @@ fn delta_unless_a_misfit<'a, T: VDeltaValue<C>, C: VCodec>(
 /// them. The loop carries `enc.wf()`, and what the encoder has been
 /// given so far.
 #[allow(dead_code)]
-fn delta_encoded_as_saved<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>) -> (r: Vec<u8>)
+fn delta_encoded_as_saved<T: DeltaValue<C>, C: Codec>(input: &Vec<T>) -> (r: Vec<u8>)
     requires
         all_fit(input@),
     ensures
-        VerifiedDeltaColumn::<T, C>::valid(r@),
-        VerifiedDeltaColumn::<T, C>::values(r@) == input@,
-        r@ == VerifiedDeltaColumn::<T, C>::encoding(input@),
+        DeltaColumn::<T, C>::valid(r@),
+        DeltaColumn::<T, C>::values(r@) == input@,
+        r@ == DeltaColumn::<T, C>::encoding(input@),
         delta_span_ok(input@),
 {
-    let mut enc = VerifiedDeltaEncoder::<T, C>::new();
+    let mut enc = DeltaEncoder::<T, C>::new();
     let mut i: usize = 0;
     proof {
         assert(enc@ =~= input@.take(0));
@@ -14015,12 +14012,12 @@ fn delta_encoded_as_saved<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>) -> (r: V
 /// A delta encoder and a delta column save the same bytes for the same
 /// values.
 #[allow(dead_code)]
-fn delta_encoder_or_column<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>)
+fn delta_encoder_or_column<T: DeltaValue<C>, C: Codec>(input: &Vec<T>)
     requires
         all_fit(input@),
 {
     let a = delta_encoded_as_saved::<T, C>(input);
-    let col = VerifiedDeltaColumn::<T, C>::from_values(input.as_slice());
+    let col = DeltaColumn::<T, C>::from_values(input.as_slice());
     let b = col.save();
     assert(a@ == b@);
 }
@@ -14029,14 +14026,14 @@ fn delta_encoder_or_column<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>)
 /// of the values given. (Of a delta load it is proved that what it
 /// gives is right, not that it takes whatever was saved.)
 #[allow(dead_code)]
-fn delta_encode_then_load<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>) -> (r: Option<VerifiedDeltaColumn<T, C>>)
+fn delta_encode_then_load<T: DeltaValue<C>, C: Codec>(input: &Vec<T>) -> (r: Option<DeltaColumn<T, C>>)
     requires
         all_fit(input@),
     ensures
         r matches Some(col) ==> col@ == input@,
 {
     let bytes = delta_encoded_as_saved::<T, C>(input);
-    match VerifiedDeltaColumn::<T, C>::load(bytes.as_slice()) {
+    match DeltaColumn::<T, C>::load(bytes.as_slice()) {
         Ok(col) => Some(col),
         Err(_) => None,
     }
@@ -14046,11 +14043,11 @@ fn delta_encode_then_load<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>) -> (r: O
 /// iterator, are saved as the column saves them. What the iterator has
 /// to give fits, the column having held it (`lemma_fits`).
 #[allow(dead_code)]
-fn delta_reencoded<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: Vec<u8>)
+fn delta_reencoded<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (r: Vec<u8>)
     ensures
-        r@ == VerifiedDeltaColumn::<T, C>::encoding(col@),
+        r@ == DeltaColumn::<T, C>::encoding(col@),
 {
-    let mut enc = VerifiedDeltaEncoder::<T, C>::new();
+    let mut enc = DeltaEncoder::<T, C>::new();
     proof {
         col.lemma_fits();
     }
@@ -14064,11 +14061,11 @@ fn delta_reencoded<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>
 /// The same by a `for` loop over the column, each value appended as it
 /// comes.
 #[allow(dead_code)]
-fn delta_reencoded_in_a_loop<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: Vec<u8>)
+fn delta_reencoded_in_a_loop<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (r: Vec<u8>)
     ensures
-        r@ == VerifiedDeltaColumn::<T, C>::encoding(col@),
+        r@ == DeltaColumn::<T, C>::encoding(col@),
 {
-    let mut enc = VerifiedDeltaEncoder::<T, C>::new();
+    let mut enc = DeltaEncoder::<T, C>::new();
     proof {
         col.lemma_fits();
         assert(enc@ =~= col@.take(0));
@@ -14097,34 +14094,34 @@ fn delta_reencoded_in_a_loop<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaCo
 /// What `encode` says of a vector whose values fit: the bytes of a
 /// delta column of them.
 #[allow(dead_code)]
-fn delta_told_by_encode<T: VDeltaValue<C>, C: VCodec>(vs: Vec<T>) -> (r: Vec<u8>)
+fn delta_told_by_encode<T: DeltaValue<C>, C: Codec>(vs: Vec<T>) -> (r: Vec<u8>)
     requires
         all_fit(vs@),
     ensures
-        VerifiedDeltaColumn::<T, C>::valid(r@),
-        VerifiedDeltaColumn::<T, C>::values(r@) == vs@,
-        r@ == VerifiedDeltaColumn::<T, C>::encoding(vs@),
+        DeltaColumn::<T, C>::valid(r@),
+        DeltaColumn::<T, C>::values(r@) == vs@,
+        r@ == DeltaColumn::<T, C>::encoding(vs@),
         delta_span_ok(vs@),
 {
-    VerifiedDeltaEncoder::<T, C>::encode(vs)
+    DeltaEncoder::<T, C>::encode(vs)
 }
 
 /// What `encode_to` says of a vector whose values fit: the buffer is
 /// what it was and then the encoding of the values, and the range
 /// returned is where.
 #[allow(dead_code)]
-fn delta_told_by_encode_to<T: VDeltaValue<C>, C: VCodec>(out: &mut Vec<u8>, vs: Vec<T>) -> (r: Range<usize>)
+fn delta_told_by_encode_to<T: DeltaValue<C>, C: Codec>(out: &mut Vec<u8>, vs: Vec<T>) -> (r: Range<usize>)
     requires
         all_fit(vs@),
     ensures
-        final(out)@ == old(out)@ + VerifiedDeltaColumn::<T, C>::encoding(vs@),
-        VerifiedDeltaColumn::<T, C>::valid(VerifiedDeltaColumn::<T, C>::encoding(vs@)),
-        VerifiedDeltaColumn::<T, C>::values(VerifiedDeltaColumn::<T, C>::encoding(vs@)) == vs@,
+        final(out)@ == old(out)@ + DeltaColumn::<T, C>::encoding(vs@),
+        DeltaColumn::<T, C>::valid(DeltaColumn::<T, C>::encoding(vs@)),
+        DeltaColumn::<T, C>::values(DeltaColumn::<T, C>::encoding(vs@)) == vs@,
         delta_span_ok(vs@),
         r.start == old(out)@.len(),
         r.end == final(out)@.len(),
 {
-    VerifiedDeltaEncoder::<T, C>::encode_to(out, vs)
+    DeltaEncoder::<T, C>::encode_to(out, vs)
 }
 
 /// What `encode_to_unless` says of a vector whose values fit: the
@@ -14132,7 +14129,7 @@ fn delta_told_by_encode_to<T: VDeltaValue<C>, C: VCodec>(out: &mut Vec<u8>, vs: 
 /// and holds the encoding of the values after what it held, where one
 /// is not.
 #[allow(dead_code)]
-fn delta_told_by_encode_to_unless<T: VDeltaValue<C>, C: VCodec>(
+fn delta_told_by_encode_to_unless<T: DeltaValue<C>, C: Codec>(
     out: &mut Vec<u8>,
     vs: Vec<T>,
     v: T,
@@ -14142,15 +14139,15 @@ fn delta_told_by_encode_to_unless<T: VDeltaValue<C>, C: VCodec>(
     ensures
         (final(out)@ == old(out)@) == only(vs@, v),
         !only(vs@, v) ==> {
-            &&& final(out)@ == old(out)@ + VerifiedDeltaColumn::<T, C>::encoding(vs@)
-            &&& VerifiedDeltaColumn::<T, C>::valid(VerifiedDeltaColumn::<T, C>::encoding(vs@))
-            &&& VerifiedDeltaColumn::<T, C>::values(VerifiedDeltaColumn::<T, C>::encoding(vs@)) == vs@
+            &&& final(out)@ == old(out)@ + DeltaColumn::<T, C>::encoding(vs@)
+            &&& DeltaColumn::<T, C>::valid(DeltaColumn::<T, C>::encoding(vs@))
+            &&& DeltaColumn::<T, C>::values(DeltaColumn::<T, C>::encoding(vs@)) == vs@
             &&& delta_span_ok(vs@)
         },
         r.start == old(out)@.len(),
         r.end == final(out)@.len(),
 {
-    VerifiedDeltaEncoder::<T, C>::encode_to_unless(out, vs, v)
+    DeltaEncoder::<T, C>::encode_to_unless(out, vs, v)
 }
 
 /// Any iterator over `u32`s can be encoded, whatever is known of it:
@@ -14160,10 +14157,10 @@ fn delta_told_by_encode_to_unless<T: VDeltaValue<C>, C: VCodec>(
 #[allow(dead_code)]
 fn delta_encode_any_iterator<I: Iterator<Item = u32>>(iter: I) -> (r: Vec<u8>)
     ensures
-        VerifiedDeltaColumn::<u32>::valid(r@),
-        r@ == VerifiedDeltaColumn::<u32>::encoding(VerifiedDeltaColumn::<u32>::values(r@)),
+        DeltaColumn::<u32>::valid(r@),
+        r@ == DeltaColumn::<u32>::encoding(DeltaColumn::<u32>::values(r@)),
 {
-    VerifiedDeltaEncoder::<u32>::encode(iter)
+    DeltaEncoder::<u32>::encode(iter)
 }
 
 /// `u64`s with nulls, some perhaps too great for a delta column: each
@@ -14173,11 +14170,11 @@ fn delta_encode_any_iterator<I: Iterator<Item = u32>>(iter: I) -> (r: Vec<u8>)
 #[allow(dead_code)]
 fn delta_encode_checked(vs: &Vec<Option<u64>>) -> (r: Option<Vec<u8>>)
     ensures
-        r matches Some(bytes) ==> bytes@ == VerifiedDeltaColumn::<Option<u64>>::encoding(vs@),
+        r matches Some(bytes) ==> bytes@ == DeltaColumn::<Option<u64>>::encoding(vs@),
         r is Some ==> forall|i: int| 0 <= i < vs@.len() && (#[trigger] vs@[i]) is Some ==> vs@[i]->Some_0 <= i64::MAX,
         r is None ==> exists|i: int| 0 <= i < vs@.len() && (#[trigger] vs@[i]) is Some && vs@[i]->Some_0 > i64::MAX,
 {
-    let mut enc = VerifiedDeltaEncoder::<Option<u64>>::new();
+    let mut enc = DeltaEncoder::<Option<u64>>::new();
     let mut i: usize = 0;
     proof {
         assert(enc@ =~= vs@.take(0));
@@ -14214,7 +14211,7 @@ fn delta_encode_checked(vs: &Vec<Option<u64>>) -> (r: Option<Vec<u8>>)
 /// Two numbers an encoder of `i64`s has saved are less than 2^63 apart,
 /// whichever two: so `save` says, having returned.
 #[allow(dead_code)]
-fn delta_saved_within_a_span<'a>(enc: VerifiedDeltaEncoder<'a, i64>, i: usize, j: usize) -> (r: Vec<u8>)
+fn delta_saved_within_a_span<'a>(enc: DeltaEncoder<'a, i64>, i: usize, j: usize) -> (r: Vec<u8>)
     requires
         enc.wf(),
         i < enc@.len(),
@@ -14236,7 +14233,7 @@ fn delta_too_wide_never_saved() -> (r: Vec<u8>)
     ensures
         false,
 {
-    let mut enc = VerifiedDeltaEncoder::<i64>::new();
+    let mut enc = DeltaEncoder::<i64>::new();
     enc.append(i64::MIN);
     enc.append(0);
     let ghost vs = enc@;
@@ -14251,9 +14248,9 @@ fn delta_too_wide_never_saved() -> (r: Vec<u8>)
 /// given nothing, and may start on any buffer, all of which is then
 /// what was there before it.
 #[allow(dead_code)]
-fn delta_told_by_a_new_state<'a, T: VDeltaValue<C>, C: VCodec>() -> (r: (
-    VerifiedDeltaEncoderState<'a, T, C>,
-    VerifiedDeltaEncoderState<'a, T, C>,
+fn delta_told_by_a_new_state<'a, T: DeltaValue<C>, C: Codec>() -> (r: (
+    DeltaEncoderState<'a, T, C>,
+    DeltaEncoderState<'a, T, C>,
 ))
     ensures
         r.0@.len() == 0,
@@ -14263,8 +14260,8 @@ fn delta_told_by_a_new_state<'a, T: VDeltaValue<C>, C: VCodec>() -> (r: (
         forall|buf: Seq<u8>| #[trigger] r.1.on(buf),
         forall|buf: Seq<u8>| #[trigger] r.1.before(buf) == buf,
 {
-    let a = VerifiedDeltaEncoderState::<T, C>::new();
-    let b = VerifiedDeltaEncoderState::<T, C>::default();
+    let a = DeltaEncoderState::<T, C>::new();
+    let b = DeltaEncoderState::<T, C>::default();
     (a, b)
 }
 
@@ -14272,8 +14269,8 @@ fn delta_told_by_a_new_state<'a, T: VDeltaValue<C>, C: VCodec>() -> (r: (
 /// it was given. They take no buffer, and require that there is one the
 /// state is on.
 #[allow(dead_code)]
-fn delta_told_by_a_states_count<'a, T: VDeltaValue<C>, C: VCodec>(
-    s: &VerifiedDeltaEncoderState<'a, T, C>,
+fn delta_told_by_a_states_count<'a, T: DeltaValue<C>, C: Codec>(
+    s: &DeltaEncoderState<'a, T, C>,
     buf: &Vec<u8>,
 ) -> (r: (usize, bool))
     requires
@@ -14289,8 +14286,8 @@ fn delta_told_by_a_states_count<'a, T: VDeltaValue<C>, C: VCodec>(
 /// had; the buffer is still the state's, and what was there before the
 /// state is what was.
 #[allow(dead_code)]
-fn delta_told_by_a_states_append<'a, T: VDeltaValue<C>, C: VCodec>(
-    s: &mut VerifiedDeltaEncoderState<'a, T, C>,
+fn delta_told_by_a_states_append<'a, T: DeltaValue<C>, C: Codec>(
+    s: &mut DeltaEncoderState<'a, T, C>,
     buf: &mut Vec<u8>,
     v: T,
 )
@@ -14311,8 +14308,8 @@ fn delta_told_by_a_states_append<'a, T: VDeltaValue<C>, C: VCodec>(
 /// What a delta state's `append_n` says: the value `n` times, after
 /// those the state had.
 #[allow(dead_code)]
-fn delta_told_by_a_states_append_n<'a, T: VDeltaValue<C>, C: VCodec>(
-    s: &mut VerifiedDeltaEncoderState<'a, T, C>,
+fn delta_told_by_a_states_append_n<'a, T: DeltaValue<C>, C: Codec>(
+    s: &mut DeltaEncoderState<'a, T, C>,
     buf: &mut Vec<u8>,
     v: T,
     n: usize,
@@ -14334,8 +14331,8 @@ fn delta_told_by_a_states_append_n<'a, T: VDeltaValue<C>, C: VCodec>(
 /// What a delta state's `extend` says of a vector handed over, whose
 /// values fit: its values, after those the state had.
 #[allow(dead_code)]
-fn delta_told_by_a_states_extend<'a, T: VDeltaValue<C>, C: VCodec>(
-    s: &mut VerifiedDeltaEncoderState<'a, T, C>,
+fn delta_told_by_a_states_extend<'a, T: DeltaValue<C>, C: Codec>(
+    s: &mut DeltaEncoderState<'a, T, C>,
     buf: &mut Vec<u8>,
     vs: Vec<T>,
 )
@@ -14353,8 +14350,8 @@ fn delta_told_by_a_states_extend<'a, T: VDeltaValue<C>, C: VCodec>(
 /// What a delta state's `lemma_fits` says: every value given is one a
 /// delta column holds.
 #[allow(dead_code)]
-proof fn delta_told_by_an_encoder_states_fit<'a, T: VDeltaValue<C>, C: VCodec>(
-    s: VerifiedDeltaEncoderState<'a, T, C>,
+proof fn delta_told_by_an_encoder_states_fit<'a, T: DeltaValue<C>, C: Codec>(
+    s: DeltaEncoderState<'a, T, C>,
     buf: Seq<u8>,
     i: int,
 )
@@ -14370,8 +14367,8 @@ proof fn delta_told_by_an_encoder_states_fit<'a, T: VDeltaValue<C>, C: VCodec>(
 /// What `is_uniform` says: whether every value given is the one asked
 /// for, either way.
 #[allow(dead_code)]
-fn delta_told_by_is_uniform<'a, T: VDeltaValue<C>, C: VCodec>(
-    s: &VerifiedDeltaEncoderState<'a, T, C>,
+fn delta_told_by_is_uniform<'a, T: DeltaValue<C>, C: Codec>(
+    s: &DeltaEncoderState<'a, T, C>,
     buf: &Vec<u8>,
     v: T,
 ) -> (r: bool)
@@ -14389,13 +14386,13 @@ fn delta_told_by_is_uniform<'a, T: VDeltaValue<C>, C: VCodec>(
 /// a saved delta column of them; and no two numbers given are 2^63 or
 /// more apart.
 #[allow(dead_code)]
-fn delta_told_by_a_finish<'a, T: VDeltaValue<C>, C: VCodec>(s: VerifiedDeltaEncoderState<'a, T, C>, buf: &mut Vec<u8>)
+fn delta_told_by_a_finish<'a, T: DeltaValue<C>, C: Codec>(s: DeltaEncoderState<'a, T, C>, buf: &mut Vec<u8>)
     requires
         s.on(old(buf)@),
     ensures
-        final(buf)@ == s.before(old(buf)@) + VerifiedDeltaColumn::<T, C>::encoding(s@),
-        VerifiedDeltaColumn::<T, C>::valid(VerifiedDeltaColumn::<T, C>::encoding(s@)),
-        VerifiedDeltaColumn::<T, C>::values(VerifiedDeltaColumn::<T, C>::encoding(s@)) == s@,
+        final(buf)@ == s.before(old(buf)@) + DeltaColumn::<T, C>::encoding(s@),
+        DeltaColumn::<T, C>::valid(DeltaColumn::<T, C>::encoding(s@)),
+        DeltaColumn::<T, C>::values(DeltaColumn::<T, C>::encoding(s@)) == s@,
         delta_span_ok(s@),
 {
     s.finish(buf);
@@ -14404,8 +14401,8 @@ fn delta_told_by_a_finish<'a, T: VDeltaValue<C>, C: VCodec>(s: VerifiedDeltaEnco
 /// What a delta state's `lemma_before` says: what was in the buffer
 /// before the state is still its start.
 #[allow(dead_code)]
-proof fn delta_told_by_the_bytes_before<'a, T: VDeltaValue<C>, C: VCodec>(
-    s: VerifiedDeltaEncoderState<'a, T, C>,
+proof fn delta_told_by_the_bytes_before<'a, T: DeltaValue<C>, C: Codec>(
+    s: DeltaEncoderState<'a, T, C>,
     buf: Seq<u8>,
 )
     requires
@@ -14426,19 +14423,19 @@ proof fn delta_told_by_the_bytes_before<'a, T: VDeltaValue<C>, C: VCodec>(
 /// (`on`), what was there before the state, and what the state has been
 /// given so far.
 #[allow(dead_code)]
-fn delta_streamed_as_saved<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>, buf: &mut Vec<u8>) -> (r: Range<usize>)
+fn delta_streamed_as_saved<T: DeltaValue<C>, C: Codec>(input: &Vec<T>, buf: &mut Vec<u8>) -> (r: Range<usize>)
     requires
         all_fit(input@),
     ensures
-        final(buf)@ == old(buf)@ + VerifiedDeltaColumn::<T, C>::encoding(input@),
+        final(buf)@ == old(buf)@ + DeltaColumn::<T, C>::encoding(input@),
         r.start == old(buf)@.len(),
         r.end == final(buf)@.len(),
-        VerifiedDeltaColumn::<T, C>::valid(final(buf)@.subrange(r.start as int, r.end as int)),
-        VerifiedDeltaColumn::<T, C>::values(final(buf)@.subrange(r.start as int, r.end as int)) == input@,
+        DeltaColumn::<T, C>::valid(final(buf)@.subrange(r.start as int, r.end as int)),
+        DeltaColumn::<T, C>::values(final(buf)@.subrange(r.start as int, r.end as int)) == input@,
         delta_span_ok(input@),
 {
     let start = buf.len();
-    let mut s = VerifiedDeltaEncoderState::<T, C>::new();
+    let mut s = DeltaEncoderState::<T, C>::new();
     let mut i: usize = 0;
     proof {
         assert(s@ =~= input@.take(0));
@@ -14463,7 +14460,7 @@ fn delta_streamed_as_saved<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>, buf: &m
     }
     s.finish(buf);
     proof {
-        let d = VerifiedDeltaColumn::<T, C>::encoding(input@);
+        let d = DeltaColumn::<T, C>::encoding(input@);
         assert(buf@.subrange(start as int, buf@.len() as int) =~= d);
     }
     start..buf.len()
@@ -14472,18 +14469,18 @@ fn delta_streamed_as_saved<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>, buf: &m
 /// A delta state, a delta encoder, a delta column and `encode` give the
 /// same bytes for the same values.
 #[allow(dead_code)]
-fn delta_one_encoding_four_ways<T: VDeltaValue<C>, C: VCodec>(input: Vec<T>) -> (r: Vec<u8>)
+fn delta_one_encoding_four_ways<T: DeltaValue<C>, C: Codec>(input: Vec<T>) -> (r: Vec<u8>)
     requires
         all_fit(input@),
     ensures
-        r@ == VerifiedDeltaColumn::<T, C>::encoding(input@),
+        r@ == DeltaColumn::<T, C>::encoding(input@),
 {
     let mut a: Vec<u8> = Vec::new();
     delta_streamed_as_saved::<T, C>(&input, &mut a);
     let b = delta_encoded_as_saved::<T, C>(&input);
-    let col = VerifiedDeltaColumn::<T, C>::from_values(input.as_slice());
+    let col = DeltaColumn::<T, C>::from_values(input.as_slice());
     let c = col.save();
-    let d = VerifiedDeltaEncoder::<T, C>::encode(input);
+    let d = DeltaEncoder::<T, C>::encode(input);
     assert(a@ =~= b@);
     assert(b@ == c@);
     assert(c@ == d@);
@@ -14496,18 +14493,18 @@ fn delta_one_encoding_four_ways<T: VDeltaValue<C>, C: VCodec>(input: Vec<T>) -> 
 #[allow(dead_code)]
 fn delta_two_streamed(buf: &mut Vec<u8>) -> (r: usize)
     ensures
-        final(buf)@ == old(buf)@ + VerifiedDeltaColumn::<u32>::encoding(seq![7u32, 7, 9]) + VerifiedDeltaColumn::<
+        final(buf)@ == old(buf)@ + DeltaColumn::<u32>::encoding(seq![7u32, 7, 9]) + DeltaColumn::<
             Option<i64>,
         >::encoding(seq![Some(-5i64), None, None, Some(i64::MIN)]),
-        r == old(buf)@.len() + VerifiedDeltaColumn::<u32>::encoding(seq![7u32, 7, 9]).len(),
+        r == old(buf)@.len() + DeltaColumn::<u32>::encoding(seq![7u32, 7, 9]).len(),
 {
-    let mut x = VerifiedDeltaEncoderState::<u32>::new();
+    let mut x = DeltaEncoderState::<u32>::new();
     x.append_n(buf, 7, 2);
     x.append(buf, 9);
     assert(x@ =~= seq![7u32, 7, 9]);
     x.finish(buf);
     let mid = buf.len();
-    let mut y = VerifiedDeltaEncoderState::<Option<i64>>::new();
+    let mut y = DeltaEncoderState::<Option<i64>>::new();
     y.append(buf, Some(-5));
     y.append_n(buf, None, 2);
     y.append(buf, Some(i64::MIN));
@@ -14529,7 +14526,7 @@ fn delta_uniform_until_another(buf: &mut Vec<u8>) -> (r: (bool, bool, bool, bool
         !r.3,
         r.4 == 4,
 {
-    let mut s = VerifiedDeltaEncoderState::<Option<u64>>::new();
+    let mut s = DeltaEncoderState::<Option<u64>>::new();
     assert(s.on(buf@));
     let a = s.is_uniform(Some(3));
     s.append_n(buf, Some(3), 3);
@@ -14550,7 +14547,7 @@ fn delta_uniform_until_another(buf: &mut Vec<u8>) -> (r: (bool, bool, bool, bool
 /// A delta decoder read to its end by a `for` loop: the `Vec` holds the
 /// values the decoder had left, in order.
 #[allow(dead_code)]
-fn delta_read_all<'a, T: VDeltaValue<C>, C: VCodec>(dec: VerifiedDeltaDecoder<'a, T, C>) -> (out: Vec<T>)
+fn delta_read_all<'a, T: DeltaValue<C>, C: Codec>(dec: DeltaDecoder<'a, T, C>) -> (out: Vec<T>)
     ensures
         out@ == dec.rest(),
 {
@@ -14576,19 +14573,19 @@ fn delta_read_all<'a, T: VDeltaValue<C>, C: VCodec>(dec: VerifiedDeltaDecoder<'a
 /// with no column built: the values the bytes are the saved column of.
 /// For every value type and codec.
 #[allow(dead_code)]
-fn delta_decode_all<'a, T: VDeltaValue<C>, C: VCodec>(bytes: &'a [u8]) -> (out: Vec<T>)
+fn delta_decode_all<'a, T: DeltaValue<C>, C: Codec>(bytes: &'a [u8]) -> (out: Vec<T>)
     requires
-        VerifiedDeltaColumn::<T, C>::valid(bytes@),
+        DeltaColumn::<T, C>::valid(bytes@),
     ensures
-        out@ == VerifiedDeltaColumn::<T, C>::values(bytes@),
+        out@ == DeltaColumn::<T, C>::values(bytes@),
 {
-    delta_read_all(VerifiedDeltaDecoder::<T, C>::new(bytes))
+    delta_read_all(DeltaDecoder::<T, C>::new(bytes))
 }
 
 /// What a delta column saves, a decoder gives back: the column's
 /// values.
 #[allow(dead_code)]
-fn delta_decoded_as_held<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (out: Vec<T>)
+fn delta_decoded_as_held<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (out: Vec<T>)
     ensures
         out@ == col@,
 {
@@ -14599,7 +14596,7 @@ fn delta_decoded_as_held<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn
 /// What a delta encoder saves, a decoder gives back: the values the
 /// encoder was given, with no column between the two.
 #[allow(dead_code)]
-fn delta_encoded_then_decoded<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>) -> (out: Vec<T>)
+fn delta_encoded_then_decoded<T: DeltaValue<C>, C: Codec>(input: &Vec<T>) -> (out: Vec<T>)
     requires
         all_fit(input@),
     ensures
@@ -14613,14 +14610,14 @@ fn delta_encoded_then_decoded<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>) -> (
 /// gives a decoder the bytes are a saved delta column, and the decoder
 /// gives its values.
 #[allow(dead_code)]
-fn delta_decode_unknown<'a, T: VDeltaValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Option<Vec<T>>)
+fn delta_decode_unknown<'a, T: DeltaValue<C>, C: Codec>(bytes: &'a [u8]) -> (r: Option<Vec<T>>)
     ensures
         r matches Some(out) ==> {
-            &&& VerifiedDeltaColumn::<T, C>::valid(bytes@)
-            &&& out@ == VerifiedDeltaColumn::<T, C>::values(bytes@)
+            &&& DeltaColumn::<T, C>::valid(bytes@)
+            &&& out@ == DeltaColumn::<T, C>::values(bytes@)
         },
 {
-    match VerifiedDeltaDecoder::<T, C>::try_new(bytes) {
+    match DeltaDecoder::<T, C>::try_new(bytes) {
         Ok(dec) => Some(delta_read_all(dec)),
         Err(_) => None,
     }
@@ -14629,13 +14626,13 @@ fn delta_decode_unknown<'a, T: VDeltaValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r
 /// Bytes a load takes are bytes a decoder may read with no check of its
 /// own, and it gives the values of the column loaded.
 #[allow(dead_code)]
-fn delta_decoded_or_loaded<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<
-    (VerifiedDeltaColumn<T, C>, Vec<T>),
+fn delta_decoded_or_loaded<T: DeltaValue<C>, C: Codec>(bytes: &[u8]) -> (r: Option<
+    (DeltaColumn<T, C>, Vec<T>),
 >)
     ensures
         r matches Some(p) ==> p.1@ == p.0@,
 {
-    match VerifiedDeltaColumn::<T, C>::load(bytes) {
+    match DeltaColumn::<T, C>::load(bytes) {
         Ok(col) => {
             let out = delta_decode_all::<T, C>(bytes);
             Some((col, out))
@@ -14648,40 +14645,40 @@ fn delta_decoded_or_loaded<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Op
 /// bytes are the saved one of, at its first value, with every value
 /// left to give.
 #[allow(dead_code)]
-fn delta_told_by_a_decoder<'a, T: VDeltaValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: VerifiedDeltaDecoder<'a, T, C>)
+fn delta_told_by_a_decoder<'a, T: DeltaValue<C>, C: Codec>(bytes: &'a [u8]) -> (r: DeltaDecoder<'a, T, C>)
     requires
-        VerifiedDeltaColumn::<T, C>::valid(bytes@),
+        DeltaColumn::<T, C>::valid(bytes@),
     ensures
-        r.column() == VerifiedDeltaColumn::<T, C>::values(bytes@),
+        r.column() == DeltaColumn::<T, C>::values(bytes@),
         r.pos() == 0,
-        r.rest() == VerifiedDeltaColumn::<T, C>::values(bytes@),
+        r.rest() == DeltaColumn::<T, C>::values(bytes@),
 {
-    VerifiedDeltaDecoder::<T, C>::new(bytes)
+    DeltaDecoder::<T, C>::new(bytes)
 }
 
 /// What `try_new` says: where it gives a decoder, the bytes are a saved
 /// delta column, and the decoder is the one `new` gives.
 #[allow(dead_code)]
-fn delta_told_by_a_checked_decoder<'a, T: VDeltaValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Result<
-    VerifiedDeltaDecoder<'a, T, C>,
+fn delta_told_by_a_checked_decoder<'a, T: DeltaValue<C>, C: Codec>(bytes: &'a [u8]) -> (r: Result<
+    DeltaDecoder<'a, T, C>,
     PackError,
 >)
     ensures
         r matches Ok(d) ==> {
-            &&& VerifiedDeltaColumn::<T, C>::valid(bytes@)
-            &&& d.column() == VerifiedDeltaColumn::<T, C>::values(bytes@)
+            &&& DeltaColumn::<T, C>::valid(bytes@)
+            &&& d.column() == DeltaColumn::<T, C>::values(bytes@)
             &&& d.pos() == 0
-            &&& d.rest() == VerifiedDeltaColumn::<T, C>::values(bytes@)
+            &&& d.rest() == DeltaColumn::<T, C>::values(bytes@)
         },
 {
-    VerifiedDeltaDecoder::<T, C>::try_new(bytes)
+    DeltaDecoder::<T, C>::try_new(bytes)
 }
 
 /// What `next` says, in the places of the column: the value at `pos()`,
 /// and the decoder one place on; or, at the end, none, and the decoder
 /// where it was.
 #[allow(dead_code)]
-fn delta_told_by_a_decoders_next<'a, T: VDeltaValue<C>, C: VCodec>(dec: &mut VerifiedDeltaDecoder<'a, T, C>) -> (r:
+fn delta_told_by_a_decoders_next<'a, T: DeltaValue<C>, C: Codec>(dec: &mut DeltaDecoder<'a, T, C>) -> (r:
     Option<T>)
     ensures
         final(dec).column() == old(dec).column(),
@@ -14708,8 +14705,8 @@ fn delta_told_by_a_decoders_next<'a, T: VDeltaValue<C>, C: VCodec>(dec: &mut Ver
 /// on, and the decoder past it; or, where the column ends before that,
 /// none, and the decoder at the end.
 #[allow(dead_code)]
-fn delta_told_by_a_decoders_nth<'a, T: VDeltaValue<C>, C: VCodec>(
-    dec: &mut VerifiedDeltaDecoder<'a, T, C>,
+fn delta_told_by_a_decoders_nth<'a, T: DeltaValue<C>, C: Codec>(
+    dec: &mut DeltaDecoder<'a, T, C>,
     n: usize,
 ) -> (r: Option<T>)
     ensures
@@ -14733,8 +14730,8 @@ fn delta_told_by_a_decoders_nth<'a, T: VDeltaValue<C>, C: VCodec>(
 /// of the column where that comes first, and what it has left is what
 /// it had `past` the first `n`.
 #[allow(dead_code)]
-fn delta_told_by_a_decoders_advance<'a, T: VDeltaValue<C>, C: VCodec>(
-    dec: &mut VerifiedDeltaDecoder<'a, T, C>,
+fn delta_told_by_a_decoders_advance<'a, T: DeltaValue<C>, C: Codec>(
+    dec: &mut DeltaDecoder<'a, T, C>,
     n: usize,
 )
     ensures
@@ -14748,8 +14745,8 @@ fn delta_told_by_a_decoders_advance<'a, T: VDeltaValue<C>, C: VCodec>(
 
 /// What `clone` says: a decoder of the same column, at the same place.
 #[allow(dead_code)]
-fn delta_told_by_a_decoders_copy<'a, T: VDeltaValue<C>, C: VCodec>(dec: &VerifiedDeltaDecoder<'a, T, C>) -> (r:
-    VerifiedDeltaDecoder<'a, T, C>)
+fn delta_told_by_a_decoders_copy<'a, T: DeltaValue<C>, C: Codec>(dec: &DeltaDecoder<'a, T, C>) -> (r:
+    DeltaDecoder<'a, T, C>)
     ensures
         r.column() == dec.column(),
         r.pos() == dec.pos(),
@@ -14763,8 +14760,8 @@ fn delta_told_by_a_decoders_copy<'a, T: VDeltaValue<C>, C: VCodec>(dec: &Verifie
 /// the decoder past it; or none, where `max` is 0 or the decoder is at
 /// the end, and the decoder where it was.
 #[allow(dead_code)]
-fn delta_told_by_a_decoders_run<'a, T: VDeltaValue<C>, C: VCodec>(
-    dec: &mut VerifiedDeltaDecoder<'a, T, C>,
+fn delta_told_by_a_decoders_run<'a, T: DeltaValue<C>, C: Codec>(
+    dec: &mut DeltaDecoder<'a, T, C>,
     max: usize,
 ) -> (r: Option<Run<Option<i64>>>)
     ensures
@@ -14797,7 +14794,7 @@ fn delta_told_by_a_decoders_run<'a, T: VDeltaValue<C>, C: VCodec>(
 /// it is one a column takes (`delta_run_fits`), and its values are the
 /// column's at those places, the first of those the decoder had left.
 #[allow(dead_code)]
-fn delta_run_stands_for<'a, T: VDeltaValue<C>, C: VCodec>(dec: &mut VerifiedDeltaDecoder<'a, T, C>, max: usize) -> (r:
+fn delta_run_stands_for<'a, T: DeltaValue<C>, C: Codec>(dec: &mut DeltaDecoder<'a, T, C>, max: usize) -> (r:
     Option<Run<Option<i64>>>)
     ensures
         final(dec).column() == old(dec).column(),
@@ -14831,7 +14828,7 @@ fn delta_run_stands_for<'a, T: VDeltaValue<C>, C: VCodec>(dec: &mut VerifiedDelt
 /// A run passed over and then a value read: the value is the column's
 /// at the place after the run.
 #[allow(dead_code)]
-fn delta_run_then_next<'a, T: VDeltaValue<C>, C: VCodec>(dec: &mut VerifiedDeltaDecoder<'a, T, C>, max: usize) -> (r:
+fn delta_run_then_next<'a, T: DeltaValue<C>, C: Codec>(dec: &mut DeltaDecoder<'a, T, C>, max: usize) -> (r:
     Option<(usize, T)>)
     ensures
         r matches Some(p) ==> {
@@ -14856,7 +14853,7 @@ fn delta_run_then_next<'a, T: VDeltaValue<C>, C: VCodec>(dec: &mut VerifiedDelta
 /// The value `n` places on, read by a copy of the decoder moved there:
 /// the decoder itself stays where it is.
 #[allow(dead_code)]
-fn delta_peek_ahead<'a, T: VDeltaValue<C>, C: VCodec>(dec: &VerifiedDeltaDecoder<'a, T, C>, n: usize) -> (r: Option<T>)
+fn delta_peek_ahead<'a, T: DeltaValue<C>, C: Codec>(dec: &DeltaDecoder<'a, T, C>, n: usize) -> (r: Option<T>)
     ensures
         dec.pos() + n < dec.column().len() ==> r == Some(dec.column()[dec.pos() + n]),
         dec.pos() + n >= dec.column().len() ==> r is None,
@@ -14873,16 +14870,16 @@ fn delta_peek_ahead<'a, T: VDeltaValue<C>, C: VCodec>(dec: &VerifiedDeltaDecoder
 /// empty column as a run after 0: that column holds the first values of
 /// the saved one. So a decoder's runs are runs a column takes.
 #[allow(dead_code)]
-fn delta_first_run_rebuilt<'a, T: VDeltaValue<C>, C: VCodec>(bytes: &'a [u8]) -> (col: VerifiedDeltaColumn<T, C>)
+fn delta_first_run_rebuilt<'a, T: DeltaValue<C>, C: Codec>(bytes: &'a [u8]) -> (col: DeltaColumn<T, C>)
     requires
-        VerifiedDeltaColumn::<T, C>::valid(bytes@),
+        DeltaColumn::<T, C>::valid(bytes@),
     ensures
-        col@.len() <= VerifiedDeltaColumn::<T, C>::values(bytes@).len(),
-        col@ == VerifiedDeltaColumn::<T, C>::values(bytes@).take(col@.len() as int),
+        col@.len() <= DeltaColumn::<T, C>::values(bytes@).len(),
+        col@ == DeltaColumn::<T, C>::values(bytes@).take(col@.len() as int),
 {
-    let mut dec = VerifiedDeltaDecoder::<T, C>::new(bytes);
+    let mut dec = DeltaDecoder::<T, C>::new(bytes);
     let ghost vs = dec.column();
-    let mut col = VerifiedDeltaColumn::<T, C>::new();
+    let mut col = DeltaColumn::<T, C>::new();
     proof {
         dec.lemma_column();
     }
@@ -15825,7 +15822,7 @@ fn raw_told_by_the_cuts(col: &RawColumn, start: usize, end: usize)
 /// A number a codec writes is the number it reads, whatever bytes come
 /// after it. For every codec.
 #[allow(dead_code)]
-fn a_number_written_and_read<C: VCodec>(n: u64, rest: &[u8]) -> (r: u64)
+fn a_number_written_and_read<C: Codec>(n: u64, rest: &[u8]) -> (r: u64)
     ensures
         r == n,
 {
@@ -15859,7 +15856,7 @@ fn a_number_written_and_read<C: VCodec>(n: u64, rest: &[u8]) -> (r: u64)
 /// A signed number a codec writes is the number it reads, whatever bytes
 /// come after it. For every codec.
 #[allow(dead_code)]
-fn a_signed_number_written_and_read<C: VCodec>(n: i64, rest: &[u8]) -> (r: i64)
+fn a_signed_number_written_and_read<C: Codec>(n: i64, rest: &[u8]) -> (r: i64)
     ensures
         r == n,
 {
@@ -15893,7 +15890,7 @@ fn a_signed_number_written_and_read<C: VCodec>(n: i64, rest: &[u8]) -> (r: i64)
 /// where the first one's bytes end is where the second one's begin. For
 /// every codec.
 #[allow(dead_code)]
-fn numbers_one_after_another<C: VCodec>(a: u64, b: i64) -> (r: (u64, i64))
+fn numbers_one_after_another<C: Codec>(a: u64, b: i64) -> (r: (u64, i64))
     ensures
         r == (a, b),
 {
@@ -15950,7 +15947,7 @@ fn numbers_one_after_another<C: VCodec>(a: u64, b: i64) -> (r: (u64, i64))
 /// A number is passed over without being read: its length is found, and
 /// the number after it is read from there. For every codec.
 #[allow(dead_code)]
-fn a_number_skipped<C: VCodec>(a: i64, b: u64) -> (r: u64)
+fn a_number_skipped<C: Codec>(a: i64, b: u64) -> (r: u64)
     ensures
         r == b,
 {
@@ -16009,7 +16006,7 @@ fn a_number_skipped<C: VCodec>(a: i64, b: u64) -> (r: u64)
 /// the same length, and that is the length `len_u` gives. For every
 /// codec.
 #[allow(dead_code)]
-fn readers_agree<C: VCodec>(data: &[u8]) -> (r: bool)
+fn readers_agree<C: Codec>(data: &[u8]) -> (r: bool)
     ensures
         r,
 {
@@ -16058,7 +16055,7 @@ fn readers_agree<C: VCodec>(data: &[u8]) -> (r: bool)
 /// longer by two to twenty bytes: each number takes one to ten. For
 /// every codec.
 #[allow(dead_code)]
-fn numbers_take_one_to_ten_bytes<C: VCodec>(buf: &mut Vec<u8>, a: u64, b: i64)
+fn numbers_take_one_to_ten_bytes<C: Codec>(buf: &mut Vec<u8>, a: u64, b: i64)
     ensures
         old(buf)@.len() + 2 <= final(buf)@.len() <= old(buf)@.len() + 20,
 {
@@ -16134,7 +16131,7 @@ fn columns_with_bijou64(
     assert(col@ == flags_owned);
     let ghost more_owned = more@;
     let saved = one_encoding_four_ways::<Option<i64>, Bijou64>(more);
-    assert(saved@ == VerifiedColumn::<Option<i64>, Bijou64>::encoding(more_owned));
+    assert(saved@ == Column::<Option<i64>, Bijou64>::encoding(more_owned));
     let same = encoded_then_decoded::<u64, Bijou64>(input);
     let also = decoded_or_loaded::<Option<Action>, Bijou64>(bytes);
     assert(same && also);
@@ -16194,7 +16191,7 @@ fn deltas_with_bijou64(values: &Vec<i64>, nullable: &Vec<Option<u32>>, owned: Ve
     }
     let ghost owned_values = owned@;
     let saved = delta_one_encoding_four_ways::<i64, Bijou64>(owned);
-    assert(saved@ == VerifiedDeltaColumn::<i64, Bijou64>::encoding(owned_values));
+    assert(saved@ == DeltaColumn::<i64, Bijou64>::encoding(owned_values));
     let out = delta_encoded_then_decoded::<i64, Bijou64>(values);
     assert(out@ == values@);
     if let Some(p) = delta_decoded_or_loaded::<i64, Bijou64>(bytes) {
@@ -16207,12 +16204,12 @@ fn deltas_with_bijou64(values: &Vec<i64>, nullable: &Vec<Option<u32>>, owned: Ve
 /// The module `leb128` names the column types with LEB128 as their
 /// codec: they are the types that name no codec.
 #[allow(dead_code)]
-fn leb128_by_its_import(a: u64, b: u64) -> (r: (VerifiedColumn<u64>, Vec<u8>))
+fn leb128_by_its_import(a: u64, b: u64) -> (r: (Column<u64>, Vec<u8>))
     ensures
         r.0@ == seq![a, b],
-        r.1@ == VerifiedColumn::<u64, Leb128>::encoding(seq![a, b]),
+        r.1@ == Column::<u64, Leb128>::encoding(seq![a, b]),
 {
-    let mut col = leb128::VerifiedColumn::<u64>::new();
+    let mut col = leb128::Column::<u64>::new();
     col.push(a);
     col.push(b);
     assert(col@ =~= seq![a, b]);
@@ -16224,12 +16221,12 @@ fn leb128_by_its_import(a: u64, b: u64) -> (r: (VerifiedColumn<u64>, Vec<u8>))
 /// codec.
 #[cfg(feature = "bijou64")]
 #[allow(dead_code)]
-fn bijou64_by_its_import(a: u64, b: u64) -> (r: (VerifiedColumn<u64, Bijou64>, Vec<u8>))
+fn bijou64_by_its_import(a: u64, b: u64) -> (r: (Column<u64, Bijou64>, Vec<u8>))
     ensures
         r.0@ == seq![a, b],
-        r.1@ == VerifiedColumn::<u64, Bijou64>::encoding(seq![a, b]),
+        r.1@ == Column::<u64, Bijou64>::encoding(seq![a, b]),
 {
-    let mut col = bijou::VerifiedColumn::<u64>::new();
+    let mut col = bijou::Column::<u64>::new();
     col.push(a);
     col.push(b);
     assert(col@ =~= seq![a, b]);
@@ -16242,24 +16239,24 @@ fn bijou64_by_its_import(a: u64, b: u64) -> (r: (VerifiedColumn<u64, Bijou64>, V
 /// side and each type is named with its codec's.
 #[cfg(feature = "bijou64")]
 #[allow(dead_code)]
-fn from_one_codec_to_the_other(col: &leb128::VerifiedColumn<Option<i64>>) -> (r: bijou::VerifiedColumn<Option<i64>>)
+fn from_one_codec_to_the_other(col: &leb128::Column<Option<i64>>) -> (r: bijou::Column<Option<i64>>)
     ensures
         r@ == col@,
 {
     let values = col.to_vec();
-    bijou::VerifiedColumn::<Option<i64>>::from_values(values.as_slice())
+    bijou::Column::<Option<i64>>::from_values(values.as_slice())
 }
 
 /// A delta column written with one codec, written anew with the other.
 #[cfg(feature = "bijou64")]
 #[allow(dead_code)]
-fn deltas_from_one_codec_to_the_other(col: &leb128::VerifiedDeltaColumn<i64>) -> (r: bijou::VerifiedDeltaColumn<i64>)
+fn deltas_from_one_codec_to_the_other(col: &leb128::DeltaColumn<i64>) -> (r: bijou::DeltaColumn<i64>)
     ensures
         r@ == col@,
 {
     let values = col.to_vec();
     assert(all_fit(values@));
-    bijou::VerifiedDeltaColumn::<i64>::from_values(values.as_slice())
+    bijou::DeltaColumn::<i64>::from_values(values.as_slice())
 }
 
 /// The streaming types named by a codec's module: an encoder given two
@@ -16271,12 +16268,12 @@ fn streamed_with_bijou64(a: u64, b: u64) -> (r: Vec<u64>)
     ensures
         r@ == seq![a, b],
 {
-    let mut enc = bijou::VerifiedEncoder::<u64>::new();
+    let mut enc = bijou::Encoder::<u64>::new();
     enc.append(a);
     enc.append(b);
     assert(enc@ =~= seq![a, b]);
     let bytes = enc.save();
-    let dec = bijou::VerifiedDecoder::<u64>::new(bytes.as_slice());
+    let dec = bijou::Decoder::<u64>::new(bytes.as_slice());
     let out = read_all(dec);
     proof {
         <u64 as VGet>::lemma_svs(out@);
@@ -16292,12 +16289,12 @@ fn deltas_streamed_with_bijou64(a: i64, b: i64) -> (r: Vec<i64>)
     ensures
         r@ == seq![a, b],
 {
-    let mut enc = bijou::VerifiedDeltaEncoder::<i64>::new();
+    let mut enc = bijou::DeltaEncoder::<i64>::new();
     enc.append(a);
     enc.append(b);
     assert(enc@ =~= seq![a, b]);
     let bytes = enc.save();
-    let dec = bijou::VerifiedDeltaDecoder::<i64>::new(bytes.as_slice());
+    let dec = bijou::DeltaDecoder::<i64>::new(bytes.as_slice());
     delta_read_all(dec)
 }
 
@@ -16308,8 +16305,8 @@ fn deltas_streamed_with_bijou64(a: i64, b: i64) -> (r: Vec<i64>)
 /// and the column counts one edit more. For every value type, codec and
 /// kind of index.
 #[allow(dead_code)]
-fn edit_like_a_splice<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    col: &mut VerifiedColumn<V, C, K>,
+fn edit_like_a_splice<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    col: &mut Column<V, C, K>,
     at: usize,
     del: usize,
     v: Get<'_, V>,
@@ -16345,7 +16342,7 @@ fn edit_as_documented() -> (r: Vec<u64>)
     input.push(3);
     input.push(4);
     input.push(5);
-    let mut col = VerifiedColumn::<u64>::from_values(input.as_slice());
+    let mut col = Column::<u64>::from_values(input.as_slice());
     assert(col@ =~= seq![1u64, 2, 3, 4, 5]);
     let mut e = col.edit();
     e.seek(1).delete(2).insert(9).seek(4).replace_with(7);
@@ -16358,8 +16355,8 @@ fn edit_as_documented() -> (r: Vec<u64>)
 /// written; an insertion moves its place in the column being written,
 /// a deletion its place among the original values.
 #[allow(dead_code)]
-fn places_of_a_cursor<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    col: &mut VerifiedColumn<V, C, K>,
+fn places_of_a_cursor<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    col: &mut Column<V, C, K>,
     at: usize,
     v: Get<'_, V>,
 ) -> (r: (usize, usize, usize, usize))
@@ -16389,8 +16386,8 @@ fn places_of_a_cursor<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
 /// Two values put in at two places by one cursor, in one pass: the
 /// column counts one edit, where two splices count two.
 #[allow(dead_code)]
-fn two_places_one_edit<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    col: &mut VerifiedColumn<V, C, K>,
+fn two_places_one_edit<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    col: &mut Column<V, C, K>,
     a: usize,
     b: usize,
     x: Get<'_, V>,
@@ -16416,8 +16413,8 @@ fn two_places_one_edit<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
 /// A cursor that only passes over values gives the column it was
 /// opened on, and the column counts no edit.
 #[allow(dead_code)]
-fn only_passed_over<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    col: &mut VerifiedColumn<V, C, K>,
+fn only_passed_over<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    col: &mut Column<V, C, K>,
     a: usize,
     b: usize,
     n: usize,
@@ -16441,7 +16438,7 @@ fn only_passed_over<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
 
 /// A seek past the end stands at the end, where an insertion is a push.
 #[allow(dead_code)]
-fn pushed_by_a_cursor<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, v: Get<'_, V>)
+fn pushed_by_a_cursor<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>)
     ensures
         final(col)@ == old(col)@.push(v.sv()),
         final(col).edits() == after_edit(old(col).edits()),
@@ -16461,7 +16458,7 @@ fn pushed_by_a_cursor<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut Verifi
 /// A deletion of more values than are left drops those that are: the
 /// column cut short at `at`, and an edit counted only if a value went.
 #[allow(dead_code)]
-fn cut_short<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize)
+fn cut_short<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize)
     ensures
         final(col)@ == if at <= old(col)@.len() {
             old(col)@.take(at as int)
@@ -16494,8 +16491,8 @@ fn cut_short<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<
 /// and then the runs an iterator gives, a run of count 0 being no
 /// value.
 #[allow(dead_code)]
-fn runs_by_a_cursor<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    col: &mut VerifiedColumn<V, C, K>,
+fn runs_by_a_cursor<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    col: &mut Column<V, C, K>,
     at: usize,
     a: Get<'v, V>,
     b: Get<'v, V>,
@@ -16530,8 +16527,8 @@ fn runs_by_a_cursor<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
 /// the laws of iterators, put in by a cursor: the column holds their
 /// values there, and counts an edit if they have a value.
 #[allow(dead_code)]
-fn any_runs_by_a_cursor<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: Iterator<Item = Run<Get<'v, V>>>>(
-    col: &mut VerifiedColumn<V, C, K>,
+fn any_runs_by_a_cursor<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, I: Iterator<Item = Run<Get<'v, V>>>>(
+    col: &mut Column<V, C, K>,
     at: usize,
     runs: I,
 )
@@ -16555,7 +16552,7 @@ fn any_runs_by_a_cursor<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: Iterato
 /// only looks, so the column is as it was and counts no edit. For
 /// every value type.
 #[allow(dead_code)]
-fn is_it_there<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize, v: Get<'_, V>) -> (r:
+fn is_it_there<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize, v: Get<'_, V>) -> (r:
     bool)
     requires
         at <= old(col)@.len(),
@@ -16581,7 +16578,7 @@ fn is_it_there<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColum
 /// they are copied out before the cursor goes on, and the byte string
 /// is then deleted.
 #[allow(dead_code)]
-fn bytes_taken_out(col: &mut VerifiedColumn<Vec<u8>>, at: usize) -> (r: Option<Vec<u8>>)
+fn bytes_taken_out(col: &mut Column<Vec<u8>>, at: usize) -> (r: Option<Vec<u8>>)
     requires
         at <= old(col)@.len(),
     ensures
@@ -16610,7 +16607,7 @@ fn bytes_taken_out(col: &mut VerifiedColumn<Vec<u8>>, at: usize) -> (r: Option<V
 
 /// A flag a cursor stands at, turned over.
 #[allow(dead_code)]
-fn flag_turned(col: &mut VerifiedColumn<bool>, at: usize)
+fn flag_turned(col: &mut Column<bool>, at: usize)
     requires
         at < old(col)@.len(),
     ensures
@@ -16634,7 +16631,7 @@ fn flag_turned(col: &mut VerifiedColumn<bool>, at: usize)
 /// A value put in the place of another; where it is the value that was
 /// there, the column counts no edit.
 #[allow(dead_code)]
-fn put_in_its_place<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize, v: Get<'_, V>)
+fn put_in_its_place<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize, v: Get<'_, V>)
     requires
         at < old(col)@.len(),
     ensures
@@ -16657,7 +16654,7 @@ fn put_in_its_place<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut Verified
 /// A cursor walked over a whole column in a loop, each number looked at
 /// and made one more: one pass, and one edit counted.
 #[allow(dead_code)]
-fn each_one_more(col: &mut VerifiedColumn<u64>)
+fn each_one_more(col: &mut Column<u64>)
     requires
         forall|i: int| 0 <= i < old(col)@.len() ==> old(col)@[i] < u64::MAX,
     ensures
@@ -16700,7 +16697,7 @@ fn each_one_more(col: &mut VerifiedColumn<u64>)
 /// dropped, the others kept. The column that is left has no absent
 /// one, and is no longer than it was.
 #[allow(dead_code)]
-fn absent_ones_dropped(col: &mut VerifiedColumn<Option<u64>>)
+fn absent_ones_dropped(col: &mut Column<Option<u64>>)
     ensures
         final(col)@.len() <= old(col)@.len(),
         forall|i: int| 0 <= i < final(col)@.len() ==> (#[trigger] final(col)@[i]) is Some,
@@ -16742,7 +16739,7 @@ fn absent_ones_dropped(col: &mut VerifiedColumn<Option<u64>>)
 /// A column kept with its sums, edited by a cursor: it is still a
 /// column whose sums fit, as every column of its kind is.
 #[allow(dead_code)]
-fn sums_after_a_cursor(col: &mut VerifiedPrefixColumn<u64>, at: usize, v: u64)
+fn sums_after_a_cursor(col: &mut PrefixColumn<u64>, at: usize, v: u64)
     requires
         at <= old(col)@.len(),
     ensures
@@ -16762,7 +16759,7 @@ fn sums_after_a_cursor(col: &mut VerifiedPrefixColumn<u64>, at: usize, v: u64)
 /// What each step of a cursor says, asked for on its own. A cursor
 /// opened: at the front, nothing written, nothing changed.
 #[allow(dead_code)]
-fn told_by_an_edit<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>) -> (e: VerifiedEdit<
+fn told_by_an_edit<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>) -> (e: Edit<
     '_,
     V,
     C,
@@ -16782,8 +16779,8 @@ fn told_by_an_edit<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedC
 
 /// A cursor opened at a place: the values before it written.
 #[allow(dead_code)]
-fn told_by_an_edit_at<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize) -> (e:
-    VerifiedEdit<'_, V, C, K>)
+fn told_by_an_edit_at<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize) -> (e:
+    Edit<'_, V, C, K>)
     requires
         at <= old(col)@.len(),
     ensures
@@ -16800,7 +16797,7 @@ fn told_by_an_edit_at<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut Verifi
 
 /// A cursor is among its original values, and says where it is.
 #[allow(dead_code)]
-fn told_by_a_cursors_places<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &VerifiedEdit<'_, V, C, K>) -> (r: (usize, usize))
+fn told_by_a_cursors_places<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &Edit<'_, V, C, K>) -> (r: (usize, usize))
     requires
         e.wf(),
     ensures
@@ -16817,7 +16814,7 @@ fn told_by_a_cursors_places<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &Verifi
 
 /// Values passed over are written as they are.
 #[allow(dead_code)]
-fn told_by_a_cursors_advance<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, n: usize)
+fn told_by_a_cursors_advance<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, n: usize)
     requires
         old(e).wf(),
     ensures
@@ -16836,7 +16833,7 @@ fn told_by_a_cursors_advance<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut V
 
 /// A seek goes to its place, or to the end where the place is past it.
 #[allow(dead_code)]
-fn told_by_a_cursors_seek<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, to: usize)
+fn told_by_a_cursors_seek<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, to: usize)
     requires
         old(e).wf(),
         old(e).at() <= to,
@@ -16855,7 +16852,7 @@ fn told_by_a_cursors_seek<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut Veri
 
 /// A value put in is written, and the cursor stays where it is.
 #[allow(dead_code)]
-fn told_by_a_cursors_insert<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, v: Get<'_, V>)
+fn told_by_a_cursors_insert<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, v: Get<'_, V>)
     requires
         old(e).wf(),
     ensures
@@ -16869,7 +16866,7 @@ fn told_by_a_cursors_insert<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut Ve
 
 /// A run put in is written whole; a run of no value changes nothing.
 #[allow(dead_code)]
-fn told_by_a_cursors_insert_run<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, v: Get<'_, V>, n: usize)
+fn told_by_a_cursors_insert_run<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, v: Get<'_, V>, n: usize)
     requires
         old(e).wf(),
     ensures
@@ -16884,8 +16881,8 @@ fn told_by_a_cursors_insert_run<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mu
 /// Runs put in are written one after another, and change the column if
 /// they have a value.
 #[allow(dead_code)]
-fn told_by_a_cursors_insert_runs<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: Iterator<Item = Run<Get<'v, V>>>>(
-    e: &mut VerifiedEdit<'_, V, C, K>,
+fn told_by_a_cursors_insert_runs<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, I: Iterator<Item = Run<Get<'v, V>>>>(
+    e: &mut Edit<'_, V, C, K>,
     runs: I,
 )
     requires
@@ -16903,7 +16900,7 @@ fn told_by_a_cursors_insert_runs<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I
 /// A look at the value the cursor stands at leaves the cursor as it
 /// was.
 #[allow(dead_code)]
-fn told_by_a_cursors_peek<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, v: Get<'_, V>) -> (r: Option<
+fn told_by_a_cursors_peek<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, v: Get<'_, V>) -> (r: Option<
     bool,
 >)
     requires
@@ -16929,7 +16926,7 @@ fn told_by_a_cursors_peek<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut Veri
 /// and has changed the column unless the value was there. At the end
 /// there is no place, and nothing is done.
 #[allow(dead_code)]
-fn told_by_a_cursors_replace_with<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, v: Get<'_, V>)
+fn told_by_a_cursors_replace_with<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, v: Get<'_, V>)
     requires
         old(e).wf(),
     ensures
@@ -16950,7 +16947,7 @@ fn told_by_a_cursors_replace_with<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &
 /// Values dropped are passed over and not written; the cursor has
 /// changed the column if there was one to drop.
 #[allow(dead_code)]
-fn told_by_a_cursors_delete<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, n: usize)
+fn told_by_a_cursors_delete<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, n: usize)
     requires
         old(e).wf(),
     ensures
@@ -16965,7 +16962,7 @@ fn told_by_a_cursors_delete<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut Ve
 /// What every step keeps: the cursor's original values, the count it
 /// began with, and the column it will give.
 #[allow(dead_code)]
-fn told_what_a_step_keeps<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, n: usize, v: Get<'_, V>)
+fn told_what_a_step_keeps<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, n: usize, v: Get<'_, V>)
     requires
         old(e).wf(),
     ensures
@@ -16981,7 +16978,7 @@ fn told_what_a_step_keeps<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut Veri
 /// rest of the original values, and counts an edit if a step changed
 /// it.
 #[allow(dead_code)]
-fn told_by_a_cursors_finish<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: VerifiedEdit<'_, V, C, K>)
+fn told_by_a_cursors_finish<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: Edit<'_, V, C, K>)
     requires
         e.wf(),
     ensures
@@ -17002,7 +16999,7 @@ fn told_by_a_cursors_finish<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: Verifie
 /// the rest kept; and the column counts one edit more. For every value
 /// type and codec.
 #[allow(dead_code)]
-fn delta_edit_like_a_splice<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, del: usize, v: T)
+fn delta_edit_like_a_splice<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, at: usize, del: usize, v: T)
     requires
         at <= old(col)@.len(),
         del <= old(col)@.len() - at,
@@ -17027,7 +17024,7 @@ fn delta_edit_as_documented() -> (r: Vec<u64>)
     ensures
         r@ == seq![10u64, 25, 40, 45],
 {
-    let mut col = VerifiedDeltaColumn::<u64>::new();
+    let mut col = DeltaColumn::<u64>::new();
     col.push(10);
     col.push(20);
     col.push(30);
@@ -17045,7 +17042,7 @@ fn delta_edit_as_documented() -> (r: Vec<u64>)
 /// before it written; an insertion moves its place in the column being
 /// written, a deletion its place among the original values.
 #[allow(dead_code)]
-fn delta_places_of_a_cursor<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, v: T) -> (r: (
+fn delta_places_of_a_cursor<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, at: usize, v: T) -> (r: (
     usize,
     usize,
     usize,
@@ -17078,7 +17075,7 @@ fn delta_places_of_a_cursor<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDelt
 /// Two values put in at two places by one delta cursor, in one pass: the
 /// column counts one edit, where two splices count two.
 #[allow(dead_code)]
-fn delta_two_places_one_edit<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, a: usize, b: usize, x: T, y: T)
+fn delta_two_places_one_edit<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, a: usize, b: usize, x: T, y: T)
     requires
         a <= b <= old(col)@.len(),
         x.fits(),
@@ -17104,7 +17101,7 @@ fn delta_two_places_one_edit<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDel
 /// opened on, and the column counts no edit. Its seeks go anywhere: one
 /// to before the cursor leaves it where it stands.
 #[allow(dead_code)]
-fn delta_only_passed_over<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, a: usize, b: usize, n: usize)
+fn delta_only_passed_over<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, a: usize, b: usize, n: usize)
     ensures
         final(col)@ == old(col)@,
         final(col).edits() == old(col).edits(),
@@ -17123,7 +17120,7 @@ fn delta_only_passed_over<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaC
 /// A seek back to before the cursor is no step: the cursor stays where
 /// it stands, and a value put in then goes there.
 #[allow(dead_code)]
-fn delta_seek_back_stays<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, a: usize, b: usize, v: T)
+fn delta_seek_back_stays<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, a: usize, b: usize, v: T)
     requires
         b <= a <= old(col)@.len(),
         v.fits(),
@@ -17142,7 +17139,7 @@ fn delta_seek_back_stays<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaCo
 
 /// A seek past the end stands at the end, where an insertion is a push.
 #[allow(dead_code)]
-fn delta_pushed_by_a_cursor<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, v: T)
+fn delta_pushed_by_a_cursor<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, v: T)
     requires
         v.fits(),
     ensures
@@ -17164,7 +17161,7 @@ fn delta_pushed_by_a_cursor<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDelt
 /// A deletion of more values than are left drops those that are: the
 /// column cut short at `at`, and an edit counted only if a value went.
 #[allow(dead_code)]
-fn delta_cut_short<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize)
+fn delta_cut_short<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, at: usize)
     ensures
         final(col)@ == if at <= old(col)@.len() {
             old(col)@.take(at as int)
@@ -17198,7 +17195,7 @@ fn delta_cut_short<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T
 /// more numbers, 7 and 9, said by the run itself (its value before is
 /// 5), whatever the cursor stands after.
 #[allow(dead_code)]
-fn delta_runs_by_a_cursor<C: VCodec>(col: &mut VerifiedDeltaColumn<u32, C>, at: usize)
+fn delta_runs_by_a_cursor<C: Codec>(col: &mut DeltaColumn<u32, C>, at: usize)
     requires
         at <= old(col)@.len(),
     ensures
@@ -17242,8 +17239,8 @@ fn delta_runs_by_a_cursor<C: VCodec>(col: &mut VerifiedDeltaColumn<u32, C>, at: 
 /// there, and counts an edit if they have a value. Where one does not
 /// pass, nothing is put in.
 #[allow(dead_code)]
-fn delta_checked_runs_by_a_cursor<T: VDeltaValue<C>, C: VCodec>(
-    col: &mut VerifiedDeltaColumn<T, C>,
+fn delta_checked_runs_by_a_cursor<T: DeltaValue<C>, C: Codec>(
+    col: &mut DeltaColumn<T, C>,
     at: usize,
     runs: &[DeltaRun],
 ) -> (r: bool)
@@ -17261,7 +17258,7 @@ fn delta_checked_runs_by_a_cursor<T: VDeltaValue<C>, C: VCodec>(
             forall|j: int| 0 <= j < i ==> delta_run_fits::<T>(#[trigger] runs@[j]),
         decreases runs.len() - i,
     {
-        if !VerifiedDeltaColumn::<T, C>::run_fits(&runs[i]) {
+        if !DeltaColumn::<T, C>::run_fits(&runs[i]) {
             return false;
         }
         i += 1;
@@ -17275,7 +17272,7 @@ fn delta_checked_runs_by_a_cursor<T: VDeltaValue<C>, C: VCodec>(
 /// The value a delta cursor stands at: the cursor only looks, so the
 /// column is as it was and counts no edit.
 #[allow(dead_code)]
-fn delta_what_is_there<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize) -> (r: Option<T>)
+fn delta_what_is_there<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, at: usize) -> (r: Option<T>)
     requires
         at <= old(col)@.len(),
     ensures
@@ -17299,7 +17296,7 @@ fn delta_what_is_there<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColu
 /// A value put in the place of another; where it is the value that was
 /// there, the column counts no edit.
 #[allow(dead_code)]
-fn delta_put_in_its_place<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, v: T)
+fn delta_put_in_its_place<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, at: usize, v: T)
     requires
         at < old(col)@.len(),
         v.fits(),
@@ -17324,7 +17321,7 @@ fn delta_put_in_its_place<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaC
 /// each one looked at and made a second later: one pass, and one edit
 /// counted.
 #[allow(dead_code)]
-fn delta_each_one_later(col: &mut VerifiedDeltaColumn<i64>)
+fn delta_each_one_later(col: &mut DeltaColumn<i64>)
     requires
         forall|i: int| 0 <= i < old(col)@.len() ==> old(col)@[i] < i64::MAX,
     ensures
@@ -17367,7 +17364,7 @@ fn delta_each_one_later(col: &mut VerifiedDeltaColumn<i64>)
 /// the others kept. The column that is left has no null, and is no
 /// longer than it was.
 #[allow(dead_code)]
-fn delta_nulls_dropped(col: &mut VerifiedDeltaColumn<Option<i32>>)
+fn delta_nulls_dropped(col: &mut DeltaColumn<Option<i32>>)
     ensures
         final(col)@.len() <= old(col)@.len(),
         forall|i: int| 0 <= i < final(col)@.len() ==> (#[trigger] final(col)@[i]) is Some,
@@ -17409,7 +17406,7 @@ fn delta_nulls_dropped(col: &mut VerifiedDeltaColumn<Option<i32>>)
 /// What each step of a delta cursor says, asked for on its own. A
 /// cursor opened: at the front, nothing written, nothing changed.
 #[allow(dead_code)]
-fn told_by_a_delta_edit<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>) -> (e: VerifiedDeltaEdit<
+fn told_by_a_delta_edit<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>) -> (e: DeltaEdit<
     '_,
     T,
     C,
@@ -17428,8 +17425,8 @@ fn told_by_a_delta_edit<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaCol
 
 /// A delta cursor opened at a place: the values before it written.
 #[allow(dead_code)]
-fn told_by_a_delta_edit_at<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize) -> (e:
-    VerifiedDeltaEdit<'_, T, C>)
+fn told_by_a_delta_edit_at<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, at: usize) -> (e:
+    DeltaEdit<'_, T, C>)
     requires
         at <= old(col)@.len(),
     ensures
@@ -17446,7 +17443,7 @@ fn told_by_a_delta_edit_at<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDelta
 
 /// A delta cursor is among its original values, and says where it is.
 #[allow(dead_code)]
-fn told_by_a_delta_cursors_places<T: VDeltaValue<C>, C: VCodec>(e: &VerifiedDeltaEdit<'_, T, C>) -> (r: (usize, usize))
+fn told_by_a_delta_cursors_places<T: DeltaValue<C>, C: Codec>(e: &DeltaEdit<'_, T, C>) -> (r: (usize, usize))
     requires
         e.wf(),
     ensures
@@ -17464,7 +17461,7 @@ fn told_by_a_delta_cursors_places<T: VDeltaValue<C>, C: VCodec>(e: &VerifiedDelt
 /// Where a delta cursor can stand, told back: among its original
 /// values, which are no more than a `usize` counts.
 #[allow(dead_code)]
-proof fn told_by_a_delta_cursors_lemma_at<T: VDeltaValue<C>, C: VCodec>(e: &VerifiedDeltaEdit<'_, T, C>)
+proof fn told_by_a_delta_cursors_lemma_at<T: DeltaValue<C>, C: Codec>(e: &DeltaEdit<'_, T, C>)
     requires
         e.wf(),
     ensures
@@ -17475,7 +17472,7 @@ proof fn told_by_a_delta_cursors_lemma_at<T: VDeltaValue<C>, C: VCodec>(e: &Veri
 
 /// Values passed over are written as they are.
 #[allow(dead_code)]
-fn told_by_a_delta_cursors_advance<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, n: usize)
+fn told_by_a_delta_cursors_advance<T: DeltaValue<C>, C: Codec>(e: &mut DeltaEdit<'_, T, C>, n: usize)
     requires
         old(e).wf(),
     ensures
@@ -17495,7 +17492,7 @@ fn told_by_a_delta_cursors_advance<T: VDeltaValue<C>, C: VCodec>(e: &mut Verifie
 /// A seek goes to its place, or to the end where the place is past it,
 /// and stays where the place is before the cursor.
 #[allow(dead_code)]
-fn told_by_a_delta_cursors_seek<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, to: usize)
+fn told_by_a_delta_cursors_seek<T: DeltaValue<C>, C: Codec>(e: &mut DeltaEdit<'_, T, C>, to: usize)
     requires
         old(e).wf(),
     ensures
@@ -17515,7 +17512,7 @@ fn told_by_a_delta_cursors_seek<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDe
 
 /// A value put in is written, and the cursor stays where it is.
 #[allow(dead_code)]
-fn told_by_a_delta_cursors_insert<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, v: T)
+fn told_by_a_delta_cursors_insert<T: DeltaValue<C>, C: Codec>(e: &mut DeltaEdit<'_, T, C>, v: T)
     requires
         old(e).wf(),
         v.fits(),
@@ -17530,7 +17527,7 @@ fn told_by_a_delta_cursors_insert<T: VDeltaValue<C>, C: VCodec>(e: &mut Verified
 
 /// A run put in is written whole; a run of no value changes nothing.
 #[allow(dead_code)]
-fn told_by_a_delta_cursors_insert_run<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, v: T, n: usize)
+fn told_by_a_delta_cursors_insert_run<T: DeltaValue<C>, C: Codec>(e: &mut DeltaEdit<'_, T, C>, v: T, n: usize)
     requires
         old(e).wf(),
         v.fits(),
@@ -17546,7 +17543,7 @@ fn told_by_a_delta_cursors_insert_run<T: VDeltaValue<C>, C: VCodec>(e: &mut Veri
 /// Runs put in are written one after another, and change the column if
 /// they have a value.
 #[allow(dead_code)]
-fn told_by_a_delta_cursors_insert_runs<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, runs: &[DeltaRun])
+fn told_by_a_delta_cursors_insert_runs<T: DeltaValue<C>, C: Codec>(e: &mut DeltaEdit<'_, T, C>, runs: &[DeltaRun])
     requires
         old(e).wf(),
         delta_runs_fit::<T>(runs@),
@@ -17562,7 +17559,7 @@ fn told_by_a_delta_cursors_insert_runs<T: VDeltaValue<C>, C: VCodec>(e: &mut Ver
 /// A look at the value the cursor stands at leaves the cursor as it
 /// was.
 #[allow(dead_code)]
-fn told_by_a_delta_cursors_peek<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>) -> (r: Option<T>)
+fn told_by_a_delta_cursors_peek<T: DeltaValue<C>, C: Codec>(e: &mut DeltaEdit<'_, T, C>) -> (r: Option<T>)
     requires
         old(e).wf(),
     ensures
@@ -17583,7 +17580,7 @@ fn told_by_a_delta_cursors_peek<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDe
 /// and has changed the column unless the value was there. At the end
 /// there is no place, and nothing is done.
 #[allow(dead_code)]
-fn told_by_a_delta_cursors_replace_with<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, v: T)
+fn told_by_a_delta_cursors_replace_with<T: DeltaValue<C>, C: Codec>(e: &mut DeltaEdit<'_, T, C>, v: T)
     requires
         old(e).wf(),
         v.fits(),
@@ -17605,7 +17602,7 @@ fn told_by_a_delta_cursors_replace_with<T: VDeltaValue<C>, C: VCodec>(e: &mut Ve
 /// Values dropped are passed over and not written; the cursor has
 /// changed the column if there was one to drop.
 #[allow(dead_code)]
-fn told_by_a_delta_cursors_delete<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, n: usize)
+fn told_by_a_delta_cursors_delete<T: DeltaValue<C>, C: Codec>(e: &mut DeltaEdit<'_, T, C>, n: usize)
     requires
         old(e).wf(),
     ensures
@@ -17620,7 +17617,7 @@ fn told_by_a_delta_cursors_delete<T: VDeltaValue<C>, C: VCodec>(e: &mut Verified
 /// What every step keeps: the cursor's original values, the count it
 /// began with, and the column it will give.
 #[allow(dead_code)]
-fn told_what_a_delta_step_keeps<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, n: usize, v: T)
+fn told_what_a_delta_step_keeps<T: DeltaValue<C>, C: Codec>(e: &mut DeltaEdit<'_, T, C>, n: usize, v: T)
     requires
         old(e).wf(),
         v.fits(),
@@ -17637,7 +17634,7 @@ fn told_what_a_delta_step_keeps<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDe
 /// rest of the original values, and counts an edit if a step changed
 /// it.
 #[allow(dead_code)]
-fn told_by_a_delta_cursors_finish<T: VDeltaValue<C>, C: VCodec>(e: VerifiedDeltaEdit<'_, T, C>)
+fn told_by_a_delta_cursors_finish<T: DeltaValue<C>, C: Codec>(e: DeltaEdit<'_, T, C>)
     requires
         e.wf(),
     ensures
@@ -17657,9 +17654,9 @@ fn told_by_a_delta_cursors_finish<T: VDeltaValue<C>, C: VCodec>(e: VerifiedDelta
 /// values, then the source's. For every value type, codec and kind of
 /// index.
 #[allow(dead_code)]
-fn copied_onto_the_end<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    dst: &mut VerifiedColumn<V, C, K>,
-    src: VerifiedColumn<V, C, K>,
+fn copied_onto_the_end<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    dst: &mut Column<V, C, K>,
+    src: Column<V, C, K>,
 )
     ensures
         final(dst)@ == old(dst)@ + src@,
@@ -17688,9 +17685,9 @@ fn copied_onto_the_end<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
 /// a reversed range), the rest kept. The column counts an edit if a
 /// value went or came.
 #[allow(dead_code)]
-fn copied_in_place<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    dst: &mut VerifiedColumn<V, C, K>,
-    src: VerifiedColumn<V, C, K>,
+fn copied_in_place<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    dst: &mut Column<V, C, K>,
+    src: Column<V, C, K>,
     at: usize,
     del: usize,
     start: usize,
@@ -17733,9 +17730,9 @@ fn copied_in_place<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
 /// Two splices in one pass: at `a`, the values of `src` in `r..m`; at
 /// `b`, those in `m..t`, where `b` deletes one value. One edit counted.
 #[allow(dead_code)]
-fn copied_at_two_places<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    dst: &mut VerifiedColumn<V, C, K>,
-    src: VerifiedColumn<V, C, K>,
+fn copied_at_two_places<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    dst: &mut Column<V, C, K>,
+    src: Column<V, C, K>,
     a: usize,
     b: usize,
     r: usize,
@@ -17779,9 +17776,9 @@ fn copied_at_two_places<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
 /// No splices, or splices that delete nothing and copy nothing: the
 /// column is as it was, and counts no edit.
 #[allow(dead_code)]
-fn copied_nothing<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    dst: &mut VerifiedColumn<V, C, K>,
-    src: VerifiedColumn<V, C, K>,
+fn copied_nothing<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    dst: &mut Column<V, C, K>,
+    src: Column<V, C, K>,
     at: usize,
 )
     requires
@@ -17813,9 +17810,9 @@ fn copied_nothing<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
 
 /// `copy_ranges`'s contract, told back.
 #[allow(dead_code)]
-fn told_by_copy_ranges<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    dst: &mut VerifiedColumn<V, C, K>,
-    src: VerifiedColumn<V, C, K>,
+fn told_by_copy_ranges<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    dst: &mut Column<V, C, K>,
+    src: Column<V, C, K>,
     splices: &[Splice],
 )
     requires
@@ -17839,11 +17836,11 @@ fn numbers_copied() -> (r: Vec<u64>)
     ensures
         r@ == seq![1u64, 8, 9, 3, 10],
 {
-    let mut dst = VerifiedColumn::<u64>::new();
+    let mut dst = Column::<u64>::new();
     dst.push(1);
     dst.push(2);
     dst.push(3);
-    let mut src = VerifiedColumn::<u64>::new();
+    let mut src = Column::<u64>::new();
     src.push(7);
     src.push(8);
     src.push(9);
@@ -17876,7 +17873,7 @@ fn numbers_copied() -> (r: Vec<u64>)
 /// A prefix column with a range of another copied in: it is still a
 /// column whose sums fit, as every column of its kind is.
 #[allow(dead_code)]
-fn sums_after_a_copy(dst: &mut VerifiedPrefixColumn<u64>, src: VerifiedPrefixColumn<u64>, at: usize)
+fn sums_after_a_copy(dst: &mut PrefixColumn<u64>, src: PrefixColumn<u64>, at: usize)
     requires
         at <= old(dst)@.len(),
     ensures
@@ -17908,7 +17905,7 @@ fn sums_after_a_copy(dst: &mut VerifiedPrefixColumn<u64>, src: VerifiedPrefixCol
 /// destination's values, then the source's. For every value type and
 /// codec.
 #[allow(dead_code)]
-fn delta_copied_onto_the_end<T: VDeltaValue<C>, C: VCodec>(dst: &mut VerifiedDeltaColumn<T, C>, src: VerifiedDeltaColumn<T, C>)
+fn delta_copied_onto_the_end<T: DeltaValue<C>, C: Codec>(dst: &mut DeltaColumn<T, C>, src: DeltaColumn<T, C>)
     ensures
         final(dst)@ == old(dst)@ + src@,
 {
@@ -17936,9 +17933,9 @@ fn delta_copied_onto_the_end<T: VDeltaValue<C>, C: VCodec>(dst: &mut VerifiedDel
 /// has; none for a reversed range), the rest kept; and an edit counted
 /// if a value went or came.
 #[allow(dead_code)]
-fn delta_copied_in_place<T: VDeltaValue<C>, C: VCodec>(
-    dst: &mut VerifiedDeltaColumn<T, C>,
-    src: VerifiedDeltaColumn<T, C>,
+fn delta_copied_in_place<T: DeltaValue<C>, C: Codec>(
+    dst: &mut DeltaColumn<T, C>,
+    src: DeltaColumn<T, C>,
     at: usize,
     del: usize,
     start: usize,
@@ -17980,9 +17977,9 @@ fn delta_copied_in_place<T: VDeltaValue<C>, C: VCodec>(
 
 /// `copy_ranges`'s contract for delta columns, told back.
 #[allow(dead_code)]
-fn told_by_delta_copy_ranges<T: VDeltaValue<C>, C: VCodec>(
-    dst: &mut VerifiedDeltaColumn<T, C>,
-    src: VerifiedDeltaColumn<T, C>,
+fn told_by_delta_copy_ranges<T: DeltaValue<C>, C: Codec>(
+    dst: &mut DeltaColumn<T, C>,
+    src: DeltaColumn<T, C>,
     splices: &[Splice],
 )
     requires
@@ -18006,11 +18003,11 @@ fn timestamps_copied() -> (r: Vec<i64>)
     ensures
         r@ == seq![100i64, 6, 7, 300],
 {
-    let mut dst = VerifiedDeltaColumn::<i64>::new();
+    let mut dst = DeltaColumn::<i64>::new();
     dst.push(100);
     dst.push(200);
     dst.push(300);
-    let mut src = VerifiedDeltaColumn::<i64>::new();
+    let mut src = DeltaColumn::<i64>::new();
     src.push(5);
     src.push(6);
     src.push(7);
@@ -18032,14 +18029,14 @@ fn timestamps_copied() -> (r: Vec<i64>)
     dst.to_vec()
 }
 
-// ── Repositioning an iterator: VShiftable, Unshift, Ranges ──────────────────
+// ── Repositioning an iterator: Shiftable, Unshift, Ranges ──────────────────
 
 /// The values of several ranges of a column, one range after another,
 /// walked with `ranges` and kept: the ranges' values of the column. For
 /// every value type, codec and kind of index.
 #[allow(dead_code)]
-fn kept_over_ranges<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
-    col: &'a VerifiedColumn<V, C, K>,
+fn kept_over_ranges<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+    col: &'a Column<V, C, K>,
     rs: &[Range<usize>],
 ) -> (out: Vec<Get<'a, V>>)
     ensures
@@ -18064,7 +18061,7 @@ fn kept_over_ranges<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
         match r.next() {
             Some(x) => {
                 proof {
-                    assert(VerifiedIter::<'a, V, C, K>::shift_spans(x) == seq![x]);
+                    assert(Iter::<'a, V, C, K>::shift_spans(x) == seq![x]);
                     assert(g[0] == x);
                     assert(out@.push(x) + g.skip(1) =~= out@ + g);
                 }
@@ -18088,7 +18085,7 @@ fn kept_over_ranges<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
 /// one it then gives, and the column's first. For every value type,
 /// codec and kind of index.
 #[allow(dead_code)]
-fn peeked_then_given<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>) -> (r: (
+fn peeked_then_given<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>) -> (r: (
     Option<Get<'a, V>>,
     Option<Get<'a, V>>,
 ))
@@ -18105,8 +18102,8 @@ fn peeked_then_given<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a Veri
         <Get<'a, V> as VGet>::lemma_svs(it.items());
     }
     let mut u = it.unshift();
-    // (`VerifiedUnshift::peek`, not the `peek` of Verus's iterator model)
-    let seen = match VerifiedUnshift::peek(&u) {
+    // (`Unshift::peek`, not the `peek` of Verus's iterator model)
+    let seen = match Unshift::peek(&u) {
         Some(g) => Some(*g),
         None => None,
     };
@@ -18117,7 +18114,7 @@ fn peeked_then_given<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a Veri
 /// A lookahead moved to a range at once: what it gives then is the
 /// range's values of the column (it may start at the value it looks at).
 #[allow(dead_code)]
-fn unshifted_to<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>, a: usize, b: usize) -> (r:
+fn unshifted_to<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>, a: usize, b: usize) -> (r:
     Option<Get<'a, V>>)
     ensures
         match r {
@@ -18146,7 +18143,7 @@ fn unshifted_to<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedC
 /// the value at `a`, if it is left, and a move of `n` from there passes
 /// over the next `n` values left.
 #[allow(dead_code)]
-fn sought_then_advanced<I: VShiftable>(it: &mut I, a: usize, n: usize) -> (r: Option<I::Item>)
+fn sought_then_advanced<I: Shiftable>(it: &mut I, a: usize, n: usize) -> (r: Option<I::Item>)
     requires
         I::shift_unit(),
         old(it).shift_at() <= a,
@@ -18159,13 +18156,13 @@ fn sought_then_advanced<I: VShiftable>(it: &mut I, a: usize, n: usize) -> (r: Op
         }),
 {
     let r = it.seek_to(a);
-    VShiftable::advance_by(it, n);
+    Shiftable::advance_by(it, n);
     r
 }
 
-/// `VShiftable`'s contracts, each told back.
+/// `Shiftable`'s contracts, each told back.
 #[allow(dead_code)]
-fn told_by_get_pos_and_max<I: VShiftable>(it: &I) -> (r: (usize, usize))
+fn told_by_get_pos_and_max<I: Shiftable>(it: &I) -> (r: (usize, usize))
     ensures
         r.0 == it.shift_at(),
         r.1 == it.shift_end(),
@@ -18174,7 +18171,7 @@ fn told_by_get_pos_and_max<I: VShiftable>(it: &I) -> (r: (usize, usize))
 }
 
 #[allow(dead_code)]
-fn told_by_get_range<I: VShiftable>(it: &I) -> (r: Range<usize>)
+fn told_by_get_range<I: Shiftable>(it: &I) -> (r: Range<usize>)
     ensures
         r.start == it.shift_at(),
         r.end == it.shift_end(),
@@ -18183,7 +18180,7 @@ fn told_by_get_range<I: VShiftable>(it: &I) -> (r: Range<usize>)
 }
 
 #[allow(dead_code)]
-fn told_by_set_max<I: VShiftable>(it: &mut I, end: usize)
+fn told_by_set_max<I: Shiftable>(it: &mut I, end: usize)
     ensures
         final(it).shift_vals() == old(it).shift_vals(),
         final(it).shift_at() == old(it).shift_at(),
@@ -18197,7 +18194,7 @@ fn told_by_set_max<I: VShiftable>(it: &mut I, end: usize)
 }
 
 #[allow(dead_code)]
-fn told_by_advance_to<I: VShiftable>(it: &mut I, target: usize)
+fn told_by_advance_to<I: Shiftable>(it: &mut I, target: usize)
     ensures
         final(it).shift_vals() == old(it).shift_vals(),
         final(it).shift_left() == past(old(it).shift_left(), target - old(it).shift_at()),
@@ -18209,7 +18206,7 @@ fn told_by_advance_to<I: VShiftable>(it: &mut I, target: usize)
 }
 
 #[allow(dead_code)]
-fn told_by_shift<I: VShiftable>(it: &mut I, a: usize, b: usize)
+fn told_by_shift<I: Shiftable>(it: &mut I, a: usize, b: usize)
     ensures
         final(it).shift_vals() == old(it).shift_vals(),
         final(it).shift_left() == window(
@@ -18226,7 +18223,7 @@ fn told_by_shift<I: VShiftable>(it: &mut I, a: usize, b: usize)
 }
 
 #[allow(dead_code)]
-fn told_by_shift_next<I: VShiftable>(it: &mut I, a: usize, b: usize) -> (r: Option<I::Item>)
+fn told_by_shift_next<I: Shiftable>(it: &mut I, a: usize, b: usize) -> (r: Option<I::Item>)
     requires
         I::shift_unit(),
         a >= old(it).shift_at(),
@@ -18250,7 +18247,7 @@ fn told_by_shift_next<I: VShiftable>(it: &mut I, a: usize, b: usize) -> (r: Opti
 }
 
 #[allow(dead_code)]
-fn told_by_shift_dup<I: VShiftable>(it: &I) -> (r: I)
+fn told_by_shift_dup<I: Shiftable>(it: &I) -> (r: I)
     ensures
         r.shift_vals() == it.shift_vals(),
         r.shift_at() == it.shift_at(),
@@ -18262,7 +18259,7 @@ fn told_by_shift_dup<I: VShiftable>(it: &I) -> (r: I)
 }
 
 #[allow(dead_code)]
-fn told_by_shift_step<I: VShiftable>(it: &mut I) -> (r: Option<I::Item>)
+fn told_by_shift_step<I: Shiftable>(it: &mut I) -> (r: Option<I::Item>)
     ensures
         final(it).shift_vals() == old(it).shift_vals(),
         match r {
@@ -18278,7 +18275,7 @@ fn told_by_shift_step<I: VShiftable>(it: &mut I) -> (r: Option<I::Item>)
 }
 
 #[allow(dead_code)]
-fn told_by_shift_nth<I: VShiftable>(it: &mut I, n: usize) -> (r: Option<I::Item>)
+fn told_by_shift_nth<I: Shiftable>(it: &mut I, n: usize) -> (r: Option<I::Item>)
     ensures
         final(it).shift_vals() == old(it).shift_vals(),
         n < old(it).shift_items().len() ==> {
@@ -18292,16 +18289,16 @@ fn told_by_shift_nth<I: VShiftable>(it: &mut I, n: usize) -> (r: Option<I::Item>
 
 /// What a lookahead and a walk over ranges say, told back.
 #[allow(dead_code)]
-fn told_by_unshift<I: VShiftable>(it: I) -> (r: VerifiedUnshift<I>)
+fn told_by_unshift<I: Shiftable>(it: I) -> (r: Unshift<I>)
     ensures
         r.unshift_vals() == it.shift_vals(),
         r.unshift_left() == it.shift_items(),
 {
-    VerifiedUnshift::new(it)
+    Unshift::new(it)
 }
 
 #[allow(dead_code)]
-fn told_by_unshift_peek_next<I: VShiftable>(u: &mut VerifiedUnshift<I>) -> (r: Option<I::Item>)
+fn told_by_unshift_peek_next<I: Shiftable>(u: &mut Unshift<I>) -> (r: Option<I::Item>)
     ensures
         final(u).unshift_vals() == old(u).unshift_vals(),
         match r {
@@ -18313,12 +18310,12 @@ fn told_by_unshift_peek_next<I: VShiftable>(u: &mut VerifiedUnshift<I>) -> (r: O
             None => old(u).unshift_left().len() == 0 && final(u).unshift_left().len() == 0,
         },
 {
-    let _ = VerifiedUnshift::peek(&*u);
+    let _ = Unshift::peek(&*u);
     u.next()
 }
 
 #[allow(dead_code)]
-fn told_by_unshift_shift<I: VShiftable>(u: &mut VerifiedUnshift<I>, a: usize, b: usize)
+fn told_by_unshift_shift<I: Shiftable>(u: &mut Unshift<I>, a: usize, b: usize)
     requires
         I::shift_unit(),
     ensures
@@ -18329,16 +18326,16 @@ fn told_by_unshift_shift<I: VShiftable>(u: &mut VerifiedUnshift<I>, a: usize, b:
 }
 
 #[allow(dead_code)]
-fn told_by_ranges<'r, I: VShiftable>(it: I, rs: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, I>)
+fn told_by_ranges<'r, I: Shiftable>(it: I, rs: &'r [Range<usize>]) -> (r: Ranges<'r, I>)
     ensures
         r.ranges_vals() == it.shift_vals(),
         r.ranges_left() == windows(it.shift_vals(), rs@),
 {
-    VerifiedRanges::new(it, rs)
+    Ranges::new(it, rs)
 }
 
 #[allow(dead_code)]
-fn told_by_ranges_next<'r, I: VShiftable>(r: &mut VerifiedRanges<'r, I>) -> (x: Option<I::Item>)
+fn told_by_ranges_next<'r, I: Shiftable>(r: &mut Ranges<'r, I>) -> (x: Option<I::Item>)
     ensures
         final(r).ranges_vals() == old(r).ranges_vals(),
         match x {
@@ -18360,7 +18357,7 @@ fn numbers_of_ranges() -> (r: Vec<u64>)
     ensures
         r@ == seq![2u64, 3, 6, 7],
 {
-    let mut col = VerifiedColumn::<u64>::new();
+    let mut col = Column::<u64>::new();
     let mut k: u64 = 1;
     while k <= 8
         invariant
@@ -18403,7 +18400,7 @@ fn numbers_of_ranges() -> (r: Vec<u64>)
 /// another, walked with `ranges` and kept: the ranges' values. For every
 /// value type and codec.
 #[allow(dead_code)]
-fn delta_kept_over_ranges<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, rs: &[Range<usize>]) -> (out:
+fn delta_kept_over_ranges<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, rs: &[Range<usize>]) -> (out:
     Vec<T>)
     ensures
         out@ == windows(col@, rs@),
@@ -18426,7 +18423,7 @@ fn delta_kept_over_ranges<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColum
         match r.next() {
             Some(x) => {
                 proof {
-                    assert(VerifiedDeltaIter::<'_, T, C>::shift_spans(x) == seq![x]);
+                    assert(DeltaIter::<'_, T, C>::shift_spans(x) == seq![x]);
                     assert(g.take(1)[0] == g[0]);
                     assert(out@.push(x) + g.skip(1) =~= out@ + g);
                 }
@@ -18446,7 +18443,7 @@ fn delta_kept_over_ranges<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColum
 /// The first value of a range of a delta column, through a lookahead
 /// moved there. For every value type and codec.
 #[allow(dead_code)]
-fn delta_first_by_lookahead<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (r: Option<
+fn delta_first_by_lookahead<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, a: usize, b: usize) -> (r: Option<
     T,
 >)
     ensures
@@ -18471,10 +18468,10 @@ fn delta_first_by_lookahead<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaCol
 }
 
 /// The first two values of a range of a delta column, the iterator moved
-/// to the range and stepped by `VShiftable`'s own moves. For every value
+/// to the range and stepped by `Shiftable`'s own moves. For every value
 /// type and codec.
 #[allow(dead_code)]
-fn delta_two_of_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (r: (
+fn delta_two_of_range<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, a: usize, b: usize) -> (r: (
     Option<T>,
     Option<T>,
 ))
@@ -18488,12 +18485,12 @@ fn delta_two_of_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T,
     proof {
         it.lemma_shift_model();
     }
-    VShiftable::shift(&mut it, a..b);
+    Shiftable::shift(&mut it, a..b);
     proof {
         it.lemma_shift_model();
     }
-    let x = VShiftable::shift_step(&mut it);
-    let y = VShiftable::shift_step(&mut it);
+    let x = Shiftable::shift_step(&mut it);
+    let y = Shiftable::shift_step(&mut it);
     proof {
         let w = window(col@, a as int, b as int);
         if a < b && a < col@.len() {
@@ -18509,11 +18506,11 @@ fn delta_two_of_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T,
 /// What a delta iterator's lookahead and walk over ranges are, told
 /// back. For every value type and codec.
 #[allow(dead_code)]
-fn delta_told_by_adapters<'a, 'r, T: VDeltaValue<C>, C: VCodec>(
-    a: VerifiedDeltaIter<'a, T, C>,
-    b: VerifiedDeltaIter<'a, T, C>,
+fn delta_told_by_adapters<'a, 'r, T: DeltaValue<C>, C: Codec>(
+    a: DeltaIter<'a, T, C>,
+    b: DeltaIter<'a, T, C>,
     rs: &'r [Range<usize>],
-) -> (r: (VerifiedUnshift<VerifiedDeltaIter<'a, T, C>>, VerifiedRanges<'r, VerifiedDeltaIter<'a, T, C>>))
+) -> (r: (Unshift<DeltaIter<'a, T, C>>, Ranges<'r, DeltaIter<'a, T, C>>))
     ensures
         r.0.unshift_vals() == a.column(),
         r.0.unshift_left() == a.rest(),
@@ -18527,8 +18524,8 @@ fn delta_told_by_adapters<'a, 'r, T: VDeltaValue<C>, C: VCodec>(
 /// moved there: with the sum of the column's values up to and through
 /// it. For every value type and codec.
 #[allow(dead_code)]
-fn prefix_first_by_lookahead<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, a: usize, b: usize) -> (r:
-    Option<VerifiedPrefixedValue<'a, V>>)
+fn prefix_first_by_lookahead<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &'a PrefixColumn<V, C>, a: usize, b: usize) -> (r:
+    Option<PrefixedValue<'a, V>>)
     ensures
         match r {
             Some(pv) => {
@@ -18559,8 +18556,8 @@ fn prefix_first_by_lookahead<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a Ver
 /// The first value of a range of a prefix column, through a walk over
 /// ranges: with the sum of the column's values up to and through it.
 #[allow(dead_code)]
-fn prefix_first_over_ranges<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, a: usize, b: usize) -> (r:
-    Option<VerifiedPrefixedValue<'a, V>>)
+fn prefix_first_over_ranges<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &'a PrefixColumn<V, C>, a: usize, b: usize) -> (r:
+    Option<PrefixedValue<'a, V>>)
     ensures
         match r {
             Some(pv) => {
@@ -18585,12 +18582,12 @@ fn prefix_first_over_ranges<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a Veri
         assert(rs@ =~= seq![a..b]);
         assert(rs@.map_values(f) =~= seq![window(v, a as int, b as int)]);
         let m = rs@.map_values(f);
-        assert(m.drop_last() =~= Seq::<Seq<VerifiedPrefixedValue<'a, V>>>::empty());
+        assert(m.drop_last() =~= Seq::<Seq<PrefixedValue<'a, V>>>::empty());
         assert(concat(m) == concat(m.drop_last()) + m.last());
         assert(windows(v, rs@) =~= window(v, a as int, b as int));
         if r is Some {
             let x = r->Some_0;
-            assert(VerifiedPrefixIter::<'a, V, C>::shift_spans(x) == seq![x]);
+            assert(PrefixIter::<'a, V, C>::shift_spans(x) == seq![x]);
             assert(window(v, a as int, b as int)[0] == v[a as int]);
             assert(col@.subrange(it.base_pos() as int, a + 1) =~= col@.take(a + 1));
         }
@@ -18599,11 +18596,11 @@ fn prefix_first_over_ranges<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a Veri
 }
 
 /// The first two values of a range of a prefix column, the iterator
-/// moved to the range and stepped by `VShiftable`'s own moves: with the
+/// moved to the range and stepped by `Shiftable`'s own moves: with the
 /// sums through them. For every value type and codec.
 #[allow(dead_code)]
-fn prefix_two_of_range<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, a: usize, b: usize) -> (r:
-    (Option<VerifiedPrefixedValue<'a, V>>, Option<VerifiedPrefixedValue<'a, V>>))
+fn prefix_two_of_range<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &'a PrefixColumn<V, C>, a: usize, b: usize) -> (r:
+    (Option<PrefixedValue<'a, V>>, Option<PrefixedValue<'a, V>>))
     ensures
         r.0 is Some <==> a < b && a < col@.len(),
         r.1 is Some <==> a + 1 < b && a + 1 < col@.len(),
@@ -18619,12 +18616,12 @@ fn prefix_two_of_range<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedP
         it.lemma_shift_model();
     }
     let ghost (it0, v) = (it, it.prefixed());
-    VShiftable::shift(&mut it, a..b);
+    Shiftable::shift(&mut it, a..b);
     proof {
         it.lemma_shift_model();
     }
-    let x = VShiftable::shift_step(&mut it);
-    let y = VShiftable::shift_step(&mut it);
+    let x = Shiftable::shift_step(&mut it);
+    let y = Shiftable::shift_step(&mut it);
     proof {
         let w = window(v, a as int, b as int);
         if a < b && a < col@.len() {
@@ -18642,11 +18639,11 @@ fn prefix_two_of_range<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedP
 /// What a prefix iterator's lookahead and walk over ranges are, told
 /// back. For every value type and codec.
 #[allow(dead_code)]
-fn prefix_told_by_adapters<'a, 'r, V: VSummed + VValue<C>, C: VCodec>(
-    a: VerifiedPrefixIter<'a, V, C>,
-    b: VerifiedPrefixIter<'a, V, C>,
+fn prefix_told_by_adapters<'a, 'r, V: PrefixValue + ColumnValueRef<C>, C: Codec>(
+    a: PrefixIter<'a, V, C>,
+    b: PrefixIter<'a, V, C>,
     rs: &'r [Range<usize>],
-) -> (r: (VerifiedUnshift<VerifiedPrefixIter<'a, V, C>>, VerifiedRanges<'r, VerifiedPrefixIter<'a, V, C>>))
+) -> (r: (Unshift<PrefixIter<'a, V, C>>, Ranges<'r, PrefixIter<'a, V, C>>))
     ensures
         r.0.unshift_vals() == a.prefixed(),
         r.0.unshift_left() == a.items(),
@@ -18660,8 +18657,8 @@ fn prefix_told_by_adapters<'a, 'r, V: VSummed + VValue<C>, C: VCodec>(
 /// moved there: with what the column's values accumulate to
 /// through it. For every value type and codec.
 #[allow(dead_code)]
-fn acc_first_by_lookahead<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, a: usize, b: usize) -> (r:
-    Option<VerifiedAccValue<'a, V>>)
+fn acc_first_by_lookahead<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, a: usize, b: usize) -> (r:
+    Option<AccValue<'a, V>>)
     ensures
         match r {
             Some(pv) => {
@@ -18692,8 +18689,8 @@ fn acc_first_by_lookahead<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a V
 /// The first value of a range of an accumulator column, through a walk over
 /// ranges: with what the column's values accumulate to through it.
 #[allow(dead_code)]
-fn acc_first_over_ranges<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, a: usize, b: usize) -> (r:
-    Option<VerifiedAccValue<'a, V>>)
+fn acc_first_over_ranges<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, a: usize, b: usize) -> (r:
+    Option<AccValue<'a, V>>)
     ensures
         match r {
             Some(pv) => {
@@ -18718,12 +18715,12 @@ fn acc_first_over_ranges<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a Ve
         assert(rs@ =~= seq![a..b]);
         assert(rs@.map_values(f) =~= seq![window(v, a as int, b as int)]);
         let m = rs@.map_values(f);
-        assert(m.drop_last() =~= Seq::<Seq<VerifiedAccValue<'a, V>>>::empty());
+        assert(m.drop_last() =~= Seq::<Seq<AccValue<'a, V>>>::empty());
         assert(concat(m) == concat(m.drop_last()) + m.last());
         assert(windows(v, rs@) =~= window(v, a as int, b as int));
         if r is Some {
             let x = r->Some_0;
-            assert(VerifiedAccIter::<'a, V, C>::shift_spans(x) == seq![x]);
+            assert(AccIter::<'a, V, C>::shift_spans(x) == seq![x]);
             assert(window(v, a as int, b as int)[0] == v[a as int]);
             assert(col@.subrange(it.base_pos() as int, a + 1) =~= col@.take(a + 1));
         }
@@ -18732,11 +18729,11 @@ fn acc_first_over_ranges<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a Ve
 }
 
 /// The first two values of a range of an accumulator column, the iterator
-/// moved to the range and stepped by `VShiftable`'s own moves: with what
+/// moved to the range and stepped by `Shiftable`'s own moves: with what
 /// the values accumulate to through them. For every value type and codec.
 #[allow(dead_code)]
-fn acc_two_of_range<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, a: usize, b: usize) -> (r:
-    (Option<VerifiedAccValue<'a, V>>, Option<VerifiedAccValue<'a, V>>))
+fn acc_two_of_range<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, a: usize, b: usize) -> (r:
+    (Option<AccValue<'a, V>>, Option<AccValue<'a, V>>))
     ensures
         r.0 is Some <==> a < b && a < col@.len(),
         r.1 is Some <==> a + 1 < b && a + 1 < col@.len(),
@@ -18748,12 +18745,12 @@ fn acc_two_of_range<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a Verifie
         it.lemma_shift_model();
     }
     let ghost (it0, v) = (it, it.accumulated_items());
-    VShiftable::shift(&mut it, a..b);
+    Shiftable::shift(&mut it, a..b);
     proof {
         it.lemma_shift_model();
     }
-    let x = VShiftable::shift_step(&mut it);
-    let y = VShiftable::shift_step(&mut it);
+    let x = Shiftable::shift_step(&mut it);
+    let y = Shiftable::shift_step(&mut it);
     proof {
         let w = window(v, a as int, b as int);
         if a < b && a < col@.len() {
@@ -18771,11 +18768,11 @@ fn acc_two_of_range<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a Verifie
 /// What an accumulator iterator's lookahead and walk over ranges are, told
 /// back. For every value type and codec.
 #[allow(dead_code)]
-fn acc_told_by_adapters<'a, 'r, V: VAccumulated + VValue<C>, C: VCodec>(
-    a: VerifiedAccIter<'a, V, C>,
-    b: VerifiedAccIter<'a, V, C>,
+fn acc_told_by_adapters<'a, 'r, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+    a: AccIter<'a, V, C>,
+    b: AccIter<'a, V, C>,
     rs: &'r [Range<usize>],
-) -> (r: (VerifiedUnshift<VerifiedAccIter<'a, V, C>>, VerifiedRanges<'r, VerifiedAccIter<'a, V, C>>))
+) -> (r: (Unshift<AccIter<'a, V, C>>, Ranges<'r, AccIter<'a, V, C>>))
     ensures
         r.0.unshift_vals() == a.accumulated_items(),
         r.0.unshift_left() == a.items(),
@@ -18788,10 +18785,10 @@ fn acc_told_by_adapters<'a, 'r, V: VAccumulated + VValue<C>, C: VCodec>(
 // ── Repositioning the runs of a column ─────────────────────────────────────
 
 /// The first run of a range of a column, the runs moved there by
-/// `VShiftable`'s own move: as many equal values as lie together from
+/// `Shiftable`'s own move: as many equal values as lie together from
 /// the range's start, inside it. For every value type and codec.
 #[allow(dead_code)]
-fn run_at_range<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, a: usize, b: usize) -> (r: Option<
+fn run_at_range<'a, V: ColumnValueRef<C>, C: Codec>(col: &'a Column<V, C>, a: usize, b: usize) -> (r: Option<
     Run<Get<'a, V>>,
 >)
     ensures
@@ -18809,7 +18806,7 @@ fn run_at_range<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, a: u
         runs.lemma_shift_model();
     }
     let ghost v = runs.shift_vals();
-    let r = VShiftable::shift_next(&mut runs, a..b);
+    let r = Shiftable::shift_next(&mut runs, a..b);
     proof {
         if let Some(x) = r {
             let w = window(v, a as int, b as int);
@@ -18824,7 +18821,7 @@ fn run_at_range<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, a: u
 /// The run from a place of a column, the runs moved there: as many equal
 /// values as lie together from it. For every value type and codec.
 #[allow(dead_code)]
-fn run_sought<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, at: usize) -> (r: Option<Run<Get<'a, V>>>)
+fn run_sought<'a, V: ColumnValueRef<C>, C: Codec>(col: &'a Column<V, C>, at: usize) -> (r: Option<Run<Get<'a, V>>>)
     ensures
         r is Some <==> at < col@.len(),
         r matches Some(run) ==> {
@@ -18838,7 +18835,7 @@ fn run_sought<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, at: us
         <Get<'a, V> as VGet>::lemma_svs(runs.iter().items());
     }
     let ghost o = runs.shift_left();
-    let r = VShiftable::seek_to(&mut runs, at);
+    let r = Shiftable::seek_to(&mut runs, at);
     proof {
         if let Some(x) = r {
             assert forall|i: int| at <= i < at + x.count implies col@[i] == x.value.sv() by {
@@ -18852,7 +18849,7 @@ fn run_sought<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, at: us
 /// The first run after some values, the runs moved on by them. For every
 /// value type and codec.
 #[allow(dead_code)]
-fn run_after<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, n: usize) -> (r: Option<Run<Get<'a, V>>>)
+fn run_after<'a, V: ColumnValueRef<C>, C: Codec>(col: &'a Column<V, C>, n: usize) -> (r: Option<Run<Get<'a, V>>>)
     ensures
         r is Some <==> n < col@.len(),
         r matches Some(run) ==> 1 <= run.count && n + run.count <= col@.len() && col@[n as int] == run.value.sv(),
@@ -18863,7 +18860,7 @@ fn run_after<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, n: usiz
         <Get<'a, V> as VGet>::lemma_svs(runs.iter().items());
     }
     let ghost (o, i0) = (runs.shift_left(), runs.iter().items());
-    VShiftable::advance_by(&mut runs, n);
+    Shiftable::advance_by(&mut runs, n);
     let ghost i1 = runs.iter().items();
     proof {
         runs.lemma_shift_model();
@@ -18878,7 +18875,7 @@ fn run_after<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, n: usiz
         }
         assert(runs.shift_items() == runs_of(i1));
     }
-    let r = VShiftable::shift_step(&mut runs);
+    let r = Shiftable::shift_step(&mut runs);
     proof {
         if let Some(x) = r {
             assert(x == runs_of(i1)[0]);
@@ -18890,7 +18887,7 @@ fn run_after<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, n: usiz
 /// The first run of a range of a column, through a walk over ranges. For
 /// every value type and codec.
 #[allow(dead_code)]
-fn run_over_range<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, a: usize, b: usize) -> (r: Option<
+fn run_over_range<'a, V: ColumnValueRef<C>, C: Codec>(col: &'a Column<V, C>, a: usize, b: usize) -> (r: Option<
     Run<Get<'a, V>>,
 >)
     ensures
@@ -18933,7 +18930,7 @@ fn run_over_range<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, a:
 /// The first run of a column, looked at through a lookahead. For every
 /// value type and codec.
 #[allow(dead_code)]
-fn run_peeked<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>) -> (r: Option<Run<Get<'a, V>>>)
+fn run_peeked<'a, V: ColumnValueRef<C>, C: Codec>(col: &'a Column<V, C>) -> (r: Option<Run<Get<'a, V>>>)
     ensures
         r is Some <==> col@.len() > 0,
         r matches Some(run) ==> 1 <= run.count <= col@.len() && col@[0] == run.value.sv(),
@@ -18955,11 +18952,11 @@ fn run_peeked<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>) -> (r:
 /// What the lookahead and the walk over ranges of a column's runs are,
 /// told back. For every value type and codec.
 #[allow(dead_code)]
-fn runs_told_by_adapters<'a, 'r, V: VValue<C>, C: VCodec>(
-    a: VerifiedRuns<'a, V, C>,
-    b: VerifiedRuns<'a, V, C>,
+fn runs_told_by_adapters<'a, 'r, V: ColumnValueRef<C>, C: Codec>(
+    a: Runs<'a, V, C>,
+    b: Runs<'a, V, C>,
     rs: &'r [Range<usize>],
-) -> (r: (VerifiedUnshift<VerifiedRuns<'a, V, C>>, VerifiedRanges<'r, VerifiedRuns<'a, V, C>>))
+) -> (r: (Unshift<Runs<'a, V, C>>, Ranges<'r, Runs<'a, V, C>>))
     ensures
         r.0.unshift_vals() == a.shift_vals(),
         r.0.unshift_left() == a.shift_items(),
@@ -18972,7 +18969,7 @@ fn runs_told_by_adapters<'a, 'r, V: VValue<C>, C: VCodec>(
 /// What a seek of any repositionable iterator does, told back: of the
 /// item from the place sought, and of one that stands for one value.
 #[allow(dead_code)]
-fn told_by_shift_seek<I: VShiftable>(it: &mut I, at: usize) -> (r: Option<I::Item>)
+fn told_by_shift_seek<I: Shiftable>(it: &mut I, at: usize) -> (r: Option<I::Item>)
     ensures
         final(it).shift_vals() == old(it).shift_vals(),
         at < old(it).shift_at() ==> {
@@ -18997,17 +18994,17 @@ fn told_by_shift_seek<I: VShiftable>(it: &mut I, at: usize) -> (r: Option<I::Ite
             &&& k >= o.len() ==> r is None && final(it).shift_left().len() == 0
         },
 {
-    VShiftable::seek_to(it, at)
+    Shiftable::seek_to(it, at)
 }
 
 // ── Repositioning the runs of a delta column ───────────────────────────────
 
 /// The first run of a range of a delta column, the runs moved there by
-/// `VShiftable`'s own move: it starts from the number before the range,
+/// `Shiftable`'s own move: it starts from the number before the range,
 /// and its difference is that of each value it stands for. For every
 /// value type and codec.
 #[allow(dead_code)]
-fn delta_run_at_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (r: Option<
+fn delta_run_at_range<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, a: usize, b: usize) -> (r: Option<
     DeltaRun,
 >)
     ensures
@@ -19026,7 +19023,7 @@ fn delta_run_at_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T,
         runs.lemma_shift_model();
     }
     let ghost v = runs.shift_vals();
-    let r = VShiftable::shift_next(&mut runs, a..b);
+    let r = Shiftable::shift_next(&mut runs, a..b);
     proof {
         if let Some(x) = r {
             let w = window(v, a as int, b as int);
@@ -19042,7 +19039,7 @@ fn delta_run_at_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T,
 /// The run of a delta column from a place, the runs moved there. For
 /// every value type and codec.
 #[allow(dead_code)]
-fn delta_run_sought<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, at: usize) -> (r: Option<DeltaRun>)
+fn delta_run_sought<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, at: usize) -> (r: Option<DeltaRun>)
     ensures
         r is Some <==> at < col@.len(),
         r matches Some(run) ==> {
@@ -19056,7 +19053,7 @@ fn delta_run_sought<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C
         runs.lemma_shift_model();
     }
     let ghost o = runs.shift_left();
-    let r = VShiftable::seek_to(&mut runs, at);
+    let r = Shiftable::seek_to(&mut runs, at);
     proof {
         if let Some(x) = r {
             assert(delta_run_units(x)[0] == o.skip(at as int)[0]);
@@ -19071,7 +19068,7 @@ fn delta_run_sought<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C
 /// The first run of a delta column after some values, the runs moved on
 /// by them. For every value type and codec.
 #[allow(dead_code)]
-fn delta_run_after<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, n: usize) -> (r: Option<DeltaRun>)
+fn delta_run_after<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, n: usize) -> (r: Option<DeltaRun>)
     ensures
         r is Some <==> n < col@.len(),
         r matches Some(run) ==> {
@@ -19088,7 +19085,7 @@ fn delta_run_after<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>
     proof {
         assert(runs.shift_left() =~= du);
     }
-    VShiftable::advance_by(&mut runs, n);
+    Shiftable::advance_by(&mut runs, n);
     proof {
         runs.lemma_shift_model();
         // the column the runs read now says the same numbers before and
@@ -19112,13 +19109,13 @@ fn delta_run_after<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>
             assert(w.len() == 0);
         }
     }
-    VShiftable::shift_step(&mut runs)
+    Shiftable::shift_step(&mut runs)
 }
 
 /// The first run of a range of a delta column, through a walk over
 /// ranges. For every value type and codec.
 #[allow(dead_code)]
-fn delta_run_over_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (r: Option<
+fn delta_run_over_range<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, a: usize, b: usize) -> (r: Option<
     DeltaRun,
 >)
     ensures
@@ -19163,7 +19160,7 @@ fn delta_run_over_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<
 /// The first run of a delta column, looked at through a lookahead: from
 /// no number before it. For every value type and codec.
 #[allow(dead_code)]
-fn delta_run_peeked<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: Option<DeltaRun>)
+fn delta_run_peeked<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>) -> (r: Option<DeltaRun>)
     ensures
         r is Some <==> col@.len() > 0,
         r matches Some(run) ==> {
@@ -19189,11 +19186,11 @@ fn delta_run_peeked<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C
 /// What the lookahead and the walk over ranges of a delta column's runs
 /// are, told back. For every value type and codec.
 #[allow(dead_code)]
-fn delta_runs_told_by_adapters<'a, 'r, T: VDeltaValue<C>, C: VCodec>(
-    a: VerifiedDeltaRuns<'a, T, C>,
-    b: VerifiedDeltaRuns<'a, T, C>,
+fn delta_runs_told_by_adapters<'a, 'r, T: DeltaValue<C>, C: Codec>(
+    a: DeltaRuns<'a, T, C>,
+    b: DeltaRuns<'a, T, C>,
     rs: &'r [Range<usize>],
-) -> (r: (VerifiedUnshift<VerifiedDeltaRuns<'a, T, C>>, VerifiedRanges<'r, VerifiedDeltaRuns<'a, T, C>>))
+) -> (r: (Unshift<DeltaRuns<'a, T, C>>, Ranges<'r, DeltaRuns<'a, T, C>>))
     ensures
         r.0.unshift_vals() == a.shift_vals(),
         r.0.unshift_left() == a.shift_items(),
@@ -19209,19 +19206,19 @@ fn delta_runs_told_by_adapters<'a, 'r, T: VDeltaValue<C>, C: VCodec>(
 /// which begins with that run, or is empty. For every value type and
 /// codec.
 #[allow(dead_code)]
-fn first_run_and_column<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Result<
-    (Option<Run<Get<'a, V>>>, VerifiedColumn<V, C>),
+fn first_run_and_column<'a, V: ColumnValueRef<C>, C: Codec>(bytes: &'a [u8]) -> (r: Result<
+    (Option<Run<Get<'a, V>>>, Column<V, C>),
     PackError,
 >)
     ensures
         r matches Ok((run, c)) ==> {
-            &&& c@ == VerifiedColumn::<V, C>::values(bytes@)
+            &&& c@ == Column::<V, C>::values(bytes@)
             &&& run matches Some(x) ==> 1 <= x.count <= c@.len() && forall|i: int|
                 0 <= i < x.count ==> c@[i] == x.value.sv()
             &&& run is None ==> c@.len() == 0
         },
 {
-    let mut it = VerifiedColumn::<V, C>::load_iter(bytes, LoadOpts::new());
+    let mut it = Column::<V, C>::load_iter(bytes, LoadOpts::new());
     let run = match it.try_next_run() {
         Ok(r) => r,
         Err(e) => return Err(e),
@@ -19247,14 +19244,14 @@ fn first_run_and_column<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Res
 /// and kind of index.
 #[allow(dead_code)]
 #[verifier::exec_allows_no_decreases_clause]
-fn loaded_runs<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(bytes: &'a [u8]) -> (r: Result<
-    (Vec<Run<Get<'a, V>>>, VerifiedColumn<V, C, K>),
+fn loaded_runs<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(bytes: &'a [u8]) -> (r: Result<
+    (Vec<Run<Get<'a, V>>>, Column<V, C, K>),
     PackError,
 >)
     ensures
-        r matches Ok((runs, c)) ==> c@ == VerifiedColumn::<V, C>::values(bytes@) && run_values(runs@) == c@,
+        r matches Ok((runs, c)) ==> c@ == Column::<V, C>::values(bytes@) && run_values(runs@) == c@,
 {
-    let mut it = VerifiedColumn::<V, C, K>::load_iter(bytes, LoadOpts::new());
+    let mut it = Column::<V, C, K>::load_iter(bytes, LoadOpts::new());
     let mut runs: Vec<Run<Get<'a, V>>> = Vec::new();
     proof {
         assert(run_values(runs@) =~= Seq::<V::S>::empty());
@@ -19293,9 +19290,9 @@ fn loaded_runs<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(bytes: &'a [u8]) ->
 /// the value, if any, and the column of that many of it. For every value
 /// type and codec.
 #[allow(dead_code)]
-fn filled_by_load<'a, V: VValue<C>, C: VCodec>(v: Get<'a, V>, n: usize) -> (r: (
+fn filled_by_load<'a, V: ColumnValueRef<C>, C: Codec>(v: Get<'a, V>, n: usize) -> (r: (
     Option<Run<Get<'a, V>>>,
-    Result<VerifiedColumn<V, C>, PackError>,
+    Result<Column<V, C>, PackError>,
 ))
     requires
         n <= i64::MAX,
@@ -19304,7 +19301,7 @@ fn filled_by_load<'a, V: VValue<C>, C: VCodec>(v: Get<'a, V>, n: usize) -> (r: (
         r.0 matches Some(x) ==> x.count <= n && x.value.sv() == v.sv(),
         r.1 matches Ok(c) && c@ == Seq::new(n as nat, |_i: int| v.sv()),
 {
-    let mut it = VerifiedColumn::<V, C>::load_iter(&[], LoadOpts::new().with_length(n).with_fill(v));
+    let mut it = Column::<V, C>::load_iter(&[], LoadOpts::new().with_length(n).with_fill(v));
     proof {
         assert(it.filling() == Some((n, v)));
     }
@@ -19327,10 +19324,10 @@ fn filled_by_load<'a, V: VValue<C>, C: VCodec>(v: Get<'a, V>, n: usize) -> (r: (
 /// What a load run by run is, as it starts, told back. For every value
 /// type, codec and kind of index.
 #[allow(dead_code)]
-fn told_by_load_iter<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>, F: MaybeFill<Get<'a, V>>>(
+fn told_by_load_iter<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, F: MaybeFill<Get<'a, V>>>(
     bytes: &'a [u8],
     opts: LoadOpts<F>,
-) -> (r: VerifiedLoadIter<'a, V, C, K>)
+) -> (r: ColumnLoadIter<'a, V, C, K>)
     requires
         opts.max_segments() >= 2,
     ensures
@@ -19341,13 +19338,13 @@ fn told_by_load_iter<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>, F: MaybeFill<
         r.given().len() == 0,
         !r.failed(),
 {
-    VerifiedColumn::<V, C, K>::load_iter(bytes, opts)
+    Column::<V, C, K>::load_iter(bytes, opts)
 }
 
 /// What a step of a load run by run does, told back. For every value
 /// type, codec and kind of index.
 #[allow(dead_code)]
-fn told_by_try_next_run<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &mut VerifiedLoadIter<'a, V, C, K>) -> (r:
+fn told_by_try_next_run<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &mut ColumnLoadIter<'a, V, C, K>) -> (r:
     Result<Option<Run<Get<'a, V>>>, PackError>)
     requires
         old(it).wf(),
@@ -19370,8 +19367,8 @@ fn told_by_try_next_run<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &mut V
 /// What the end of a load run by run gives, told back. For every value
 /// type, codec and kind of index.
 #[allow(dead_code)]
-fn told_by_load_finalize<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedLoadIter<'a, V, C, K>) -> (r:
-    Result<VerifiedColumn<V, C, K>, PackError>)
+fn told_by_load_finalize<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: ColumnLoadIter<'a, V, C, K>) -> (r:
+    Result<Column<V, C, K>, PackError>)
     requires
         it.wf(),
     ensures
@@ -19381,13 +19378,13 @@ fn told_by_load_finalize<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: Verif
             Some((len, v)) => r matches Ok(c) && c@ == Seq::new(len as nat, |_i: int| v.sv()),
             None => {
                 &&& r matches Ok(c) ==> {
-                    &&& VerifiedColumn::<V, C>::valid(it.bytes())
-                    &&& c@ == VerifiedColumn::<V, C>::values(it.bytes())
+                    &&& Column::<V, C>::valid(it.bytes())
+                    &&& c@ == Column::<V, C>::values(it.bytes())
                     &&& it.length() matches Some(len) ==> c@.len() == len
                 }
-                &&& !it.failed() && VerifiedColumn::<V, C>::loadable(it.bytes()) && K::keeps(
-                    VerifiedColumn::<V, C>::values(it.bytes()),
-                ) && (it.length() matches Some(len) ==> VerifiedColumn::<V, C>::values(it.bytes()).len() == len)
+                &&& !it.failed() && Column::<V, C>::loadable(it.bytes()) && K::keeps(
+                    Column::<V, C>::values(it.bytes()),
+                ) && (it.length() matches Some(len) ==> Column::<V, C>::values(it.bytes()).len() == len)
                     ==> r is Ok
             },
         },
@@ -19398,7 +19395,7 @@ fn told_by_load_finalize<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: Verif
 // ── A client's own repositionable iterator ─────────────────────────────────
 
 /// A client's own iterator that repositions as hexane's do
-/// ([`VShiftable`]): the numbers of a slice, from where it stands up to
+/// ([`Shiftable`]): the numbers of a slice, from where it stands up to
 /// the end of its window (or of the slice). Its fields are open: what
 /// is said of it holds whatever they are.
 pub struct SliceNumbers<'s> {
@@ -19506,7 +19503,7 @@ impl<'s> Iterator for SliceNumbers<'s> {
     }
 }
 
-impl<'s> VShiftable for SliceNumbers<'s> {
+impl<'s> Shiftable for SliceNumbers<'s> {
     open spec fn shift_vals(&self) -> Seq<u64> {
         self.v@
     }
@@ -19639,17 +19636,17 @@ impl<'s> VShiftable for SliceNumbers<'s> {
 
     fn shift(&mut self, range: Range<usize>) {
         // the window's end, and then its start
-        VShiftable::set_max(self, range.end);
-        VShiftable::advance_to(self, range.start);
+        Shiftable::set_max(self, range.end);
+        Shiftable::advance_to(self, range.start);
     }
 
     fn shift_next(&mut self, range: Range<usize>) -> (r: Option<u64>) {
         let ghost (s, e) = (range.start as int, range.end as int);
         let ghost (v, p) = (self.shift_vals(), self.shift_at());
-        VShiftable::set_max(self, range.end);
-        let q = VShiftable::get_pos(self);
+        Shiftable::set_max(self, range.end);
+        let q = Shiftable::get_pos(self);
         let ghost o = self.shift_items();
-        let r = VShiftable::shift_nth(self, range.start - q);
+        let r = Shiftable::shift_nth(self, range.start - q);
         proof {
             let w = window(v, s, e);
             let k = s - p;
@@ -19665,14 +19662,14 @@ impl<'s> VShiftable for SliceNumbers<'s> {
 }
 
 /// The numbers of several ranges of a slice, walked by hexane's
-/// [`VerifiedRanges`] over a client's own iterator.
+/// [`Ranges`] over a client's own iterator.
 #[allow(dead_code)]
 fn numbers_over_ranges<'s, 'r>(v: &'s [u64], rs: &'r [Range<usize>]) -> (out: Vec<u64>)
     ensures
         out@ == windows(v@, rs@),
 {
     let it = SliceNumbers::new(v);
-    let mut walk = VerifiedRanges::new(it, rs);
+    let mut walk = Ranges::new(it, rs);
     let ghost all = walk.ranges_left();
     let mut out: Vec<u64> = Vec::new();
     loop
@@ -19715,7 +19712,7 @@ fn first_number_of_range(v: &[u64], a: usize, b: usize) -> (r: Option<u64>)
         },
 {
     let it = SliceNumbers::new(v);
-    let mut u = VerifiedUnshift::new(it);
+    let mut u = Unshift::new(it);
     u.shift(a..b);
     let r = u.next();
     proof {
@@ -19749,12 +19746,12 @@ pub open spec fn tag_byte(v: Tag) -> u8 {
     }
 }
 
-impl VPack for Tag {
-    open spec fn enc<C: VCodec>(v: Tag) -> Seq<u8> {
+impl RleValue for Tag {
+    open spec fn enc<C: Codec>(v: Tag) -> Seq<u8> {
         seq![tag_byte(v)]
     }
 
-    proof fn lemma_enc<C: VCodec>(v: Tag, w: Tag, s: Seq<u8>, t: Seq<u8>) {
+    proof fn lemma_enc<C: Codec>(v: Tag, w: Tag, s: Seq<u8>, t: Seq<u8>) {
         if Self::enc::<C>(v) + s == Self::enc::<C>(w) + t {
             assert((Self::enc::<C>(v) + s)[0] == tag_byte(v));
         }
@@ -19787,7 +19784,7 @@ impl VPack for Tag {
         }
     }
 
-    fn try_unpack<C: VCodec>(data: &[u8]) -> (r: Result<(usize, Tag), PackError>) {
+    fn try_unpack<C: Codec>(data: &[u8]) -> (r: Result<(usize, Tag), PackError>) {
         if data.len() == 0 || (data[0] != 0x00 && data[0] != 0xff) {
             proof {
                 assert forall|v: Tag| !(#[trigger] Self::enc::<C>(v)).is_prefix_of(data@) by {
@@ -19806,7 +19803,7 @@ impl VPack for Tag {
         Ok((1, v))
     }
 
-    fn unpack<C: VCodec>(data: &[u8]) -> (r: (usize, Tag)) {
+    fn unpack<C: Codec>(data: &[u8]) -> (r: (usize, Tag)) {
         let v = if data[0] == 0x00 {
             Tag::Int
         } else {
@@ -19815,11 +19812,11 @@ impl VPack for Tag {
         (1, v)
     }
 
-    fn value_len<C: VCodec>(data: &[u8]) -> (r: Option<usize>) {
+    fn value_len<C: Codec>(data: &[u8]) -> (r: Option<usize>) {
         Some(1)
     }
 
-    fn pack<C: VCodec>(v: &Tag, buf: &mut Vec<u8>) -> (n: usize) {
+    fn pack<C: Codec>(v: &Tag, buf: &mut Vec<u8>) -> (n: usize) {
         let b: u8 = match *v {
             Tag::Int => 0x00,
             Tag::Str => 0xff,
@@ -19840,7 +19837,7 @@ fn round_trip_tag(input: &Vec<Tag>, nullable: &Vec<Option<Tag>>)
     round_trip::<Option<Tag>, Leb128, LenIndex>(nullable);
 }
 
-/// The order of the tags is the client's ([`VPack::num`]), not their
+/// The order of the tags is the client's ([`RleValue::num`]), not their
 /// bytes': `Int` (0x00) before `Str` (0xff). In a column of some `Int`s
 /// and then some `Str`s, the search for `Str` gives the `Str`s, and that
 /// for `Int` the `Int`s.
@@ -19849,7 +19846,7 @@ fn find_tag(ints: usize, strs: usize)
     requires
         ints + strs <= 1000,
 {
-    let mut col = VerifiedColumn::<Tag>::new();
+    let mut col = Column::<Tag>::new();
     let mut i: usize = 0;
     while i < ints
         invariant
@@ -19996,7 +19993,7 @@ fn read8(data: &[u8]) -> (n: u64)
     n
 }
 
-impl VCodec for Fixed8 {
+impl Codec for Fixed8 {
     open spec fn enc_u(n: u64) -> Seq<u8> {
         bytes8(n)
     }
@@ -20142,7 +20139,7 @@ fn round_trip_bit_index(nums: &Vec<u64>, actions: &Vec<Option<Action>>, flags: &
 /// wrote, as of a plain column: edits, then a read of each value.
 #[allow(dead_code)]
 fn edit_bit_index(a: u64, b: u64) {
-    let mut col = VerifiedColumn::<u64, Leb128, LenBitIndex>::new();
+    let mut col = Column::<u64, Leb128, LenBitIndex>::new();
     col.push(a);
     col.push(b);
     col.insert(1, a);
@@ -20163,7 +20160,7 @@ fn edit_bit_index(a: u64, b: u64) {
 #[allow(dead_code)]
 fn sized_write(n: u64, i: i64) -> (r: (Vec<u8>, u64))
     ensures
-        r.0@ == <Leb128 as VCodec>::enc_u(n) + <Leb128 as VCodec>::enc_i(i),
+        r.0@ == <Leb128 as Codec>::enc_u(n) + <Leb128 as Codec>::enc_i(i),
         r.0@.len() == r.1,
 {
     proof {
@@ -20182,7 +20179,7 @@ fn sized_write(n: u64, i: i64) -> (r: (Vec<u8>, u64))
 #[allow(dead_code)]
 fn sized_read(data: &[u8]) -> (r: Option<(u64, usize)>)
     ensures
-        r matches Some((n, k)) ==> k <= data@.len() && <Leb128 as VCodec>::enc_u(n) == data@.take(k as int),
+        r matches Some((n, k)) ==> k <= data@.len() && <Leb128 as Codec>::enc_u(n) == data@.take(k as int),
 {
     match Leb128::read_u_opt(data) {
         Some((_, n)) => {

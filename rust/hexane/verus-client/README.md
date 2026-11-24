@@ -60,14 +60,14 @@ clients.
 ## What only this check has found
 
 * A type that an associated type of one of the model traits names (the
-  state under `VerifiedEncoderState`, for one) has to be `pub`, in a
+  state under `EncoderState`, for one) has to be `pub`, in a
   module that is not. With `pub(crate)` hexane verifies and builds, and
   Verus panics on every function of a crate that depends on it.
 * Verus panics on a direct call of `from_iter` where the `FromIterator`
   is of another verified crate. `collect()` is the same call and is
   accepted, which is why `gen.py` rewrites the one into the other.
 * A public type that the module did not re-export
-  (`VerifiedEncoderState`, before it was first committed).
+  (`EncoderState`, before it was first committed).
 
 ## What it does not check
 

@@ -29,7 +29,7 @@ use vstd::std_specs::iter::IteratorSpec;
 
 verus! {
 
-impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> Encoder<'a, V, C> {
     pub(super) fn new_impl() -> (r: Self)
         ensures
             r.wf(),
@@ -41,7 +41,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
             assert(e.e_values() =~= Seq::empty());
             lemma_svs_none::<Held<V, C>>();
         }
-        VerifiedEncoder { e }
+        Encoder { e }
     }
 
     pub(super) fn with_max_segments_impl(max_segments: usize) -> (r: Self)
@@ -57,7 +57,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
             assert(e.e_values() =~= Seq::empty());
             lemma_svs_none::<Held<V, C>>();
         }
-        VerifiedEncoder { e }
+        Encoder { e }
     }
 
     pub(super) fn with_segments_impl() -> (r: Self)
@@ -247,14 +247,14 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         requires
             self.wf(),
         ensures
-            VerifiedColumn::<V, C>::valid(r@),
-            VerifiedColumn::<V, C>::values(r@) == self@,
-            r@ == VerifiedColumn::<V, C>::encoding(self@),
+            Column::<V, C>::valid(r@),
+            Column::<V, C>::values(r@) == self@,
+            r@ == Column::<V, C>::encoding(self@),
             r@.len() <= V::size_bound(self@),
     {
         let r = <V::E as Streams<'a, V::X>>::bytes(self.e);
         proof {
-            VerifiedColumn::<V, C>::lemma_encoding(r@);
+            Column::<V, C>::lemma_encoding(r@);
             V::lemma_size(r@);
         }
         r
@@ -264,10 +264,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         requires
             self.wf(),
         ensures
-            final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(self@),
-            VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(self@)),
-            VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(self@)) == self@,
-            VerifiedColumn::<V, C>::encoding(self@).len() <= V::size_bound(self@),
+            final(out)@ == old(out)@ + Column::<V, C>::encoding(self@),
+            Column::<V, C>::valid(Column::<V, C>::encoding(self@)),
+            Column::<V, C>::values(Column::<V, C>::encoding(self@)) == self@,
+            Column::<V, C>::encoding(self@).len() <= V::size_bound(self@),
             r.start == old(out)@.len(),
             r.end == final(out)@.len(),
     {
@@ -275,7 +275,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         <V::E as Streams<'a, V::X>>::write(self.e, out);
         proof {
             let d = out@.skip(start as int);
-            VerifiedColumn::<V, C>::lemma_encoding(d);
+            Column::<V, C>::lemma_encoding(d);
             V::lemma_size(d);
             assert(out@ =~= old(out)@ + d);
         }
@@ -289,10 +289,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
             final(out)@ == old(out)@ ==> only(self@, value.sv()),
             self.max_segments() is None && only(self@, value.sv()) ==> final(out)@ == old(out)@,
             final(out)@ != old(out)@ ==> {
-                &&& final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(self@)
-                &&& VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(self@))
-                &&& VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(self@)) == self@
-                &&& VerifiedColumn::<V, C>::encoding(self@).len() <= V::size_bound(self@)
+                &&& final(out)@ == old(out)@ + Column::<V, C>::encoding(self@)
+                &&& Column::<V, C>::valid(Column::<V, C>::encoding(self@))
+                &&& Column::<V, C>::values(Column::<V, C>::encoding(self@)) == self@
+                &&& Column::<V, C>::encoding(self@).len() <= V::size_bound(self@)
             },
             r.start == old(out)@.len(),
             r.end == final(out)@.len(),
@@ -320,10 +320,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         }
         let r = self.save_to(out);
         proof {
-            let d = VerifiedColumn::<V, C>::encoding(self@);
+            let d = Column::<V, C>::encoding(self@);
             if out@ == old(out)@ {
                 assert(d =~= Seq::empty());
-                VerifiedColumn::<V, C>::lemma_no_bytes();
+                Column::<V, C>::lemma_no_bytes();
             }
         }
         r
@@ -331,10 +331,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
 
     pub(super) fn encode_impl<I: IntoIterator<Item = Get<'a, V>>>(iter: I) -> (r: Vec<u8>)
         ensures
-            VerifiedColumn::<V, C>::valid(r@),
-            r@ == VerifiedColumn::<V, C>::encoding(VerifiedColumn::<V, C>::values(r@)),
-            r@.len() <= V::size_bound(VerifiedColumn::<V, C>::values(r@)),
-            gives(iter, |xs: Seq<I::Item>| VerifiedColumn::<V, C>::values(r@) == VGet::svs(xs)),
+            Column::<V, C>::valid(r@),
+            r@ == Column::<V, C>::encoding(Column::<V, C>::values(r@)),
+            r@.len() <= V::size_bound(Column::<V, C>::values(r@)),
+            gives(iter, |xs: Seq<I::Item>| Column::<V, C>::values(r@) == VGet::svs(xs)),
     {
         let mut buf: Vec<u8> = Vec::new();
         Self::encode_to(&mut buf, iter);
@@ -348,10 +348,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         ensures
             ({
                 let d = final(buf)@.skip(old(buf)@.len() as int);
-                let w = VerifiedColumn::<V, C>::values(d);
+                let w = Column::<V, C>::values(d);
                 &&& final(buf)@ == old(buf)@ + d
-                &&& VerifiedColumn::<V, C>::valid(d)
-                &&& d == VerifiedColumn::<V, C>::encoding(w)
+                &&& Column::<V, C>::valid(d)
+                &&& d == Column::<V, C>::encoding(w)
                 &&& d.len() <= V::size_bound(w)
                 &&& gives(iter, |xs: Seq<I::Item>| w == VGet::svs(xs))
             }),
@@ -359,13 +359,13 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
             r.end == final(buf)@.len(),
     {
         let start = buf.len();
-        let mut s = VerifiedEncoderState::<'a, V, C>::new();
+        let mut s = EncoderState::<'a, V, C>::new();
         s.extend(buf, iter);
         let ghost vs = s@;
         s.finish(buf);
         proof {
             let d = buf@.skip(start as int);
-            assert(d =~= VerifiedColumn::<V, C>::encoding(vs));
+            assert(d =~= Column::<V, C>::encoding(vs));
             assert(Seq::<V::S>::empty() + vs =~= vs);
         }
         start..buf.len()
@@ -379,10 +379,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         ensures
             ({
                 let d = final(buf)@.skip(old(buf)@.len() as int);
-                let w = VerifiedColumn::<V, C>::values(d);
+                let w = Column::<V, C>::values(d);
                 &&& final(buf)@ == old(buf)@ + d
-                &&& VerifiedColumn::<V, C>::valid(d)
-                &&& d == VerifiedColumn::<V, C>::encoding(w)
+                &&& Column::<V, C>::valid(d)
+                &&& d == Column::<V, C>::encoding(w)
                 &&& d.len() <= V::size_bound(w)
                 &&& gives(
                     iter,
@@ -397,7 +397,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
             r.end == final(buf)@.len(),
     {
         let start = buf.len();
-        let mut s = VerifiedEncoderState::<'a, V, C>::new();
+        let mut s = EncoderState::<'a, V, C>::new();
         s.extend(buf, iter);
         let ghost vs = s@;
         proof {
@@ -412,8 +412,8 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
                 assert(buf@ =~= old(buf)@);
                 let d = buf@.skip(start as int);
                 assert(d =~= Seq::<u8>::empty());
-                VerifiedColumn::<V, C>::lemma_no_bytes();
-                VerifiedColumn::<V, C>::lemma_encoding(d);
+                Column::<V, C>::lemma_no_bytes();
+                Column::<V, C>::lemma_encoding(d);
                 V::lemma_size(d);
                 assert(buf@ =~= old(buf)@ + d);
             }
@@ -422,10 +422,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         s.finish(buf);
         proof {
             let d = buf@.skip(start as int);
-            assert(d =~= VerifiedColumn::<V, C>::encoding(vs));
+            assert(d =~= Column::<V, C>::encoding(vs));
             if buf@ == old(buf)@ {
                 assert(d =~= Seq::<u8>::empty());
-                VerifiedColumn::<V, C>::lemma_no_bytes();
+                Column::<V, C>::lemma_no_bytes();
             }
         }
         start..buf.len()
@@ -584,7 +584,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         let mut e = self.e;
         let slabs = <<V::E as Streams<'a, V::X>>::Enc as Encodes<V::E>>::take(&mut e);
         let to = Self::walk(slabs.as_slice(), f);
-        VerifiedEncoder { e: to }
+        Encoder { e: to }
     }
 
     pub(super) fn save_to_and_remap_impl<F: Fn(V) -> V>(self, out: &mut Vec<u8>, f: F) -> (r: Range<usize>)
@@ -595,10 +595,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
             ({
                 // what was written, and the values it is the encoding of
                 let d = final(out)@.skip(old(out)@.len() as int);
-                let w = VerifiedColumn::<V, C>::values(d);
+                let w = Column::<V, C>::values(d);
                 &&& final(out)@ == old(out)@ + d
-                &&& VerifiedColumn::<V, C>::valid(d)
-                &&& d == VerifiedColumn::<V, C>::encoding(w)
+                &&& Column::<V, C>::valid(d)
+                &&& d == Column::<V, C>::encoding(w)
                 &&& d.len() <= V::size_bound(w)
                 &&& w.len() == self@.len()
                 &&& forall|i: int| 0 <= i < self@.len() ==> mapped(f, self@[i], #[trigger] w[i])
@@ -609,7 +609,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         let m = self.remapped(&f);
         let r = m.save_to(out);
         proof {
-            assert(out@.skip(old(out)@.len() as int) =~= VerifiedColumn::<V, C>::encoding(m@));
+            assert(out@.skip(old(out)@.len() as int) =~= Column::<V, C>::encoding(m@));
         }
         r
     }
@@ -627,10 +627,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
                 ==> final(out)@ == old(out)@,
             final(out)@ != old(out)@ ==> {
                 let d = final(out)@.skip(old(out)@.len() as int);
-                let w = VerifiedColumn::<V, C>::values(d);
+                let w = Column::<V, C>::values(d);
                 &&& final(out)@ == old(out)@ + d
-                &&& VerifiedColumn::<V, C>::valid(d)
-                &&& d == VerifiedColumn::<V, C>::encoding(w)
+                &&& Column::<V, C>::valid(d)
+                &&& d == Column::<V, C>::encoding(w)
                 &&& d.len() <= V::size_bound(w)
                 &&& w.len() == self@.len()
                 &&& forall|i: int| 0 <= i < self@.len() ==> mapped(f, self@[i], #[trigger] w[i])
@@ -642,7 +642,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         let r = m.save_to_unless(out, unless);
         proof {
             if out@ != old(out)@ {
-                assert(out@.skip(old(out)@.len() as int) =~= VerifiedColumn::<V, C>::encoding(m@));
+                assert(out@.skip(old(out)@.len() as int) =~= Column::<V, C>::encoding(m@));
             } else {
                 assert forall|i: int| 0 <= i < self@.len() implies mapped(f, #[trigger] self@[i], unless.sv()) by {
                     assert(mapped(f, self@[i], m@[i]));
@@ -657,7 +657,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         r
     }
 
-    pub(super) fn into_column_impl(self) -> (r: VerifiedColumn<V, C>)
+    pub(super) fn into_column_impl(self) -> (r: Column<V, C>)
         requires
             self.wf(),
         ensures
@@ -668,18 +668,18 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
             Some(max) => {
                 let slabs = <<V::E as Streams<'a, V::X>>::Enc as Encodes<V::E>>::take(&mut e);
                 let core = Core::<V::E>::from_cut(slabs, max);
-                VerifiedColumn { core }
+                Column { core }
             },
             None => {
                 let bytes = <V::E as Streams<'a, V::X>>::bytes(e);
-                match VerifiedColumn::<V, C>::load(bytes.as_slice()) {
+                match Column::<V, C>::load(bytes.as_slice()) {
                     Ok(c) => c,
                     Err(err) => {
                         proof {
                             // what was saved is the encoding, and a load
                             // takes every encoding that is `loadable`
-                            VerifiedColumn::<V, C>::lemma_encoding(bytes@);
-                            assert(!VerifiedColumn::<V, C>::loadable(bytes@));
+                            Column::<V, C>::lemma_encoding(bytes@);
+                            assert(!Column::<V, C>::loadable(bytes@));
                         }
                         unloadable(err, Ghost(self@))
                     },
@@ -725,7 +725,7 @@ pub(super) proof fn lemma_read_first<'s, X: Decoders<'s>>(s: Seq<Slab<X::Tail>>,
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoderState<'a, V, C> {
+impl<'a, V: ColumnValueRef<C>, C: Codec> EncoderState<'a, V, C> {
     #[inline(always)]
     pub(super) fn new_impl() -> (r: Self)
         ensures
@@ -733,7 +733,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoderState<'a, V, C> {
             forall|buf: Seq<u8>| #[trigger] r.on(buf),
             forall|buf: Seq<u8>| #[trigger] r.before(buf) == buf,
     {
-        let r = VerifiedEncoderState { s: <V::E as Flows<'a, V::X>>::f_new() };
+        let r = EncoderState { s: <V::E as Flows<'a, V::X>>::f_new() };
         proof {
             lemma_svs_none::<Held<V, C>>();
             assert(<V::E as Flows<'a, V::X>>::f_values(r.s) =~= Seq::empty());
@@ -953,16 +953,16 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoderState<'a, V, C> {
         requires
             self.on(old(buf)@),
         ensures
-            final(buf)@ == self.before(old(buf)@) + VerifiedColumn::<V, C>::encoding(self@),
-            VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(self@)),
-            VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(self@)) == self@,
-            VerifiedColumn::<V, C>::encoding(self@).len() <= V::size_bound(self@),
+            final(buf)@ == self.before(old(buf)@) + Column::<V, C>::encoding(self@),
+            Column::<V, C>::valid(Column::<V, C>::encoding(self@)),
+            Column::<V, C>::values(Column::<V, C>::encoding(self@)) == self@,
+            Column::<V, C>::encoding(self@).len() <= V::size_bound(self@),
     {
         let ghost h = self.before(buf@);
         <V::E as Flows<'a, V::X>>::f_finish(self.s, buf);
         proof {
             let d = buf@.skip(h.len() as int);
-            VerifiedColumn::<V, C>::lemma_encoding(d);
+            Column::<V, C>::lemma_encoding(d);
             V::lemma_size(d);
             assert(buf@ =~= h + d);
         }
@@ -971,11 +971,11 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoderState<'a, V, C> {
 
 } // verus!
 
-impl<V: VValue<C>, C: VCodec> std::fmt::Debug for VerifiedEncoder<'_, V, C> {
+impl<V: ColumnValueRef<C>, C: Codec> std::fmt::Debug for Encoder<'_, V, C> {
     /// How many values it has been given. This is not checked: it reads
-    /// the count that [`len`](VerifiedEncoder::len) returns.
+    /// the count that [`len`](Encoder::len) returns.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedEncoder")
+        f.debug_struct("Encoder")
             .field("len", &<V::E as Streams<'_, V::X>>::count(&self.e))
             .finish()
     }

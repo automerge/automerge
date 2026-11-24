@@ -30,11 +30,11 @@ pub struct VB<C>(PhantomData<C>);
 #[verifier::reject_recursive_types(C)]
 pub struct VCounts<C>(PhantomData<C>);
 
-impl<C: VCodec> CountsOf for VB<C> {
+impl<C: Codec> CountsOf for VB<C> {
     type K = VCounts<C>;
 }
 
-impl<C: VCodec> CountOps for VCounts<C> {
+impl<C: Codec> CountOps for VCounts<C> {
     open spec fn enc(n: u64) -> Seq<u8> {
         C::enc_u(n)
     }

@@ -1,11 +1,11 @@
 //! The finds of a delta column: the places of the values within some
 //! bounds, found by the column's index.
 //!
-//! [`find_by_range`](VerifiedDeltaColumn::find_by_range) and
-//! [`find_by_value`](VerifiedDeltaColumn::find_by_value) of a
-//! [`VerifiedDeltaColumn`] give a [`VerifiedFindByRange`]: an iterator
+//! [`find_by_range`](DeltaColumn::find_by_range) and
+//! [`find_by_value`](DeltaColumn::find_by_value) of a
+//! [`DeltaColumn`] give a [`FindByRange`]: an iterator
 //! over the places of the column whose values are within the bounds,
-//! from the first on. [`find_first`](VerifiedDeltaColumn::find_first)
+//! from the first on. [`find_first`](DeltaColumn::find_first)
 //! gives the first place of a value. The values need be in no order.
 //!
 //! The search is [`FindByRange`](crate::FindByRange)'s, the shared one
@@ -24,7 +24,7 @@
 //! function's body is a call of one of `imp` (`find/imp.rs`), which has
 //! its contract word for word and is proved there.
 
-use super::{bounds_of, DKind, VDeltaValue, VerifiedDeltaColumn, DE, DX};
+use super::{bounds_of, DKind, DeltaColumn, DeltaValue, DE, DX};
 #[cfg(verus_keep_ghost)]
 use super::{delta_within, VDelta};
 use crate::column::Slab;
@@ -33,7 +33,7 @@ use crate::delta::dfind::DFind;
 #[cfg(verus_keep_ghost)]
 use crate::delta::dfind::{d_find_new, d_find_next};
 use crate::iter_core::Decoders;
-use crate::verified::codec::VCodec;
+use crate::verified::codec::Codec;
 use crate::Leb128;
 #[cfg(verus_keep_ghost)]
 use std::ops::Bound;
@@ -50,7 +50,7 @@ verus! {
 
 /// The places of the values `vs`, from `from` on, whose values are
 /// within the bounds `lo` and `hi` ([`delta_within`]), in order: what a
-/// find over the bounds gives ([`VerifiedDeltaColumn::find_by_range`]).
+/// find over the bounds gives ([`DeltaColumn::find_by_range`]).
 /// [`lemma_delta_finds`] says which places they are, and
 /// [`lemma_delta_finds_first`] which is the first.
 pub open spec fn delta_finds<T: VDelta>(vs: Seq<T>, lo: Bound<&T>, hi: Bound<&T>, from: int) -> Seq<usize>
@@ -130,21 +130,21 @@ pub proof fn lemma_delta_within_one<T: VDelta>(t: T, v: T)
     imp::lemma_delta_within_one_impl::<T>(t, v)
 }
 
-/// The places of a [`VerifiedDeltaColumn`] whose values are within some
+/// The places of a [`DeltaColumn`] whose values are within some
 /// bounds, one after another from the first:
-/// [`find_by_range`](VerifiedDeltaColumn::find_by_range) and
-/// [`find_by_value`](VerifiedDeltaColumn::find_by_value) give one.
+/// [`find_by_range`](DeltaColumn::find_by_range) and
+/// [`find_by_value`](DeltaColumn::find_by_value) give one.
 ///
 /// It is an iterator, and says what it has left to give (`finds`):
 /// `next` gives the first of them and leaves the rest.
-pub struct VerifiedFindByRange<'a, T: VDeltaValue<C>, C: VCodec = Leb128> {
+pub struct FindByRange<'a, T: DeltaValue<C>, C: Codec = Leb128> {
     slabs: &'a [Slab<<DE<T, C> as Slabs>::Tail>],
     /// The search of the column's index and slabs; none where there is
     /// nothing to find.
     find: Option<DFind<'a, <DX<T, C> as Decoders<'a>>::D>>,
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedFindByRange<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> FindByRange<'a, T, C> {
     /// The places the finder has left to give, in the order it gives
     /// them.
     pub closed spec fn finds(&self) -> Seq<usize> {
@@ -156,7 +156,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedFindByRange<'a, T, C> {
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, T: VDeltaValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for VerifiedFindByRange<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> vstd::std_specs::iter::IteratorSpecImpl for FindByRange<'a, T, C> {
     /// The finder keeps to what Verus asks of an iterator: `next` gives
     /// `remaining()`, one place after another, and then `None`.
     open spec fn obeys_prophetic_iter_laws(&self) -> bool {
@@ -184,7 +184,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl f
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> Iterator for VerifiedFindByRange<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> Iterator for FindByRange<'a, T, C> {
     type Item = usize;
 
     /// The next place, if one is left: the first of `finds()`, which
@@ -195,7 +195,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> Iterator for VerifiedFindByRange<'a, T, C
     }
 }
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> Default for VerifiedFindByRange<'a, T, C> {
+impl<'a, T: DeltaValue<C>, C: Codec> Default for FindByRange<'a, T, C> {
     /// A finder with nothing to give.
     #[inline(always)]
     fn default() -> (r: Self)
@@ -206,7 +206,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> Default for VerifiedFindByRange<'a, T, C>
     }
 }
 
-impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// The places of the values within `range`, from the first on.
     ///
     /// The bounds are values of the column's type, and a value is
@@ -215,7 +215,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
     /// `delta_finds`. The column's index tells it which slabs can
     /// hold such a value, and it reads through those alone.
     #[inline(always)]
-    pub fn find_by_range<R: RangeBounds<T>>(&self, range: R) -> (r: VerifiedFindByRange<'_, T, C>)
+    pub fn find_by_range<R: RangeBounds<T>>(&self, range: R) -> (r: FindByRange<'_, T, C>)
         ensures
             r.finds() == delta_finds::<T>(self@, range.spec_start_bound(), range.spec_end_bound(), 0),
     {
@@ -229,7 +229,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
     /// the places are those of the values within the bounds that
     /// include `target` and nothing else (`lemma_delta_within_one`).
     #[inline(always)]
-    pub fn find_by_value(&self, target: T) -> (r: VerifiedFindByRange<'_, T, C>)
+    pub fn find_by_value(&self, target: T) -> (r: FindByRange<'_, T, C>)
         ensures
             r.finds() == delta_finds::<T>(self@, Bound::Included(&target), Bound::Included(&target), 0),
     {
