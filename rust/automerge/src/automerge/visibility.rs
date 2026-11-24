@@ -73,6 +73,24 @@ impl FrontierVisibility {
         }
     }
 
+    /// Refresh derived visibility and report whether the mask changed.
+    ///
+    /// Derive using [`FrontierVisibility::new`] and replace both the mask and
+    /// pending boundary hashes, even when the mask compares equal. The return
+    /// value concerns only the mask, not pending-boundary bookkeeping.
+    pub(super) fn refresh(
+        &mut self,
+        policy: &WriteFrontier,
+        graph: &ChangeGraph,
+        authors: &Authors,
+        actors: &ActorTable,
+    ) -> bool {
+        let new = FrontierVisibility::new(policy, graph, authors, actors);
+        let changed = self.mask() != new.mask();
+        *self = new;
+        changed
+    }
+
     pub(super) fn mask(&self) -> Option<&Mask> {
         self.mask.as_ref()
     }

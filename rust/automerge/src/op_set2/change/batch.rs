@@ -1,16 +1,13 @@
+use crate::actor::ActorTable;
 use crate::automerge::view::Mask;
-use crate::automerge::HistoryUpdate;
-use crate::change_queue::ChangeBatch;
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
 use crate::op_set2::op::SuccessorValue;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
 use crate::patches::Events;
-use crate::types::{
-    ActorId, ElemId, ObjId, ObjType, OpId, ScalarValue, SequenceType, SmallHashMap,
-};
-use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
+use crate::types::{ElemId, ObjId, ObjType, OpId, ScalarValue, SequenceType, SmallHashMap};
+use crate::{Automerge, Change, PatchLog, PatchLogMismatch};
 use crate::{AutomergeError, TextEncoding};
 
 use super::super::op::{ChangeOp, Op, OpBuilder};
@@ -18,7 +15,7 @@ use super::super::op_set::{ObjIdIter, ObjIndex, OpIter, OpSet};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ops::Range;
 
 mod transition;
@@ -26,12 +23,25 @@ use transition::{CandidateSummary, ValueTransition};
 
 type PredCache = SmallHashMap<OpId, Vec<SuccessorValue>>;
 
+/// Operation scratch data for a dependency-ordered batch of changes.
+///
+/// The coordinator establishes actors and history before importing operations,
+/// then walks the document and installs the resulting updates.
 #[derive(Debug, Clone, Default)]
-struct BatchApply {
+pub(crate) struct BatchApply<'change> {
     ops: Vec<ChangeOp>,
-    changes: Vec<Change>,
+    changes: Vec<&'change Change>,
     pred: PredCache,
     obj_spans: Vec<ObjSpan>,
+}
+
+/// Operation-set updates calculated by [`BatchApply::walk_and_record`].
+///
+/// Pass to [`BatchApply::install`] against the same operation set without
+/// intervening mutations. The recorded positions refer to that operation set.
+pub(crate) struct BatchUpdates {
+    succ: Vec<SuccInsert>,
+    conflicts: Vec<Adjust>,
 }
 
 struct Untangler<'a> {
@@ -698,8 +708,8 @@ fn walk_map(mw: &mut MapWalker<'_, '_, '_>, change_ops: &mut [ChangeOp]) {
     mw.finish(change_ops);
 }
 
-impl BatchApply {
-    fn new(changes: Vec<Change>) -> Self {
+impl<'change> BatchApply<'change> {
+    pub(crate) fn new(changes: Vec<&'change Change>) -> Self {
         Self {
             ops: Vec::default(),
             changes,
@@ -708,67 +718,36 @@ impl BatchApply {
         }
     }
 
-    fn insert_new_actors(&self, doc: &mut Automerge) {
-        // Insert every new actor first: a later insertion would shift the
-        // indices collected for the earlier ones. The second pass is pure
-        // lookup. Registration is bulk: one visibility derivation per batch,
-        // not one per new actor.
-        for c in self.changes.iter().filter(|c| c.seq() == 1) {
-            doc.put_actor_ref(c.actor_id());
-        }
-        let pairs: Vec<_> = self
-            .changes
-            .iter()
-            .filter(|c| c.seq() == 1)
-            .filter_map(|c| {
-                let author = c.author()?.into_owned();
-                Some((author, doc.put_actor_ref(c.actor_id())))
-            })
-            .collect();
-        doc.register_actors(pairs);
+    pub(crate) fn changes(&self) -> &[&'change Change] {
+        &self.changes
     }
 
-    /// Flag every incoming op against the mask snapshot and import it. The
-    /// graph is already up to date; the mask has not moved.
-    fn import_ops(&mut self, doc: &mut Automerge, mask: Option<&Mask>) {
-        let actors_before = doc.ops().actors.len();
-        for c in &self.changes {
-            doc.import_ops_to(c, &mut self.ops, mask).unwrap();
+    /// Convert incoming operations using the actor table and mask snapshot.
+    pub(crate) fn import_ops(&mut self, actors: &ActorTable, mask: Option<&Mask>) {
+        for change in &self.changes {
+            self.ops
+                .extend(import_change_ops(change, actors, mask).unwrap());
         }
-        doc.remove_unused_actors(true);
-        // The mask snapshot and the ops staged above are baked against the
-        // actor indices as of step 3; an actor removal here would silently
-        // invalidate both. Step 4 gave every inserted actor a seq entry, so
-        // this is unreachable — assert it stays that way.
-        debug_assert_eq!(
-            doc.ops().actors.len(),
-            actors_before,
-            "no actor renumbering between the mask snapshot and the walk"
-        );
     }
 
-    pub(crate) fn apply(
+    pub(crate) fn install(&mut self, ops: &mut OpSet, updates: BatchUpdates) {
+        for adjustment in updates.conflicts {
+            match adjustment {
+                Adjust::Conflict(index) => ops.conflict(index),
+                Adjust::Expose(index) => ops.expose(index),
+            }
+        }
+
+        ops.add_succ(&updates.succ);
+        self.insert_runs_of_ops(ops);
+    }
+
+    pub(crate) fn walk_and_record(
         &mut self,
-        doc: &mut Automerge,
+        doc: &Automerge,
         log: &mut PatchLog,
-    ) -> Result<(), PatchLogMismatch> {
-        // Align the batch and log with the incoming doc, taking a snapshot of
-        // the mask before the op set mutation.
-        log.transition_to(doc, |d| d.visible_current())?;
-        self.insert_new_actors(doc);
-        doc.assert_mask_derived();
-        let mask0 = doc.mask().cloned();
-
-        // Mark whether a pending boundary has been resolved by any of the
-        // incoming changes. If resolved is true, the mask is published after
-        // the op set is consistent again.
-        let mut resolved = false;
-        for c in &self.changes {
-            resolved |= matches!(doc.update_history(c), HistoryUpdate::BoundaryResolved);
-        }
-
-        self.import_ops(doc, mask0.as_ref());
-
+        mask: Option<&Mask>,
+    ) -> Result<BatchUpdates, PatchLogMismatch> {
         let mut obj_info = doc.ops().obj_info.clone();
 
         self.order_ops_for_doc(&mut obj_info);
@@ -779,9 +758,9 @@ impl BatchApply {
 
         // The walk records the batch's events and moves the observed view past
         // it in one operation. That view only depends on the change graph and
-        // the mask (`mask0`), so computing it here — before the deferred op-set
-        // mutations below — names the same view as after them. The transition
-        // above already aligned the log with the pre-insertion actors, so
+        // the mask (`mask`), so computing it here — before the deferred op-set
+        // mutations in install — names the same view as after them. The
+        // coordinator already aligned the log with the pre-insertion actors, so
         // migrating onto the superset of actors cannot fail.
         {
             let ops = &mut self.ops;
@@ -802,7 +781,7 @@ impl BatchApply {
                                     os.obj,
                                     SequenceType::List,
                                     doc.text_encoding(),
-                                    mask0.as_ref(),
+                                    mask,
                                     doc.ops(),
                                 );
                                 let mut walker =
@@ -820,7 +799,7 @@ impl BatchApply {
                                     os.obj,
                                     sequence_type,
                                     doc.text_encoding(),
-                                    mask0.as_ref(),
+                                    mask,
                                     doc.ops(),
                                 );
                                 let ut = Untangler::new(
@@ -854,29 +833,10 @@ impl BatchApply {
             debug_assert_eq!(succ, tmp_succ);
         }
 
-        for a in conflicts {
-            match a {
-                Adjust::Conflict(index) => doc.ops.conflict(index),
-                Adjust::Expose(index) => doc.ops.expose(index),
-            }
-        }
-
-        doc.ops.add_succ(&succ);
-
-        self.insert_runs_of_ops(doc);
-
-        // If the batch witnessed a pending write-frontier boundary, publish the
-        // mask change once, as its own visibility transition between two
-        // internally consistent op-set states.
-        if resolved {
-            doc.republish_mask(log, |_| {})?;
-        }
-
-        debug_assert!(doc.ops.validate_op_order());
-        Ok(())
+        Ok(BatchUpdates { succ, conflicts })
     }
 
-    fn insert_runs_of_ops(&mut self, doc: &mut Automerge) {
+    fn insert_runs_of_ops(&mut self, ops: &mut OpSet) {
         let mut last_pos = None;
         let mut start = 0;
         let mut shift = 0;
@@ -884,25 +844,25 @@ impl BatchApply {
             if op.pos != last_pos {
                 if let Some(pos) = last_pos {
                     let end = i;
-                    shift += self.insert_ops(doc, pos + shift, start..end);
+                    shift += self.insert_ops(ops, pos + shift, start..end);
                     start = end;
                 }
                 last_pos = op.pos;
             }
         }
         if let Some(pos) = last_pos {
-            self.insert_ops(doc, pos + shift, start..self.ops.len());
+            self.insert_ops(ops, pos + shift, start..self.ops.len());
         }
     }
 
-    pub(crate) fn insert_ops(&self, doc: &mut Automerge, pos: usize, range: Range<usize>) -> usize {
+    fn insert_ops(&self, ops: &mut OpSet, pos: usize, range: Range<usize>) -> usize {
         let batch = &self.ops[range];
-        let start = doc.ops().len();
-        doc.ops_mut().splice(pos, batch);
-        doc.ops().len() - start
+        let start = ops.len();
+        ops.splice(pos, batch);
+        ops.len() - start
     }
 
-    pub(crate) fn order_ops_for_doc(&mut self, obj_info: &mut ObjIndex) {
+    fn order_ops_for_doc(&mut self, obj_info: &mut ObjIndex) {
         self.ops.sort_by(|a, b| {
             a.bld.obj.cmp(&b.bld.obj).then_with(|| {
                 match a.elemid_or_key().partial_cmp(&b.elemid_or_key()) {
@@ -964,143 +924,54 @@ struct ObjSpan {
     span: Range<usize>,
 }
 
-impl Automerge {
-    pub fn apply_changes_batch(
-        &mut self,
-        changes: impl IntoIterator<Item = Change> + Clone,
-    ) -> Result<(), AutomergeError> {
-        self.apply_changes_batch_log_patches(changes, &mut PatchLog::inactive())
-    }
+/// Convert a change's operations to document-local actor indices.
+///
+/// Every actor referenced by the change must already be in `actors`. The mask
+/// uses those same indices. Neither input is modified, and returned operations
+/// have not been installed into the operation set.
+fn import_change_ops(
+    change: &Change,
+    actors: &ActorTable,
+    mask: Option<&Mask>,
+) -> Result<Vec<ChangeOp>, AutomergeError> {
+    let actors: Vec<_> = change.actors().map(|a| actors.lookup(a).unwrap()).collect();
 
-    pub fn apply_changes_batch_log_patches<I: IntoIterator<Item = Change>>(
-        &mut self,
-        changes: I,
-        log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
-        // Validate the observer before any change is taken from the queue: a
-        // rejected log must leave previously queued changes available for a
-        // retry with a compatible log. `validate` is read-only, and once it
-        // passes the migrations inside `BatchApply::apply` cannot fail:
-        // applying a batch only *adds* actors, and migrating onto a superset
-        // of the log's actors always succeeds.
-        log.validate(&self.ops.actors)?;
-
-        let mut seen: HashSet<ChangeHash> = self.queue.iter().map(Change::hash).collect();
-        let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
-        let mut actor_author: HashSet<ActorId> = HashSet::new();
-
-        for change in self.queue.iter() {
-            actor_seqs
-                .entry(change.actor_id().clone())
-                .or_default()
-                .insert(change.seq());
-            if change.author().is_some() {
-                actor_author.insert(change.actor_id().clone());
-            }
-        }
-
-        let mut incoming = ChangeBatch::new();
-        for change in changes {
-            let hash = change.hash();
-            if self.change_graph.has_change(&hash) || seen.contains(&hash) {
-                continue;
-            }
-            if self.has_actor_seq(&change) {
-                self.queue
-                    .remove_actor_branch_from(change.actor_id(), change.seq().saturating_add(1));
-                return Err(AutomergeError::duplicate_seq(&change));
-            }
-            if actor_seqs
-                .get(change.actor_id())
-                .is_some_and(|seqs| seqs.contains(&change.seq()))
-            {
-                return Err(AutomergeError::duplicate_seq(&change));
-            }
-            // TODO(finto): Refactor with BatchBuilder pattern
-            if change.author().is_some()
-                && (self.get_author_for_actor(change.actor_id()).is_some()
-                    || actor_author.contains(change.actor_id()))
-            {
-                return Err(AutomergeError::duplicate_author(&change));
-            }
-            if change.author().is_some() && change.seq() != 1 {
-                return Err(AutomergeError::author_on_non_initial_seq(&change));
-            }
-
-            seen.insert(hash);
-            actor_seqs
-                .entry(change.actor_id().clone())
-                .or_default()
-                .insert(change.seq());
-            if change.author().is_some() {
-                actor_author.insert(change.actor_id().clone());
-            }
-            incoming.push(change)?;
-        }
-
-        self.queue.extend(incoming);
-        let changes = self.queue.pop_topo_sorted_ready(&self.change_graph);
-        Ok(BatchApply::new(changes).apply(self, log)?)
-    }
-
-    fn import_ops_to(
-        &mut self,
-        change: &Change,
-        ops: &mut Vec<ChangeOp>,
-        mask: Option<&Mask>,
-    ) -> Result<(), AutomergeError> {
-        let new_ops = self.import_ops(change, mask)?;
-        ops.extend(new_ops);
-        Ok(())
-    }
-
-    fn import_ops(
-        &mut self,
-        change: &Change,
-        mask: Option<&Mask>,
-    ) -> Result<Vec<ChangeOp>, AutomergeError> {
-        let actors: Vec<_> = change
-            .actors()
-            .map(|a| self.ops.lookup_actor(a).unwrap())
-            .collect();
-
-        change
-            .iter_ops()
-            .enumerate()
-            .map(|(i, c)| {
-                let id = OpId::new(change.start_op().get() + i as u64, 0).map(&actors)?;
-                let key = c.key.map(&actors)?;
-                let obj = c.obj.map(&actors)?;
-                let pred = c
-                    .pred
-                    .into_iter()
-                    .map(|id| id.map(&actors))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let bld = OpBuilder {
-                    id,
-                    obj,
-                    key,
-                    action: c.action.try_into().map_err(AutomergeError::encoding)?,
-                    value: c.val.into_ref(),
-                    mark_name: c.mark_name.map(String::from).map(Cow::Owned),
-                    expand: c.expand,
-                    insert: c.insert,
-                    pred,
-                };
-                let change = ChangeOp {
-                    pos: None,
-                    subsort: 0,
-                    conflicted: false,
-                    succ: vec![],
-                    // The invariant fact for this batch: hidden by the mask
-                    // snapshot taken before the graph was updated.
-                    masked: mask.is_some_and(|m| m.hides(&id)),
-                    bld,
-                };
-                Ok(change)
-            })
-            .collect()
-    }
+    change
+        .iter_ops()
+        .enumerate()
+        .map(|(i, c)| {
+            let id = OpId::new(change.start_op().get() + i as u64, 0).map(&actors)?;
+            let key = c.key.map(&actors)?;
+            let obj = c.obj.map(&actors)?;
+            let pred = c
+                .pred
+                .into_iter()
+                .map(|id| id.map(&actors))
+                .collect::<Result<Vec<_>, _>>()?;
+            let bld = OpBuilder {
+                id,
+                obj,
+                key,
+                action: c.action.try_into().map_err(AutomergeError::encoding)?,
+                value: c.val.into_ref(),
+                mark_name: c.mark_name.map(String::from).map(Cow::Owned),
+                expand: c.expand,
+                insert: c.insert,
+                pred,
+            };
+            let change = ChangeOp {
+                pos: None,
+                subsort: 0,
+                conflicted: false,
+                succ: vec![],
+                // The invariant fact for this batch: hidden by the mask
+                // snapshot taken before the graph was updated.
+                masked: mask.is_some_and(|m| m.hides(&id)),
+                bld,
+            };
+            Ok(change)
+        })
+        .collect()
 }
 
 #[cfg(test)]

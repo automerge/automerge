@@ -14,16 +14,16 @@ pub(crate) use crate::op_set2::{
 };
 pub(crate) use crate::read::ReadDoc;
 
-use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable, HasActorIndices};
+use crate::actor::{ActorRemoval, ActorShift, ActorTable, HasActorIndices};
 use crate::change_graph::ChangeGraph;
-use crate::change_queue::ChangeQueue;
-use crate::clock::Clock;
+use crate::clock::{Clock, SeqClock};
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
 use crate::hydrate;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
+use crate::staging::StagedChanges;
 use crate::storage::document::ReconstructError;
 use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::transaction::{
@@ -33,10 +33,17 @@ use crate::transaction::{
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
 use crate::write_frontier::WriteFrontier;
 use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
+use actor::ActorMaintenance;
+use author::AuthorRegistration;
+use history::History;
 use std::borrow::Cow;
 use view::{ClockRange, Mask, ReadAt, VisibleClock};
 
+mod actor;
+mod apply;
+mod author;
 pub(crate) mod current_state;
+mod history;
 pub(crate) mod view;
 mod visibility;
 
@@ -299,8 +306,8 @@ impl std::default::Default for LoadOptions<'static> {
 /// to an author ID you can use [`Automerge::get_author_for_actor`].
 #[derive(Debug, Clone)]
 pub struct Automerge {
-    /// The list of unapplied changes that are not causally ready.
-    pub(crate) queue: ChangeQueue,
+    /// Unapplied change contents held for possible application.
+    pub(crate) staged: StagedChanges,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph,
     authors: Authors,
@@ -369,7 +376,7 @@ impl Automerge {
             &ops.actors,
         );
         Automerge {
-            queue: ChangeQueue::new(),
+            staged: StagedChanges::new(),
             change_graph,
             authors,
             write_frontier,
@@ -398,7 +405,7 @@ impl Automerge {
             &ops.actors,
         );
         let mut doc = Automerge {
-            queue: ChangeQueue::new(),
+            staged: StagedChanges::new(),
             change_graph,
             authors,
             write_frontier,
@@ -450,7 +457,7 @@ impl Automerge {
 
     /// Whether this document has any operations
     pub fn is_empty(&self) -> bool {
-        self.change_graph.is_empty() && self.queue.is_empty()
+        self.change_graph.is_empty() && self.staged.is_empty()
     }
 
     pub(crate) fn actor_id(&self) -> &ActorId {
@@ -597,19 +604,17 @@ impl Automerge {
     ) -> Result<(), crate::PatchLogMismatch> {
         log.transition_to(self, |d| d.visible_current())?;
         update(&mut self.write_frontier);
-        let visibility = visibility::FrontierVisibility::new(
+        let changed = self.visibility.refresh(
             &self.write_frontier,
             &self.change_graph,
             &self.authors,
-            self.actors(),
+            &self.ops.actors,
         );
         // An update that leaves the mask as it was (e.g. setting an empty
         // policy on a document that had none, or re-witnessing a resolved
         // boundary) changes no visibility: the indexes are already correct
         // and the first transition already bound the log, so the expensive
         // reindex can be skipped.
-        let changed = visibility.mask() != self.visibility.mask();
-        self.visibility = visibility;
         if changed {
             let after = self.visible_current();
             self.ops.recompute_indexes(after.clock());
@@ -643,9 +648,7 @@ impl Automerge {
     /// Used by [`Automerge::transaction_args`] so that a new actor of a masked
     /// author is entered into the mask before the transaction opens.
     fn register_actor(&mut self, author: Author<'static>, actor: usize) {
-        debug_assert_eq!(self.change_graph.seq_for_actor(actor), 0);
-        self.authors.assign_author(author, actor);
-        self.rederive_visibility();
+        self.register_actors([(author, actor)]);
     }
 
     /// Bulk form of [`Automerge::register_actor`] for the batch importer:
@@ -657,27 +660,14 @@ impl Automerge {
         &mut self,
         pairs: impl IntoIterator<Item = (Author<'static>, usize)>,
     ) {
-        let mut pairs = pairs.into_iter().peekable();
-        let should_derive = pairs.peek().is_some();
-        for (author, actor) in pairs {
-            debug_assert_eq!(self.change_graph.seq_for_actor(actor), 0);
-            self.authors.assign_author(author, actor);
-        }
-        if should_derive {
-            self.rederive_visibility();
-        }
-    }
-
-    /// Re-derive `visibility` from the unchanged policy, without an
-    /// index rebuild. Sound only when no op's visibility can have changed
-    /// (registration of zero-op actors).
-    fn rederive_visibility(&mut self) {
-        self.visibility = visibility::FrontierVisibility::new(
-            &self.write_frontier,
+        AuthorRegistration::new(
+            &mut self.authors,
+            &mut self.visibility,
             &self.change_graph,
-            &self.authors,
-            self.actors(),
-        );
+            &self.ops.actors,
+            &self.write_frontier,
+        )
+        .register(pairs);
     }
 
     /// Ensure that the current visibility mask is the same as the mask that
@@ -729,11 +719,14 @@ impl Automerge {
     /// Remove the actor at index `actor`, which must have no changes in the
     /// document, from every actor-indexed structure.
     pub(crate) fn remove_actor(&mut self, actor: usize) {
-        let (removed, removal) = self.ops.remove_actor(actor);
-        self.actor.remove_actor(&removal, removed);
-        self.change_graph.remove_actor(&removal);
-        self.authors.remove_actor(&removal);
-        self.visibility.remove_actor(&removal);
+        ActorMaintenance::new(
+            &mut self.ops,
+            &mut self.change_graph,
+            &mut self.actor,
+            &mut self.authors,
+            &mut self.visibility,
+        )
+        .remove(actor);
     }
 
     pub(crate) fn assert_no_unused_actors(&self, panic: bool) {
@@ -752,11 +745,14 @@ impl Automerge {
         if panic {
             self.assert_no_unused_actors(cfg!(debug_assertions));
         }
-
-        // remove the offending actors
-        while let Some(idx) = self.change_graph.unused_actors().last() {
-            self.remove_actor(idx);
-        }
+        ActorMaintenance::new(
+            &mut self.ops,
+            &mut self.change_graph,
+            &mut self.actor,
+            &mut self.authors,
+            &mut self.visibility,
+        )
+        .remove_unused();
     }
 
     fn get_or_create_actor_index(&mut self) -> usize {
@@ -853,12 +849,13 @@ impl Automerge {
                 seq = self.change_graph.seq_for_actor(actor_index) + 1;
                 deps = self.get_heads();
                 scope = None;
-                if seq > 1 {
-                    let last_hash = self.get_hash(actor_index, seq - 1).unwrap();
-                    if !deps.contains(&last_hash) {
-                        deps.push(last_hash);
-                    }
-                }
+            }
+        }
+
+        if seq > 1 {
+            let last_hash = self.get_hash(actor_index, seq - 1).unwrap();
+            if !deps.contains(&last_hash) {
+                deps.push(last_hash);
             }
         }
 
@@ -866,7 +863,7 @@ impl Automerge {
         // same or a later sequence belongs to an incompatible actor branch;
         // retaining it would allow save() to encode duplicate sequence numbers.
         let actor = self.ops.actors[actor_index].clone();
-        self.queue.remove_actor_branch_from(&actor, seq);
+        self.staged.remove_actor_branch_from(&actor, seq);
 
         let start_op = NonZeroU64::MIN.saturating_add(self.change_graph.max_op());
         let author = if seq == 1 { self.author.clone() } else { None };
@@ -1315,7 +1312,7 @@ impl Automerge {
                 am.apply_changes(changes.into_iter().chain(c))?;
                 // Only allow missing deps if the first chunk was a document chunk
                 // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
-                if !am.queue.is_empty()
+                if !am.staged.is_empty()
                     && !first_chunk_was_doc
                     && options.on_partial_load == OnPartialLoad::Error
                 {
@@ -1490,8 +1487,23 @@ impl Automerge {
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self.get_changes_added(other);
+
+        let fragments = if changes.is_empty() {
+            Vec::new()
+        } else {
+            let incoming_hashes = changes.iter().map(Change::hash).collect::<HashSet<_>>();
+            let heads = other.get_heads();
+
+            let mut fragments: Vec<_> = other
+                .change_graph
+                .fragments_filtered(&heads, .., |head| incoming_hashes.contains(head))
+                .collect();
+            fragments.reverse();
+            fragments
+        };
+
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
-        self.apply_changes_log_patches(changes, patch_log)?;
+        self.apply_changes_with_fragments_log_patches(changes, fragments, patch_log)?;
         Ok(self.get_heads())
     }
 
@@ -1518,7 +1530,7 @@ impl Automerge {
         let mut bytes = doc.into_bytes();
 
         if options.retain_orphans {
-            for orphaned in self.queue.iter() {
+            for orphaned in self.staged.iter() {
                 bytes.extend(orphaned.raw_bytes());
             }
         }
@@ -1605,6 +1617,12 @@ impl Automerge {
         VisibleClock::new(self.change_graph.clock_at(heads), self.mask())
     }
 
+    /// Similar to [`Automerge::visible`], but the [`SeqClock`] is predefined
+    /// rather than calculated from a set of heads.
+    fn visible_from(&self, clock: &SeqClock) -> VisibleClock {
+        VisibleClock::new(self.change_graph.clock_from_seq_clock(clock), self.mask())
+    }
+
     /// The visible clock at the current heads.
     pub(crate) fn visible_current(&self) -> VisibleClock {
         self.visible(&self.get_heads())
@@ -1660,47 +1678,79 @@ impl Automerge {
         ReadAt::at(scope)
     }
 
-    fn get_isolated_actor_index(&mut self, level: usize) -> usize {
-        if level == 0 {
-            self.get_or_create_actor_index()
-        } else {
-            let base_actor = self.get_actor();
-            let new_actor = base_actor.with_concurrency(level);
-            self.put_actor(new_actor)
+    /// Choose an actor for a transaction isolated at the heads `seq_clock` was
+    /// built from, without mutating the document.
+    ///
+    /// Prefers `base_index`, then successive concurrency actors derived from it:
+    ///   * [`ChosenIsolatedActor::Existing`] for an actor already in the table
+    ///     whose latest change is in the ancestry, or
+    ///   * [`ChosenIsolatedActor::Fresh`] for the first derived actor absent from
+    ///     the table, which therefore has no changes.
+    fn choose_isolation_actor(
+        &self,
+        base_index: usize,
+        seq_clock: &SeqClock,
+    ) -> ChosenIsolatedActor {
+        if self
+            .change_graph
+            .is_actor_chain_within(base_index, seq_clock)
+        {
+            return ChosenIsolatedActor::Existing(base_index);
         }
+        let base = self.ops.get_actor(base_index).clone();
+        (1..)
+            .find_map(|level| {
+                let derived = base.with_concurrency(level);
+                match self.ops.lookup_actor(&derived) {
+                    None => Some(ChosenIsolatedActor::Fresh(derived)),
+                    Some(idx) if self.change_graph.is_actor_chain_within(idx, seq_clock) => {
+                        Some(ChosenIsolatedActor::Existing(idx))
+                    }
+                    Some(_) => None,
+                }
+            })
+            .expect("unused concurrency levels are unbounded")
     }
 
+    /// Selects an actor for a transaction isolated at `heads` (see
+    /// [`Automerge::choose_isolation_actor`]), returning its next change sequence
+    /// number and operation visibility clock.
+    ///
+    /// For an unmasked actor, adjusts the returned clock to make its new
+    /// operations visible within the transaction. For a masked actor, leaves
+    /// the clock unchanged so its operations remain hidden.
     pub(crate) fn isolate_actor(&mut self, heads: &[ChangeHash]) -> Isolation {
-        let mut actor_index = self.get_isolated_actor_index(0);
-        let mut clock = self.visible(heads);
+        // This may widen the actor table, so it must always happen before
+        // computing the `seq_clock` below.
+        let base_index = self.get_or_create_actor_index();
+        let seq_clock = self.change_graph.seq_clock_for_heads(heads);
 
-        for i in 1.. {
-            let max_op = self.change_graph.max_op_for_actor(actor_index);
-            // Only actors whose latest change is in the isolation scope can safely
-            // advance their sequence under it. Masked actors can also be selected,
-            // but their counter is not isolated: doing so would unmask their own
-            // ops. A fresh actor belongs to a masked local author if `transaction_args`
-            // would mark it masked.
-            if max_op == 0 || clock.covers(&OpId::new(max_op, actor_index)) {
-                let masked = self.visibility.hides(&OpId::new(max_op + 1, actor_index))
-                    || (max_op == 0
-                        && self.author.as_ref().is_some_and(|a| {
-                            self.write_frontier
-                                .get_write_frontier_for_author(a)
-                                .is_some()
-                        }));
-                if !masked {
-                    clock.isolate(actor_index);
-                }
-                break;
+        let (actor_index, mut clock) = match self.choose_isolation_actor(base_index, &seq_clock) {
+            // The actor is already in the actor table, so actor indices are
+            // unchanged. Derive the `VisibleClock` from `seq_clock`.
+            ChosenIsolatedActor::Existing(idx) => (idx, self.visible_from(&seq_clock)),
+            // The actor table is modified by `put_actor`, making `seq_clock`
+            // stale. Build a fresh `VisibleClock`.
+            ChosenIsolatedActor::Fresh(actor_id) => {
+                let idx = self.put_actor(actor_id);
+                (idx, self.visible(heads))
             }
-            actor_index = self.get_isolated_actor_index(i);
-            // need to recompute the clock b/c the actor indexes may have changed
-            clock = self.visible(heads);
+        };
+
+        // Preserve masking, including for a fresh actor whose local author
+        // already has a write frontier.
+        let max_op = self.change_graph.max_op_for_actor(actor_index);
+        let masked = self.visibility.hides(&OpId::new(max_op + 1, actor_index))
+            || (max_op == 0
+                && self.author.as_ref().is_some_and(|a| {
+                    self.write_frontier
+                        .get_write_frontier_for_author(a)
+                        .is_some()
+                }));
+        if !masked {
+            clock.isolate(actor_index);
         }
-
         let seq = self.change_graph.seq_for_actor(actor_index) + 1;
-
         Isolation {
             actor_index,
             seq,
@@ -1718,51 +1768,27 @@ impl Automerge {
     /// visibility [`Mask`] — publishing that is the caller's single
     /// [`Automerge::republish_mask`] step after the op set is consistent.
     pub(crate) fn update_history(&mut self, change: &Change) -> HistoryUpdate {
-        self.update_deps(change);
-
-        let actor_index = self
-            .ops
-            .lookup_actor(change.actor_id())
-            .expect("Change's actor not already in the document");
-
-        let hash = self
-            .change_graph
-            .add_change(change, actor_index, &mut self.authors)
-            .expect("Change's deps should already be in the document");
-
-        // This change was a pending boundary head. Report it so the caller
-        // republishes the visibility once the op set is consistent.
-        if self.visibility.is_pending(&hash) {
-            HistoryUpdate::BoundaryResolved
-        } else {
-            HistoryUpdate::Unchanged
-        }
-    }
-
-    pub(crate) fn put_actor_ref(&mut self, actor: &ActorId) -> usize {
-        self.put_actor(actor.clone())
+        History::new(
+            &mut self.change_graph,
+            &mut self.deps,
+            &mut self.authors,
+            &self.ops.actors,
+            &self.visibility,
+        )
+        .update(change)
     }
 
     /// Ensure `actor` is in the actor table and return its index, shifting
     /// every actor-indexed structure if it had to be inserted.
     pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
-        match self.ops.insert_actor(actor) {
-            ActorInsert::Existing(idx) => idx,
-            ActorInsert::Inserted(shift) => {
-                self.change_graph.insert_actor(&shift);
-                self.actor.shift(&shift);
-                self.authors.insert_actor(&shift);
-                self.visibility.insert_actor(&shift);
-                shift.index()
-            }
-        }
-    }
-
-    fn update_deps(&mut self, change: &Change) {
-        for d in change.deps() {
-            self.deps.remove(d);
-        }
-        self.deps.insert(change.hash());
+        ActorMaintenance::new(
+            &mut self.ops,
+            &mut self.change_graph,
+            &mut self.actor,
+            &mut self.authors,
+            &mut self.visibility,
+        )
+        .insert(actor)
     }
 
     #[doc(hidden)]
@@ -2489,7 +2515,7 @@ impl Automerge {
         start: impl Iterator<Item = ChangeHash>,
     ) -> Vec<ChangeHash> {
         let queued_changes = self
-            .queue
+            .staged
             .iter()
             .map(|change| (change.hash(), change))
             .collect::<HashMap<_, _>>();
@@ -2726,7 +2752,7 @@ impl ReadDoc for Automerge {
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
-        let queued = self.queue.iter().map(|change| change.hash());
+        let queued = self.staged.iter().map(|change| change.hash());
         self.missing_deps_from(queued.chain(heads.iter().copied()))
     }
 
@@ -2797,4 +2823,13 @@ pub(crate) struct Isolation {
     actor_index: usize,
     seq: u64,
     clock: VisibleClock,
+}
+
+/// A candidate actor for an isolated transaction.
+enum ChosenIsolatedActor {
+    /// The actor is already in the actor table, so actor indices are unchanged.
+    Existing(usize),
+    /// The actor is absent from the actor table, so it has no changes and no
+    /// index yet.
+    Fresh(ActorId),
 }
