@@ -3182,6 +3182,12 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let ghost t0 = *self;
         let ghost hi = chunk_at(1, b, r);
         proof { lemma_chunk(num as int, b, r, 0); }
+        // what is left of `aggs` is the first chunk, in the room of all of
+        // them: the leaf takes a copy of just its length (as `split_off`
+        // gives), not that room for as long as it lives
+        let ghost left = aggs@;
+        let aggs = aggs.split_off(0);
+        proof { assert(aggs@ =~= left); }
         let slab_count = aggs.len();
         proof { lemma_sum_len_sub(all, 0, hi); }
         let agg = Self::fold_leaf(&aggs);
@@ -3367,6 +3373,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let ghost t0 = *self;
         let ghost hi = chunk_at(1, b, r);
         let ghost rest = all.subrange(hi, n);
+        // the first chunk, as in `split_leaf`: a copy of just its length
+        let ghost left = children@;
+        let children = children.split_off(0);
+        proof { assert(children@ =~= left); }
         let ghost first = children@;
         proof {
             lemma_chunk(num as int, b, r, 0);
