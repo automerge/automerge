@@ -79,7 +79,7 @@ pub(crate) trait FuzzTarget: Sized {
 }
 
 /// Cumulative slab boundaries of a column.
-fn column_boundaries<V: ColumnValueRef<C>, C: crate::Codec, K: crate::VIndex<V, C>>(
+fn column_boundaries<V: ColumnValueRef<C>, C: crate::Codec, K: crate::Index<V, C>>(
     col: &Column<V, C, K>,
 ) -> Vec<usize> {
     let mut acc = 0;
@@ -98,7 +98,7 @@ fn column_boundaries<V: ColumnValueRef<C>, C: crate::Codec, K: crate::VIndex<V, 
 /// counts the slabs). Where the budget can't be kept (`cap` is false)
 /// that check would fail for it alone, and only the saved bytes are
 /// checked.
-fn check_column<V: ColumnValueRef<C>, C: crate::Codec, K: crate::VIndex<V, C>>(
+fn check_column<V: ColumnValueRef<C>, C: crate::Codec, K: crate::Index<V, C>>(
     col: &Column<V, C, K>,
     cap: bool,
 ) {

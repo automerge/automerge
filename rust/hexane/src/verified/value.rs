@@ -9,11 +9,11 @@
 //!
 //! [`RleValue`] is proved for `u64` and `i64`, which are the codec's own
 //! numbers, and for every type that says how it is one of those
-//! ([`VNewtype`]): `u32`, `i32`, `usize` and `NonZeroU32` here, and a
+//! ([`Newtype`]): `u32`, `i32`, `usize` and `NonZeroU32` here, and a
 //! client's own types.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`value/imp.rs`), which has
 //! its contract word for word and is proved there.
 
@@ -39,7 +39,7 @@ use imp::*;
 #[allow(unused_imports)]
 pub(crate) use imp::{lemma_opt_sizes, lemma_plain_sizes};
 #[allow(unused_imports)]
-pub(crate) use imp::{VOps, VOptOps, VOptWrite, VWrite};
+pub(crate) use imp::{Ops, OptOps, OptWrite, Write};
 
 verus! {
 
@@ -47,7 +47,7 @@ verus! {
 
 /// A value that packs as one to ten bytes: how, with that specified and
 /// proved. The types are this crate's numbers (`u64` and `i64`), those
-/// that say which of these they are ([`VNewtype`]), and a client's own
+/// that say which of these they are ([`Newtype`]), and a client's own
 /// with an encoding of its own.
 ///
 /// The proofs about a column of the type rest on what this trait's
@@ -246,7 +246,7 @@ impl RleValue for i64 {
 /// gives back the value `to_base` was given and no other (and, if it
 /// writes a [`from_valid_base`](Self::from_valid_base) of its own, that
 /// it gives what `from_base` does).
-pub trait VNewtype: Copy + Sized {
+pub trait Newtype: Copy + Sized {
     /// The type it is stored as.
     type Base: RleValue;
 
@@ -297,7 +297,7 @@ pub trait VNewtype: Copy + Sized {
     }
 }
 
-impl<T: VNewtype> RleValue for T {
+impl<T: Newtype> RleValue for T {
     open spec fn enc<C: Codec>(v: T) -> Seq<u8> {
         T::Base::enc::<C>(T::base(v))
     }
@@ -345,7 +345,7 @@ impl<T: VNewtype> RleValue for T {
     }
 }
 
-impl VNewtype for u32 {
+impl Newtype for u32 {
     type Base = u64;
 
     open spec fn base(v: u32) -> u64 {
@@ -371,7 +371,7 @@ impl VNewtype for u32 {
     }
 }
 
-impl VNewtype for i32 {
+impl Newtype for i32 {
     type Base = i64;
 
     open spec fn base(v: i32) -> i64 {
@@ -397,7 +397,7 @@ impl VNewtype for i32 {
     }
 }
 
-impl VNewtype for usize {
+impl Newtype for usize {
     type Base = u64;
 
     open spec fn base(v: usize) -> u64 {
@@ -426,7 +426,7 @@ impl VNewtype for usize {
 /// Every `u32` but zero. What a `NonZeroU32` is to Verus comes from
 /// vstd's specifications of `NonZero`: its number (`v@`), that no two
 /// have the same, and that `NonZeroU32::new` refuses zero alone.
-impl VNewtype for NonZeroU32 {
+impl Newtype for NonZeroU32 {
     type Base = u32;
 
     open spec fn base(v: NonZeroU32) -> u32 {

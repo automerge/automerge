@@ -21,20 +21,20 @@ use vstd::prelude::*;
 verus! {
 
 /// A `bool` column under codec `C`: the name its slab model and readers
-/// take (`BoolModel<VB<C>>`), for the counts `VCounts<C>`.
+/// take (`BoolModel<Bools<C>>`), for the counts `Counts<C>`.
 #[verifier::reject_recursive_types(C)]
-pub struct VB<C>(PhantomData<C>);
+pub struct Bools<C>(PhantomData<C>);
 
 /// The counts of a `bool` column under codec `C`: unsigned numbers of
 /// the codec.
 #[verifier::reject_recursive_types(C)]
-pub struct VCounts<C>(PhantomData<C>);
+pub struct Counts<C>(PhantomData<C>);
 
-impl<C: Codec> CountsOf for VB<C> {
-    type K = VCounts<C>;
+impl<C: Codec> CountsOf for Bools<C> {
+    type K = Counts<C>;
 }
 
-impl<C: Codec> CountOps for VCounts<C> {
+impl<C: Codec> CountOps for Counts<C> {
     open spec fn enc(n: u64) -> Seq<u8> {
         C::enc_u(n)
     }

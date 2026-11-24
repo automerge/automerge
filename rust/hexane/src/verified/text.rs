@@ -55,7 +55,7 @@
 //! of at most `usize::MAX` bytes.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`text/imp.rs`), which has
 //! its contract word for word and is proved there.
 
@@ -69,7 +69,7 @@ use super::codec::Codec;
 #[cfg(verus_keep_ghost)]
 use super::model::Model;
 use super::model::Plain;
-use super::{seal, ColumnValueRef, Owned, VForm, VGet, VSpec};
+use super::{seal, ColumnValueRef, Form, Owned, VGet, VSpec};
 #[cfg(verus_keep_ghost)]
 use crate::rle::lift::Lift;
 #[cfg(verus_keep_ghost)]
@@ -94,7 +94,7 @@ use imp::*;
 #[allow(unused_imports)]
 pub(crate) use imp::{lemma_opt_text_sizes, lemma_text_sizes};
 #[allow(unused_imports)]
-pub(crate) use imp::{TextCow, VOptTextOps, VOptTextWrite, VTextOps, VTextWrite};
+pub(crate) use imp::{OptTextOps, OptTextWrite, TextCow, TextOps, TextWrite};
 
 verus! {
 
@@ -148,7 +148,7 @@ impl VSpec for String {
     }
 }
 
-impl<'a> VForm<'a> for String {
+impl<'a> Form<'a> for String {
     type Get = &'a str;
 }
 
@@ -251,7 +251,7 @@ impl VSpec for Option<String> {
     }
 }
 
-impl<'a> VForm<'a> for Option<String> {
+impl<'a> Form<'a> for Option<String> {
     type Get = Option<&'a str>;
 }
 

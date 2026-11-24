@@ -3,12 +3,12 @@
 //! [`DeltaColumn::edit_at`] open.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`edit/imp.rs`), which has
 //! its contract word for word and is proved there.
 
 #[cfg(verus_keep_ghost)]
-use super::{all_dom, delta_runs_fit, delta_runs_values, vals, VDelta, DE, DX};
+use super::{all_dom, delta_runs_fit, delta_runs_values, vals, Delta, DE, DX};
 use super::{DKind, DeltaColumn, DeltaValue, ECore};
 #[cfg(verus_keep_ghost)]
 use crate::delta::ddomain::DeltaWrite;
@@ -47,7 +47,7 @@ verus! {
 /// another, and [`finish`](Self::finish) hands the edited column back:
 ///
 /// ```
-/// use hexane::verified::DeltaColumn;
+/// use hexane::DeltaColumn;
 ///
 /// let mut col = DeltaColumn::<u64>::from_values(&[10, 20, 30, 40, 50]);
 /// let mut e = col.edit();

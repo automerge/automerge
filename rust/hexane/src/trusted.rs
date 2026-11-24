@@ -1,6 +1,6 @@
 //! What the verified API takes on trust, all of it in one place.
 //!
-//! Verus checks every function on a path of `hexane::verified` but those
+//! Verus checks every function on a path of the crate's API but those
 //! here: it takes each as it is, its body unchecked and its contract
 //! assumed. Most assume nothing but that they exist: the helpers that
 //! panic, whose contract is that they do not return (which a panic does
@@ -17,8 +17,8 @@
 //!
 //! Besides what is here, the verified API rests on Verus, on its solver
 //! Z3, and on Verus's library `vstd` and its specifications of the
-//! standard library: the module docs of `hexane::verified` ("What is
-//! trusted") say which of those it uses.
+//! standard library: the crate's documentation ("What is trusted") says
+//! which of those it uses.
 //!
 #![allow(dead_code)]
 
@@ -860,7 +860,7 @@ pub(crate) fn bad_utf8() -> PackError {
 
 // from src/verified/value.rs
 /// The error of a
-/// [`VNewtype::from_base`](crate::verified::VNewtype::from_base) for a
+/// [`Newtype::from_base`](crate::Newtype::from_base) for a
 /// base value its type has no value for. Nothing is assumed of it.
 #[verifier::external_body]
 #[cold]
@@ -870,7 +870,7 @@ pub fn refused(msg: &'static str) -> PackError {
 
 // from src/verified/mod.rs
 /// The error of a
-/// [`IterState::try_resume`](crate::verified::IterState::try_resume)
+/// [`IterState::try_resume`](crate::IterState::try_resume)
 /// on a column that the state does not fit. Nothing is assumed of it.
 #[verifier::external_body]
 #[cold]

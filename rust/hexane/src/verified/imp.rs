@@ -34,7 +34,7 @@ use crate::rle::enc::REncoder;
 #[cfg(verus_keep_ghost)]
 use crate::verified::{saved, saved_values};
 use crate::{Leb128, LoadOpts, MaybeFill, PackError, Run};
-use counts::VB;
+use counts::Bools;
 use kind::KCore;
 use model::{Model, Streams};
 use std::cmp::Ordering;
@@ -42,7 +42,7 @@ use std::marker::PhantomData;
 use std::ops::{Bound, Range, RangeBounds};
 #[cfg(verus_keep_ghost)]
 use value::{lemma_opt_sizes, lemma_plain_sizes};
-use value::{VOps, VOptOps, VOptWrite, VWrite};
+use value::{Ops, OptOps, OptWrite, Write};
 #[allow(unused_imports)]
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -295,7 +295,7 @@ pub(crate) trait Owned<C>: seal::Sealed<C> {
     type N: Encodes<Self::E>;
 
     /// A value read from a column, owned.
-    fn to_owned<'a>(g: <Self as VForm<'a>>::Get) -> (v: Self)
+    fn to_owned<'a>(g: <Self as Form<'a>>::Get) -> (v: Self)
         ensures
             Self::sv_of(v) == g.sv(),
     ;
@@ -315,13 +315,13 @@ pub(crate) trait Owned<C>: seal::Sealed<C> {
 }
 
 impl<T: RleValue, C: Codec> seal::Sealed<C> for T {
-    type X = RleReads<VOps<T, C>>;
+    type X = RleReads<Ops<T, C>>;
 
-    type E = RleModel<VWrite<T, C>>;
+    type E = RleModel<Write<T, C>>;
 }
 
 impl<T: RleValue, C: Codec> Owned<C> for T {
-    type N = REncoder<'static, VWrite<T, C>>;
+    type N = REncoder<'static, Write<T, C>>;
 
     #[inline(always)]
     fn to_owned<'a>(g: T) -> (v: T) {
@@ -340,13 +340,13 @@ impl<T: RleValue, C: Codec> Owned<C> for T {
 }
 
 impl<T: RleValue, C: Codec> seal::Sealed<C> for Option<T> {
-    type X = RleReads<VOptOps<T, C>>;
+    type X = RleReads<OptOps<T, C>>;
 
-    type E = RleModel<VOptWrite<T, C>>;
+    type E = RleModel<OptWrite<T, C>>;
 }
 
 impl<T: RleValue, C: Codec> Owned<C> for Option<T> {
-    type N = REncoder<'static, VOptWrite<T, C>>;
+    type N = REncoder<'static, OptWrite<T, C>>;
 
     #[inline(always)]
     fn to_owned<'a>(g: Option<T>) -> (v: Option<T>) {
@@ -365,13 +365,13 @@ impl<T: RleValue, C: Codec> Owned<C> for Option<T> {
 }
 
 impl<C: Codec> seal::Sealed<C> for bool {
-    type X = BoolReads<VB<C>>;
+    type X = BoolReads<Bools<C>>;
 
-    type E = BoolModel<VB<C>>;
+    type E = BoolModel<Bools<C>>;
 }
 
 impl<C: Codec> Owned<C> for bool {
-    type N = BoolRecoder<VB<C>>;
+    type N = BoolRecoder<Bools<C>>;
 
     #[inline(always)]
     fn to_owned<'a>(g: bool) -> (v: bool) {
@@ -395,12 +395,12 @@ impl<C: Codec> Owned<C> for bool {
 /// the order of the values. Nothing here is trusted: the comparison is
 /// the value type's own, which is verified.
 #[verifier::reject_recursive_types(C)]
-pub(super) struct VProbe<'t, V: ColumnValueRef<C>, C: Codec> {
+pub(super) struct ValueProbe<'t, V: ColumnValueRef<C>, C: Codec> {
     pub(super) target: Get<'t, V>,
     pub(super) _c: PhantomData<C>,
 }
 
-impl<'a, 't, V: ColumnValueRef<C>, C: Codec> Probe<Get<'a, V>> for VProbe<'t, V, C> {
+impl<'a, 't, V: ColumnValueRef<C>, C: Codec> Probe<Get<'a, V>> for ValueProbe<'t, V, C> {
     open(in crate::verified) spec fn side(&self, v: Get<'a, V>) -> int {
         if V::below(v.sv(), self.target.sv()) {
             -1
@@ -466,7 +466,7 @@ pub(super) fn seek_sorted<'a, 't, V: ColumnValueRef<C>, C: Codec, W: SlabAggrega
     let ghost w = it.out::<V::X>(slabs@);
     let ghost p0 = it.pos;
     let mut it = it;
-    let probe = VProbe::<V, C> { target, _c: PhantomData };
+    let probe = ValueProbe::<V, C> { target, _c: PhantomData };
     let find = |t: usize| -> (r: (usize, usize))
         requires
             index.ok(),
@@ -540,12 +540,12 @@ pub(super) fn seek_sorted<'a, 't, V: ColumnValueRef<C>, C: Codec, W: SlabAggrega
 #[verifier::reject_recursive_types(V)]
 #[verifier::reject_recursive_types(C)]
 #[verifier::reject_recursive_types(F)]
-pub(super) struct VMap<'f, V, C, F> {
+pub(super) struct MapFn<'f, V, C, F> {
     pub(super) f: &'f F,
     pub(super) _c: PhantomData<(V, C)>,
 }
 
-impl<'a, 'f, V: ColumnValueRef<C>, C: Codec, F: Fn(V) -> V> Mapping<Get<'a, V>, <V::N as Encodes<V::E>>::In> for VMap<
+impl<'a, 'f, V: ColumnValueRef<C>, C: Codec, F: Fn(V) -> V> Mapping<Get<'a, V>, <V::N as Encodes<V::E>>::In> for MapFn<
     'f,
     V,
     C,
@@ -984,7 +984,7 @@ pub(super) proof fn lemma_after_edits_impl(n: usize, k: nat)
     }
 }
 
-impl<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
+impl<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
     pub(super) fn extend_impl<I: IntoIterator<Item = Get<'v, V>>>(&mut self, iter: I)
         ensures
             gives(iter, |xs: Seq<I::Item>| final(self)@ == old(self)@ + VGet::svs(xs)),
@@ -1003,7 +1003,7 @@ impl<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     }
 }
 
-impl<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
+impl<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
     pub(super) fn from_iter_impl<I: IntoIterator<Item = Get<'v, V>>>(iter: I) -> (s: Self)
         ensures
             // what Verus asks of every `FromIterator`
@@ -1057,7 +1057,7 @@ impl<V: ColumnValueRef<C>, C: Codec> Column<V, C> {
     }
 }
 
-impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
     pub(super) fn new_impl() -> (r: Self)
         ensures
             r@ == Seq::<V::S>::empty(),
@@ -1147,7 +1147,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     }
 }
 
-impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
     #[inline(always)]
     pub(super) fn len_impl(&self) -> (r: usize)
         ensures
@@ -1809,7 +1809,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
             final(self).edits() == after_edit(old(self).edits()),
     {
         let counter = self.core.counter();
-        let m = VMap::<V, C, F> { f: &f, _c: PhantomData };
+        let m = MapFn::<V, C, F> { f: &f, _c: PhantomData };
         let ghost o = vals_of::<V::X>(self.core.slabs_spec());
         self.core.lemma_column();
         proof {
@@ -1822,7 +1822,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
                 assert(self@[i] == o[i].sv());
             }
         }
-        let (core, Ghost(ws)) = self.core.remap::<V::X, V::N, VMap<V, C, F>>(&m);
+        let (core, Ghost(ws)) = self.core.remap::<V::X, V::N, MapFn<V, C, F>>(&m);
         proof {
             <Held<V, C> as VGet>::lemma_svs(core@);
             assert forall|i: int| 0 <= i < o.len() implies mapped(
@@ -1965,7 +1965,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     }
 }
 
-impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
     pub(super) fn load_impl(bytes: &[u8]) -> (r: Result<Self, PackError>)
         ensures
             Column::<V, C>::loadable(bytes@) && K::keeps(Column::<V, C>::values(bytes@)) ==> r is Ok,
@@ -2126,7 +2126,7 @@ pub(super) proof fn lemma_runs_of_values_impl<G: VGet>(o: Seq<G>)
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Iter<'a, V, C, K> {
     /// The iterator stands in the slabs of its column, in the column or
     /// at its end.
     #[verifier::type_invariant]
@@ -2779,7 +2779,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Iter<'a, V, C, K> {
     #[inline(always)]
     pub(super) fn next_impl(&mut self) -> (r: Option<Get<'a, V>>)
         ensures
@@ -2959,7 +2959,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Iter<'a, V, C, K> {
     pub(super) fn clone_impl(&self) -> (r: Self)
         ensures
             r.items() == self.items(),
@@ -2975,7 +2975,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Iter<'a, V, C, K> {
     pub(super) fn default_impl() -> (r: Self)
         ensures
             r.items().len() == 0,
@@ -2997,7 +2997,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
 }
 
 impl IterState {
-    pub(super) proof fn lemma_fits_impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(&self, column: &Column<V, C, K>)
+    pub(super) proof fn lemma_fits_impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(&self, column: &Column<V, C, K>)
         requires
             self.fits(column),
         ensures
@@ -3005,7 +3005,7 @@ impl IterState {
     {
     }
 
-    pub(super) fn try_resume_impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(&self, column: &'a Column<V, C, K>) -> (r: Result<
+    pub(super) fn try_resume_impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(&self, column: &'a Column<V, C, K>) -> (r: Result<
         Iter<'a, V, C, K>,
         PackError,
     >)
@@ -3048,7 +3048,7 @@ impl IterState {
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Runs<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Runs<'a, V, C, K> {
     #[inline(always)]
     pub(super) fn next_impl(&mut self) -> (r: Option<Run<Get<'a, V>>>)
         ensures
@@ -3104,8 +3104,8 @@ pub(super) proof fn vvalue_lemma_size_t<T: RleValue, C: Codec>(d: Seq<u8>)
     ensures
         d.len() <= <T as ColumnValueRef<C>>::size_bound(saved_values::<T, C>(d)),
 {
-    <RleModel<VWrite<T, C>> as Model<RleReads<VOps<T, C>>>>::lemma_size(d);
-    lemma_plain_sizes::<T, C>(slab_values::<VOps<T, C>>(d));
+    <RleModel<Write<T, C>> as Model<RleReads<Ops<T, C>>>>::lemma_size(d);
+    lemma_plain_sizes::<T, C>(slab_values::<Ops<T, C>>(d));
 }
 
 #[inline(always)]
@@ -3127,8 +3127,8 @@ pub(super) proof fn vvalue_lemma_size_option_t<T: RleValue, C: Codec>(d: Seq<u8>
     ensures
         d.len() <= <Option<T> as ColumnValueRef<C>>::size_bound(saved_values::<Option<T>, C>(d)),
 {
-    <RleModel<VOptWrite<T, C>> as Model<RleReads<VOptOps<T, C>>>>::lemma_size(d);
-    lemma_opt_sizes::<T, C>(slab_values::<VOptOps<T, C>>(d));
+    <RleModel<OptWrite<T, C>> as Model<RleReads<OptOps<T, C>>>>::lemma_size(d);
+    lemma_opt_sizes::<T, C>(slab_values::<OptOps<T, C>>(d));
 }
 
 #[inline(always)]
@@ -3181,13 +3181,13 @@ pub(super) fn vvalue_compare_bool(a: bool, b: bool) -> (r: Ordering)
 
 } // verus!
 
-impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> std::fmt::Debug for Runs<'_, V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> std::fmt::Debug for Runs<'_, V, C, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Runs").field(&self.0).finish()
     }
 }
 
-impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> std::fmt::Debug for Iter<'_, V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> std::fmt::Debug for Iter<'_, V, C, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Iter")
             .field("pos", &self.it.pos)
@@ -3199,7 +3199,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> std::fmt::Debug for Iter<'
 // The two functions of this block print and compare, and Verus does not
 // check them. They read the column through checked functions that ask
 // nothing of a caller.
-impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
     /// Print a line for each slab, as [`Column`] does:
     /// where in the column the slab starts, how many values and runs it
     /// holds, its first run and its last.
@@ -3293,7 +3293,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     }
 }
 
-impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> std::fmt::Debug for Column<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> std::fmt::Debug for Column<V, C, K> {
     /// How many values and how many slabs, as `Column` prints itself.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Column")
@@ -3303,7 +3303,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> std::fmt::Debug for Column
     }
 }
 
-// one budget for both APIs
+// the API's segment budget is the core's
 const _: () = assert!(MAX_SEG == crate::column::DEFAULT_MAX_SEG);
 
 #[cfg(test)]

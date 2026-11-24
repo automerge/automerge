@@ -77,7 +77,7 @@ pub(super) proof fn lemma_wrap(x: int, y: int, m: int)
 
 } // verus!
 
-/// [`VSum`] and [`UnsignedPrefix`] for an unsigned type: its integers are those
+/// [`Sum`] and [`UnsignedPrefix`] for an unsigned type: its integers are those
 /// from zero, and it wraps by the remainder.
 macro_rules! unsigned_sum {
     ($t:ty) => {
@@ -87,7 +87,7 @@ macro_rules! unsigned_sum {
 
         }
 
-        impl VSum for $t {
+        impl Sum for $t {
             open spec fn as_int(self) -> int {
                 self as int
             }
@@ -211,12 +211,12 @@ impl seal::SumSeal for i128 {
 /// has, and what they add up to, wrapping.
 #[doc(hidden)]
 #[derive(Debug, Default)]
-pub struct SumWeight<P: VSum> {
+pub struct SumWeight<P: Sum> {
     pub len: usize,
     pub sum: P,
 }
 
-impl<P: VSum> Clone for SumWeight<P> {
+impl<P: Sum> Clone for SumWeight<P> {
     #[inline(always)]
     fn clone(&self) -> (r: Self)
         ensures
@@ -226,11 +226,11 @@ impl<P: VSum> Clone for SumWeight<P> {
     }
 }
 
-impl<P: VSum> Copy for SumWeight<P> {
+impl<P: Sum> Copy for SumWeight<P> {
 
 }
 
-impl<P: VSum> SlabAggregate for SumWeight<P> {
+impl<P: Sum> SlabAggregate for SumWeight<P> {
     open spec fn spec_len(&self) -> nat {
         self.len as nat
     }
@@ -283,7 +283,7 @@ impl<P: VSum> SlabAggregate for SumWeight<P> {
     }
 }
 
-impl<P: VSum> PrefixAggregate for SumWeight<P> {
+impl<P: Sum> PrefixAggregate for SumWeight<P> {
     type Prefix = P;
 
     open spec fn spec_prefix(&self) -> P {
@@ -330,7 +330,7 @@ impl<P: VSum> PrefixAggregate for SumWeight<P> {
 
 /// The laws the shared proofs of running sums rest on, which wrapping
 /// arithmetic has.
-impl<P: VSum> PrefixWeight for SumWeight<P> {
+impl<P: Sum> PrefixWeight for SumWeight<P> {
     open spec fn prefix_minus(a: P, b: P) -> P {
         P::of_int(a.as_int() - b.as_int())
     }
@@ -351,7 +351,7 @@ impl<P: VSum> PrefixWeight for SumWeight<P> {
     }
 }
 
-impl<P: VSum> OrdPrefix for SumWeight<P> {
+impl<P: Sum> OrdPrefix for SumWeight<P> {
     open spec fn prefix_le(a: P, b: P) -> bool {
         a.as_int() <= b.as_int()
     }
@@ -368,7 +368,7 @@ impl<P: VSum> OrdPrefix for SumWeight<P> {
 }
 
 /// `n` copies of a sum, added: the sum times `n`, wrapping.
-pub(super) proof fn lemma_reps<P: VSum>(n: nat, c: P)
+pub(super) proof fn lemma_reps<P: Sum>(n: nat, c: P)
     ensures
         reps::<SumWeight<P>>(n, c) == P::of_int(c.as_int() * n),
     decreases n,
@@ -405,11 +405,11 @@ pub(super) fn u32_room_len() -> (n: usize)
     (u32::MAX as usize).saturating_add(2)
 }
 
-impl<T: VAmount> seal::SummedSeal for T {
+impl<T: Amount> seal::SummedSeal for T {
 
 }
 
-impl<T: VAmount> seal::SummedSeal for Option<T> {
+impl<T: Amount> seal::SummedSeal for Option<T> {
 
 }
 
@@ -656,7 +656,7 @@ pub(crate) proof fn lemma_vsum<'a, V: PrefixValue>(vs: Seq<Get<'a, V>>)
 /// Where a sum and a second, wrapped, are what the shared proofs give
 /// for two integers that fit, and so does their difference, the second
 /// is the difference.
-pub(crate) proof fn lemma_sum_diff<P: VSum>(base: P, t: P, a: int, b: int)
+pub(crate) proof fn lemma_sum_diff<P: Sum>(base: P, t: P, a: int, b: int)
     requires
         base == P::of_int(a),
         <SumWeight<P> as PrefixAggregate>::prefix_plus(base, t) == P::of_int(b),
@@ -1211,7 +1211,7 @@ impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> LoadWeigh<'a, V::E, V::X,
 #[inline(always)]
 pub(super) fn vsum_zero_i128() -> (r: i128)
     ensures
-        r == <i128 as VSum>::of_int(0),
+        r == <i128 as Sum>::of_int(0),
 {
     proof {
         lemma_wrap(0, 0, u128::MAX + 1);
@@ -1222,7 +1222,7 @@ pub(super) fn vsum_zero_i128() -> (r: i128)
 #[inline(always)]
 pub(super) fn vsum_w_add_i128(this: i128, b: i128) -> (r: i128)
     ensures
-        r == <i128 as VSum>::of_int(<i128 as VSum>::as_int(this) + b.as_int()),
+        r == <i128 as Sum>::of_int(<i128 as Sum>::as_int(this) + b.as_int()),
 {
     proof {
         lemma_wrap(this + b, 0, u128::MAX + 1);
@@ -1233,7 +1233,7 @@ pub(super) fn vsum_w_add_i128(this: i128, b: i128) -> (r: i128)
 #[inline(always)]
 pub(super) fn vsum_w_sub_i128(this: i128, b: i128) -> (r: i128)
     ensures
-        r == <i128 as VSum>::of_int(<i128 as VSum>::as_int(this) - b.as_int()),
+        r == <i128 as Sum>::of_int(<i128 as Sum>::as_int(this) - b.as_int()),
 {
     proof {
         lemma_wrap(this - b, 0, u128::MAX + 1);
@@ -1243,10 +1243,10 @@ pub(super) fn vsum_w_sub_i128(this: i128, b: i128) -> (r: i128)
 
 pub(super) proof fn vamount_lemma_room_u64()
     ensures
-        <u64 as VAmount>::room() >= 1,
-        <u64 as VAmount>::room() * <u64 as VAmount>::amount_max() <= <u64 as VAmount>::Sum::hi(),
-        <u64 as VAmount>::Sum::lo() == 0 || -(<u64 as VAmount>::room() * <u64 as VAmount>::amount_max()) >= <u64 as VAmount>::Sum::lo(),
-        <u64 as VAmount>::Sum::lo() == 0 || <u64 as VAmount>::room() >= usize::MAX,
+        <u64 as Amount>::room() >= 1,
+        <u64 as Amount>::room() * <u64 as Amount>::amount_max() <= <u64 as Amount>::Sum::hi(),
+        <u64 as Amount>::Sum::lo() == 0 || -(<u64 as Amount>::room() * <u64 as Amount>::amount_max()) >= <u64 as Amount>::Sum::lo(),
+        <u64 as Amount>::Sum::lo() == 0 || <u64 as Amount>::room() >= usize::MAX,
 {
     lemma_mul_inequality(usize::MAX as int, u64::MAX as int, u64::MAX as int);
     assert(u64::MAX * u64::MAX <= u128::MAX) by (compute);
@@ -1254,10 +1254,10 @@ pub(super) proof fn vamount_lemma_room_u64()
 
 pub(super) proof fn vamount_lemma_room_i64()
     ensures
-        <i64 as VAmount>::room() >= 1,
-        <i64 as VAmount>::room() * <i64 as VAmount>::amount_max() <= <i64 as VAmount>::Sum::hi(),
-        <i64 as VAmount>::Sum::lo() == 0 || -(<i64 as VAmount>::room() * <i64 as VAmount>::amount_max()) >= <i64 as VAmount>::Sum::lo(),
-        <i64 as VAmount>::Sum::lo() == 0 || <i64 as VAmount>::room() >= usize::MAX,
+        <i64 as Amount>::room() >= 1,
+        <i64 as Amount>::room() * <i64 as Amount>::amount_max() <= <i64 as Amount>::Sum::hi(),
+        <i64 as Amount>::Sum::lo() == 0 || -(<i64 as Amount>::room() * <i64 as Amount>::amount_max()) >= <i64 as Amount>::Sum::lo(),
+        <i64 as Amount>::Sum::lo() == 0 || <i64 as Amount>::room() >= usize::MAX,
 {
     lemma_mul_inequality(usize::MAX as int, u64::MAX as int, 0x8000_0000_0000_0000);
     assert(u64::MAX * 0x8000_0000_0000_0000 <= i128::MAX) by (compute);
@@ -1266,14 +1266,14 @@ pub(super) proof fn vamount_lemma_room_i64()
 #[inline(always)]
 pub(super) fn vamount_part_of_nonzerou32(v: NonZeroU32) -> (r: u64)
     ensures
-        r.as_int() == <NonZeroU32 as VAmount>::amount_of(v),
+        r.as_int() == <NonZeroU32 as Amount>::amount_of(v),
 {
     broadcast use vstd::std_specs::nonzero::group_nonzero_axioms;
 
     v.get() as u64
 }
 
-pub(super) proof fn vsummed_lemma_amount_option_t<T: VAmount>(v: Option<T>)
+pub(super) proof fn vsummed_lemma_amount_option_t<T: Amount>(v: Option<T>)
     ensures
         -(<Option<T> as PrefixValue>::most() as int) <= <Option<T> as PrefixValue>::amount(v) <= <Option<T> as PrefixValue>::most(),
         <Option<T> as PrefixValue>::Sum::lo() == 0 ==> <Option<T> as PrefixValue>::amount(v) >= 0,
@@ -1285,7 +1285,7 @@ pub(super) proof fn vsummed_lemma_amount_option_t<T: VAmount>(v: Option<T>)
 }
 
 #[inline(always)]
-pub(super) fn vsummed_to_part_option_t<T: VAmount>(v: Option<T>) -> (r: <T as VAmount>::Sum)
+pub(super) fn vsummed_to_part_option_t<T: Amount>(v: Option<T>) -> (r: <T as Amount>::Sum)
     ensures
         r.as_int() == <Option<T> as PrefixValue>::amount(v.sv()),
 {
@@ -1293,10 +1293,10 @@ pub(super) fn vsummed_to_part_option_t<T: VAmount>(v: Option<T>) -> (r: <T as VA
         Some(x) => T::part_of(x),
         None => {
             proof {
-                <T as VAmount>::Sum::lemma_as_int(<T as VAmount>::Sum::of_int(0));
-                <T as VAmount>::Sum::lemma_of_int(0, 0);
+                <T as Amount>::Sum::lemma_as_int(<T as Amount>::Sum::of_int(0));
+                <T as Amount>::Sum::lemma_of_int(0, 0);
             }
-            <T as VAmount>::Sum::zero()
+            <T as Amount>::Sum::zero()
         },
     }
 }

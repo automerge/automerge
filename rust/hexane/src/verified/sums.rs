@@ -2,7 +2,7 @@
 //! Verus.
 //!
 //! A prefix column answers what the values before a position add up to.
-//! The sums are of this crate's integer types ([`VSum`]), and the laws
+//! The sums are of this crate's integer types ([`Sum`]), and the laws
 //! the prefix core asks of their arithmetic (`+` is associative, and `-`
 //! undoes it) are *proved* of them.
 //!
@@ -18,7 +18,7 @@
 //! overflow, and such a column is checked.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`sums/imp.rs`), which has
 //! its contract word for word and is proved there.
 
@@ -32,7 +32,7 @@ use super::value::RleValue;
 use super::Held;
 #[cfg(verus_keep_ghost)]
 use super::VGet;
-use super::{ColumnValueRef, Get, VForm, VSpec};
+use super::{ColumnValueRef, Form, Get, VSpec};
 #[cfg(verus_keep_ghost)]
 use crate::attrib::Accumulate;
 #[cfg(verus_keep_ghost)]
@@ -82,7 +82,7 @@ verus! {
 /// arithmetic wraps: what it gives for an integer outside those bounds
 /// is `of_int` of the integer, which is the integer itself wherever it
 /// is within them.
-pub trait VSum: Copy + Default + Debug + AddAssign + SubAssign + Add<Output = Self> + for <'x>AddAssign<
+pub trait Sum: Copy + Default + Debug + AddAssign + SubAssign + Add<Output = Self> + for <'x>AddAssign<
     &'x Self,
 > + seal::SumSeal {
     /// The sum, as an integer.
@@ -176,7 +176,7 @@ pub trait VSum: Copy + Default + Debug + AddAssign + SubAssign + Add<Output = Se
 /// The sums of values of such a type do not fall as more are added, so
 /// a prefix column of them can be searched by sum
 /// ([`get_index_for_prefix`](super::Column::get_index_for_prefix)).
-pub trait UnsignedPrefix: VSum {
+pub trait UnsignedPrefix: Sum {
     /// The least sum of the type is zero.
     proof fn lemma_count()
         ensures
@@ -210,7 +210,7 @@ verus! {
 
 /// The integers of an `i128` are those of either sign, and it wraps as
 /// two's complement does.
-impl VSum for i128 {
+impl Sum for i128 {
     open spec fn as_int(self) -> int {
         self as int
     }
@@ -285,9 +285,9 @@ impl VSum for i128 {
 /// checked, and a longer one is: so a type whose `room` is every length
 /// a column can have (`usize::MAX`) is never checked, and a type summed
 /// in a signed type must be one of those.
-pub trait VAmount: RleValue {
+pub trait Amount: RleValue {
     /// The type the sums are kept in.
-    type Sum: VSum;
+    type Sum: Sum;
 
     /// What the value `v` adds to a sum.
     spec fn amount_of(v: Self) -> int;
@@ -330,7 +330,7 @@ pub trait VAmount: RleValue {
     ;
 }
 
-impl VAmount for u64 {
+impl Amount for u64 {
     type Sum = u128;
 
     open spec fn amount_of(v: u64) -> int {
@@ -363,7 +363,7 @@ impl VAmount for u64 {
     }
 }
 
-impl VAmount for i64 {
+impl Amount for i64 {
     type Sum = i128;
 
     open spec fn amount_of(v: i64) -> int {
@@ -407,7 +407,7 @@ pub open spec fn u32_room() -> nat {
     }
 }
 
-impl VAmount for u32 {
+impl Amount for u32 {
     type Sum = u64;
 
     open spec fn amount_of(v: u32) -> int {
@@ -440,7 +440,7 @@ impl VAmount for u32 {
     }
 }
 
-impl VAmount for NonZeroU32 {
+impl Amount for NonZeroU32 {
     type Sum = u64;
 
     open spec fn amount_of(v: NonZeroU32) -> int {
@@ -474,12 +474,12 @@ impl VAmount for NonZeroU32 {
 }
 
 /// A value type a prefix column can hold: a number type that says what
-/// its values add to a sum ([`VAmount`]), an `Option` of one, whose
+/// its values add to a sum ([`Amount`]), an `Option` of one, whose
 /// `None` adds nothing, or `bool`, whose `true` adds one to a sum kept
 /// in a `usize`. No other type can implement this trait.
-pub trait PrefixValue: VSpec + for <'a>VForm<'a> + seal::SummedSeal {
+pub trait PrefixValue: VSpec + for <'a>Form<'a> + seal::SummedSeal {
     /// The type the sums are kept in.
-    type Sum: VSum;
+    type Sum: Sum;
 
     /// What the value `v` adds to a sum.
     spec fn amount(v: <Self as VSpec>::S) -> int;
@@ -525,8 +525,8 @@ pub trait PrefixValue: VSpec + for <'a>VForm<'a> + seal::SummedSeal {
     ;
 }
 
-impl<T: VAmount> PrefixValue for T {
-    type Sum = <T as VAmount>::Sum;
+impl<T: Amount> PrefixValue for T {
+    type Sum = <T as Amount>::Sum;
 
     open spec fn amount(v: T) -> int {
         T::amount_of(v)
@@ -554,13 +554,13 @@ impl<T: VAmount> PrefixValue for T {
     }
 
     #[inline(always)]
-    fn to_part<'a>(v: T) -> <T as VAmount>::Sum {
+    fn to_part<'a>(v: T) -> <T as Amount>::Sum {
         T::part_of(v)
     }
 }
 
-impl<T: VAmount> PrefixValue for Option<T> {
-    type Sum = <T as VAmount>::Sum;
+impl<T: Amount> PrefixValue for Option<T> {
+    type Sum = <T as Amount>::Sum;
 
     open spec fn amount(v: Option<T>) -> int {
         match v {
@@ -591,7 +591,7 @@ impl<T: VAmount> PrefixValue for Option<T> {
     }
 
     #[inline(always)]
-    fn to_part<'a>(v: Option<T>) -> <T as VAmount>::Sum {
+    fn to_part<'a>(v: Option<T>) -> <T as Amount>::Sum {
         imp::vsummed_to_part_option_t::<T>(v)
     }
 }

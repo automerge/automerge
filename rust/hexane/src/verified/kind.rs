@@ -18,7 +18,7 @@
 //! plain column is every one.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`kind/imp.rs`), which has
 //! its contract word for word and is proved there.
 
@@ -61,7 +61,7 @@ pub trait VKeeps<V: ColumnValueRef<C>, C: Codec = Leb128>: Sized {
 /// `V` can be kept with, its numbers written with codec `C`. The kinds
 /// are this crate's: no other type can implement this trait.
 #[allow(private_bounds)]
-pub trait VIndex<V: ColumnValueRef<C>, C: Codec = Leb128>: Kind<V, C> {
+pub trait Index<V: ColumnValueRef<C>, C: Codec = Leb128>: Kind<V, C> {
 
 }
 
@@ -76,7 +76,7 @@ impl<V: ColumnValueRef<C>, C: Codec> VKeeps<V, C> for LenIndex {
     }
 }
 
-impl<V: ColumnValueRef<C>, C: Codec> VIndex<V, C> for LenIndex {
+impl<V: ColumnValueRef<C>, C: Codec> Index<V, C> for LenIndex {
 
 }
 
@@ -95,7 +95,7 @@ impl<V: ColumnValueRef<C>, C: Codec> VKeeps<V, C> for LenBitIndex {
     }
 }
 
-impl<V: ColumnValueRef<C>, C: Codec> VIndex<V, C> for LenBitIndex {
+impl<V: ColumnValueRef<C>, C: Codec> Index<V, C> for LenBitIndex {
 
 }
 

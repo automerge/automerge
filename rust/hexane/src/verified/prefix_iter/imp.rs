@@ -1094,7 +1094,7 @@ impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
             r.total().as_int() == 0,
     {
         let inner: Iter<'a, V, C, SumIndex> = Iter { it: ICore::empty::<V::X>(), slabs: &[], col: None };
-        let zero = <V::Sum as VSum>::zero();
+        let zero = <V::Sum as Sum>::zero();
         proof {
             let s = inner.slabs@;
             <Get<'a, V> as VGet>::lemma_svs(inner.items());
@@ -1198,7 +1198,7 @@ impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Column<V, C, SumIndex> {
     {
         let ix = self.sum_index();
         let inner = self.iter();
-        let zero = <V::Sum as VSum>::zero();
+        let zero = <V::Sum as Sum>::zero();
         proof {
             use_type_invariant(&inner);
             let s = inner.slabs@;

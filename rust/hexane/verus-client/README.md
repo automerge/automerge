@@ -1,7 +1,7 @@
 # The acceptance clients, as a crate outside hexane
 
 `src/verified/client_proof.rs` holds the acceptance clients of the
-verified API (`hexane::verified`): functions written as a user of the API
+verified API: functions written as a user of the API
 would write them, each with a specification that Verus proves from the
 API's specifications alone. They are a module of hexane, so that every
 Verus run of the crate checks them.
@@ -35,7 +35,7 @@ verifies: `vstd` and hexane the first time, and after that only what
 has changed since. The last such line is the clients'. The second
 command runs the clients.
 
-Run it after a change to the public API of `hexane::verified`, or to the
+Run it after a change to hexane's public API, or to the
 clients.
 
 ## What is in the crate

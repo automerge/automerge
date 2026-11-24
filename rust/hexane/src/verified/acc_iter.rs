@@ -19,7 +19,7 @@
 //! holds them: the running sum *is* `accumulated` of the column's values
 //! from `base_pos()` up to the iterator (`acc_to`). It rests on the laws
 //! the client proves of its accumulator
-//! ([`VGroup`](crate::verified::VGroup)), and on nothing else of it: the
+//! ([`VGroup`](crate::VGroup)), and on nothing else of it: the
 //! accumulators of two values need not add up to the same in either
 //! order.
 //!
@@ -36,13 +36,13 @@
 //! whose running sum counts from where the suspended one's did.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`acc_iter/imp.rs`), which has
 //! its contract word for word and is proved there.
 
 #[cfg(verus_keep_ghost)]
 use super::acc::{accumulated, times, VGroup};
-use super::acc::{AccIndex, AccOf, AccWeight, VAccum, VAccumulated};
+use super::acc::{AccIndex, AccOf, AccWeight, Accum, Accumulated};
 use super::Get;
 #[cfg(verus_keep_ghost)]
 use super::{head_run, VGet, VSpec};
@@ -89,7 +89,7 @@ verus! {
 /// Both count from where the iterator's running sum does: the column's
 /// start, unless the iterator's sum was reset
 /// ([`AccIter::reset_prefix`]).
-pub struct AccValue<'a, V: VAccumulated> {
+pub struct AccValue<'a, V: Accumulated> {
     /// The value.
     pub value: Get<'a, V>,
     /// What the values through this one add up to: what
@@ -100,7 +100,7 @@ pub struct AccValue<'a, V: VAccumulated> {
     pub total: V::Acc,
 }
 
-impl<'a, V: VAccumulated> AccValue<'a, V> {
+impl<'a, V: Accumulated> AccValue<'a, V> {
     /// [`total`](Self::total), as a specification sees it: there it is
     /// written `total()`.
     pub open spec fn spec_total(&self) -> V::Acc {
@@ -151,7 +151,7 @@ impl<'a, V: VAccumulated> AccValue<'a, V> {
     }
 }
 
-impl<'a, V: VAccumulated> Clone for AccValue<'a, V> {
+impl<'a, V: Accumulated> Clone for AccValue<'a, V> {
     fn clone(&self) -> (r: Self)
         ensures
             r == *self,
@@ -164,7 +164,7 @@ impl<'a, V: VAccumulated> Clone for AccValue<'a, V> {
 /// What [`AccIter::delta_nth`] and an accumulator column's
 /// `delta` find: a value with what the values up to it add up to, where
 /// it is, and what the values passed over on the way to it add up to.
-pub struct AccSeek<'a, V: VAccumulated> {
+pub struct AccSeek<'a, V: Accumulated> {
     /// The index in the column of the value found. The iterator stands
     /// just after it.
     pub pos: usize,
@@ -177,7 +177,7 @@ pub struct AccSeek<'a, V: VAccumulated> {
     pub pv: AccValue<'a, V>,
 }
 
-impl<'a, V: VAccumulated> Clone for AccSeek<'a, V> {
+impl<'a, V: Accumulated> Clone for AccSeek<'a, V> {
     #[inline(always)]
     fn clone(&self) -> (r: Self)
         ensures
@@ -207,7 +207,7 @@ impl<'a, V: VAccumulated> Clone for AccSeek<'a, V> {
 /// An accumulator is the client's, and its functions may panic. If one
 /// does while the iterator moves, the iterator is left with nothing to
 /// give, as a `default()` one.
-pub struct AccIter<'a, V: VAccumulated + ColumnValueRef<C> + 'a, C: Codec + 'a = Leb128> {
+pub struct AccIter<'a, V: Accumulated + ColumnValueRef<C> + 'a, C: Codec + 'a = Leb128> {
     /// The column's index, for long moves; a default iterator has none.
     ix: Option<&'a SlabBTree<AccWeight<V::Acc>>>,
     inner: Iter<'a, V, C, AccIndex>,
@@ -219,7 +219,7 @@ pub struct AccIter<'a, V: VAccumulated + ColumnValueRef<C> + 'a, C: Codec + 'a =
     base_at: usize,
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     /// The iterator without its sums: a [`Iter`] that stands
     /// where this one does, over the same column, with the same values
     /// left.
@@ -709,7 +709,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> vstd::std_specs::iter::IteratorSpecImpl for AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> vstd::std_specs::iter::IteratorSpecImpl for AccIter<'a, V, C> {
     /// The iterator keeps to what Verus asks of an iterator: `next` gives
     /// `remaining()`, one value after another, and then `None`.
     open spec fn obeys_prophetic_iter_laws(&self) -> bool {
@@ -737,7 +737,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> vstd::std_specs::iter::I
     }
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Iterator for AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> Iterator for AccIter<'a, V, C> {
     type Item = AccValue<'a, V>;
 
     /// The next value, if one is left, with what the values through it
@@ -825,13 +825,13 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Iterator for AccIter<'a,
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> vstd::std_specs::iter::ExactSizeIteratorSpecImpl for AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> vstd::std_specs::iter::ExactSizeIteratorSpecImpl for AccIter<'a, V, C> {
     open spec fn exact_len(&self) -> usize {
         self.items().len() as usize
     }
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> ExactSizeIterator for AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> ExactSizeIterator for AccIter<'a, V, C> {
     /// How many values are left.
     #[inline]
     fn len(&self) -> (len: usize)
@@ -843,7 +843,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> ExactSizeIterator for Ac
     }
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Clone for AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> Clone for AccIter<'a, V, C> {
     /// An iterator of its own that stands where this one does, with the
     /// same values left and the same running sum.
     #[inline(always)]
@@ -862,7 +862,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Clone for AccIter<'a, V,
     }
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Default for AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> Default for AccIter<'a, V, C> {
     /// An iterator with nothing to give.
     fn default() -> (r: Self)
         ensures
@@ -887,14 +887,14 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Default for AccIter<'a, 
 ///
 /// It holds a [`IterState`] (`plain()`) and `base_pos()`. The
 /// sums themselves are not kept: `try_resume` asks the column for them.
-pub struct AccIterState<V: VAccumulated> {
+pub struct AccIterState<V: Accumulated> {
     inner: IterState,
     /// Where the running sum counts from.
     base_at: usize,
     _phantom: PhantomData<V>,
 }
 
-impl<V: VAccumulated> AccIterState<V> {
+impl<V: Accumulated> AccIterState<V> {
     /// The state without where the sum counts from: that of a
     /// [`Iter`] standing where the iterator stood, with its
     /// window.
@@ -989,7 +989,7 @@ impl<V: VAccumulated> AccIterState<V> {
 // ── The column's ────────────────────────────────────────────────────────────
 /// An accumulator column's values with what the values up to each add
 /// up to.
-impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
+impl<V: Accumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
     /// An iterator over the values that keeps what they add up to: each
     /// value comes with what the values through it add up to, and what
     /// those before it do.
@@ -1073,7 +1073,7 @@ impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
 
 // ── Repositioning (`Shiftable`) ───────────────────────────────────────────
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     /// The items the iterator ranges over: at each place of the column,
     /// the value there with what the values accumulate to through
     /// it (from `base_pos()`).
@@ -1086,7 +1086,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
 /// The iterator repositioned as any of the verified ones is: its model
 /// is each value of the column with what the values accumulate to
 /// through it, each an item.
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Shiftable for AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> Shiftable for AccIter<'a, V, C> {
     closed spec fn shift_vals(&self) -> Seq<AccValue<'a, V>> {
         self.accumulated_items()
     }
@@ -1178,7 +1178,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Shiftable for AccIter<'a
     }
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     /// The iterator's repositioning model ([`Shiftable`]) in the terms
     /// of its own specification: at each place of the column, its value
     /// and what the values come to through it; it stands at `pos()`;

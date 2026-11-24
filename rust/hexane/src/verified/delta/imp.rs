@@ -77,7 +77,7 @@ impl seal::DeltaSeal for usize {
 /// The value a column keeps as `d` is ordered against a value `v` as
 /// `d` is against what `v` is kept as, and comes before a `v` that does
 /// not fit.
-pub(crate) proof fn lemma_bound<T: VDelta>(v: T, d: Option<i64>)
+pub(crate) proof fn lemma_bound<T: Delta>(v: T, d: Option<i64>)
     requires
         in_dom::<T>(d),
     ensures
@@ -99,7 +99,7 @@ pub(crate) proof fn lemma_bound<T: VDelta>(v: T, d: Option<i64>)
 }
 
 /// Whether `v` is at the lower bound `lo` or after it.
-pub(super) open spec fn above_low<T: VDelta>(lo: Bound<&T>, v: T) -> bool {
+pub(super) open spec fn above_low<T: Delta>(lo: Bound<&T>, v: T) -> bool {
     match lo {
         Bound::Included(a) => !T::below(v, *a),
         Bound::Excluded(a) => T::below(*a, v),
@@ -108,7 +108,7 @@ pub(super) open spec fn above_low<T: VDelta>(lo: Bound<&T>, v: T) -> bool {
 }
 
 /// Whether `v` is at the upper bound `hi` or before it.
-pub(super) open spec fn below_high<T: VDelta>(hi: Bound<&T>, v: T) -> bool {
+pub(super) open spec fn below_high<T: Delta>(hi: Bound<&T>, v: T) -> bool {
     match hi {
         Bound::Included(b) => !T::below(*b, v),
         Bound::Excluded(b) => T::below(v, *b),
@@ -118,7 +118,7 @@ pub(super) open spec fn below_high<T: VDelta>(hi: Bound<&T>, v: T) -> bool {
 
 /// The least number the lower bound `lo` lets in, of those a delta
 /// column of `T` keeps; none if it lets none of them in.
-pub(super) fn low_of<T: VDelta>(lo: Bound<&T>) -> (r: Option<i64>)
+pub(super) fn low_of<T: Delta>(lo: Bound<&T>) -> (r: Option<i64>)
     ensures
         forall|n: i64|
             #![trigger T::of(Some(n))]
@@ -166,7 +166,7 @@ pub(super) fn low_of<T: VDelta>(lo: Bound<&T>) -> (r: Option<i64>)
 
 /// The greatest number the upper bound `hi` lets in, of those a delta
 /// column of `T` keeps; none if it lets none of them in.
-pub(super) fn high_of<T: VDelta>(hi: Bound<&T>) -> (r: Option<i64>)
+pub(super) fn high_of<T: Delta>(hi: Bound<&T>) -> (r: Option<i64>)
     ensures
         forall|n: i64|
             #![trigger T::of(Some(n))]
@@ -215,7 +215,7 @@ pub(super) fn high_of<T: VDelta>(hi: Bound<&T>) -> (r: Option<i64>)
 /// The bounds `lo` and `hi` as the least and the greatest of the
 /// numbers within them that a delta column of `T` keeps; none if it
 /// keeps none within them.
-pub(crate) fn bounds_of<T: VDelta>(lo: Bound<&T>, hi: Bound<&T>) -> (r: Option<(i64, i64)>)
+pub(crate) fn bounds_of<T: Delta>(lo: Bound<&T>, hi: Bound<&T>) -> (r: Option<(i64, i64)>)
     ensures
         forall|d: Option<i64>|
             #![trigger T::of(d)]
@@ -247,11 +247,11 @@ pub(crate) fn bounds_of<T: VDelta>(lo: Bound<&T>, hi: Bound<&T>) -> (r: Option<(
     r
 }
 
-impl<T: VDeltaNum> seal::DeltaValSeal for T {
+impl<T: DeltaNum> seal::DeltaValSeal for T {
 
 }
 
-impl<T: VDeltaNum> seal::DeltaValSeal for Option<T> {
+impl<T: DeltaNum> seal::DeltaValSeal for Option<T> {
 
 }
 
@@ -263,9 +263,9 @@ impl<T: VDeltaNum> seal::DeltaValSeal for Option<T> {
 #[doc(hidden)]
 #[verifier::reject_recursive_types(I)]
 #[verifier::reject_recursive_types(C)]
-pub struct VDeltas<I, C>(PhantomData<(I, C)>);
+pub struct Deltas<I, C>(PhantomData<(I, C)>);
 
-impl<C: Codec> DeltaOps<i64> for VDeltas<i64, C> {
+impl<C: Codec> DeltaOps<i64> for Deltas<i64, C> {
     open spec fn dv(v: i64) -> Option<i64> {
         Some(v)
     }
@@ -276,7 +276,7 @@ impl<C: Codec> DeltaOps<i64> for VDeltas<i64, C> {
     }
 }
 
-impl<C: Codec> DeltaOps<Option<i64>> for VDeltas<Option<i64>, C> {
+impl<C: Codec> DeltaOps<Option<i64>> for Deltas<Option<i64>, C> {
     open spec fn dv(v: Option<i64>) -> Option<i64> {
         v
     }
@@ -287,8 +287,8 @@ impl<C: Codec> DeltaOps<Option<i64>> for VDeltas<Option<i64>, C> {
     }
 }
 
-impl<'a, C: Codec> DeltaWrite<'a, RleModel<VWrite<i64, C>>, RleReads<VOps<i64, C>>> for VDeltas<i64, C> {
-    type Ins = ReadIns<'a, VWrite<i64, C>>;
+impl<'a, C: Codec> DeltaWrite<'a, RleModel<Write<i64, C>>, RleReads<Ops<i64, C>>> for Deltas<i64, C> {
+    type Ins = ReadIns<'a, Write<i64, C>>;
 
     open spec fn dvo(o: i64) -> Option<i64> {
         Some(o)
@@ -301,7 +301,7 @@ impl<'a, C: Codec> DeltaWrite<'a, RleModel<VWrite<i64, C>>, RleReads<VOps<i64, C
     ///
     /// Panics when asked to write a null: the column has none.
     #[inline(always)]
-    fn ins(d: Option<i64>) -> ReadIns<'a, VWrite<i64, C>> {
+    fn ins(d: Option<i64>) -> ReadIns<'a, Write<i64, C>> {
         match d {
             Some(v) => ReadIns { v },
             None => {
@@ -312,11 +312,11 @@ impl<'a, C: Codec> DeltaWrite<'a, RleModel<VWrite<i64, C>>, RleReads<VOps<i64, C
     }
 }
 
-impl<'a, C: Codec> DeltaWrite<'a, RleModel<VOptWrite<i64, C>>, RleReads<VOptOps<i64, C>>> for VDeltas<
+impl<'a, C: Codec> DeltaWrite<'a, RleModel<OptWrite<i64, C>>, RleReads<OptOps<i64, C>>> for Deltas<
     Option<i64>,
     C,
 > {
-    type Ins = ReadIns<'a, VOptWrite<i64, C>>;
+    type Ins = ReadIns<'a, OptWrite<i64, C>>;
 
     open spec fn dvo(o: Option<i64>) -> Option<i64> {
         o
@@ -326,7 +326,7 @@ impl<'a, C: Codec> DeltaWrite<'a, RleModel<VOptWrite<i64, C>>, RleReads<VOptOps<
     }
 
     #[inline(always)]
-    fn ins(d: Option<i64>) -> ReadIns<'a, VOptWrite<i64, C>> {
+    fn ins(d: Option<i64>) -> ReadIns<'a, OptWrite<i64, C>> {
         ReadIns { v: d }
     }
 }
@@ -336,12 +336,12 @@ impl<'a, C: Codec> DeltaWrite<'a, RleModel<VOptWrite<i64, C>>, RleReads<VOptOps<
 /// The values of a slice, for a delta column to be built from
 /// (`ColumnCore::fill_delta`): each as the column keeps it, in the
 /// slice's order.
-pub(crate) struct SliceValues<'v, T: VDelta> {
+pub(crate) struct SliceValues<'v, T: Delta> {
     pub(crate) vs: &'v [T],
     pub(crate) at: usize,
 }
 
-impl<'v, T: VDelta> SliceValues<'v, T> {
+impl<'v, T: Delta> SliceValues<'v, T> {
     /// The source is within its slice, whose values all fit.
     #[verifier::type_invariant]
     pub(crate) open spec fn inv(&self) -> bool {
@@ -361,7 +361,7 @@ impl<'v, T: VDelta> SliceValues<'v, T> {
     }
 }
 
-impl<'v, T: VDelta> ValueItems for SliceValues<'v, T> {
+impl<'v, T: Delta> ValueItems for SliceValues<'v, T> {
     open spec fn left(&self) -> Option<Seq<Option<i64>>> {
         Some(dvs(self.vs@.skip(self.at as int)))
     }
@@ -386,7 +386,7 @@ impl<'v, T: VDelta> ValueItems for SliceValues<'v, T> {
     }
 }
 
-impl<'v, T: VDelta> SpliceValues for SliceValues<'v, T> {
+impl<'v, T: Delta> SpliceValues for SliceValues<'v, T> {
     #[inline(always)]
     fn splice_values<E, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, M, B>(
         slabs: &mut Vec<Slab<E::Tail>>,
@@ -408,7 +408,7 @@ impl<'v, T: VDelta> SpliceValues for SliceValues<'v, T> {
     }
 }
 
-impl<'v, T: VDelta> BoundedValues for SliceValues<'v, T> {
+impl<'v, T: Delta> BoundedValues for SliceValues<'v, T> {
     proof fn lemma_told(&self) {
     }
 }
@@ -434,12 +434,12 @@ pub(crate) proof fn lemma_value_items(ds: Seq<Option<i64>>)
 /// The values of a slice, for a delta column's splice
 /// (`ColumnCore::splice_delta`): each an item, as the column keeps it,
 /// in the slice's order.
-pub(crate) struct SliceItems<'v, T: VDelta> {
+pub(crate) struct SliceItems<'v, T: Delta> {
     pub(crate) vs: &'v [T],
     pub(crate) at: usize,
 }
 
-impl<'v, T: VDelta> SliceItems<'v, T> {
+impl<'v, T: Delta> SliceItems<'v, T> {
     /// The source is within its slice, whose values all fit.
     #[verifier::type_invariant]
     pub(crate) open spec fn inv(&self) -> bool {
@@ -459,7 +459,7 @@ impl<'v, T: VDelta> SliceItems<'v, T> {
     }
 }
 
-impl<'v, T: VDelta> SpliceItems for SliceItems<'v, T> {
+impl<'v, T: Delta> SpliceItems for SliceItems<'v, T> {
     open spec fn left(&self) -> Option<Seq<SpliceItem>> {
         Some(value_items(dvs(self.vs@.skip(self.at as int))))
     }
@@ -484,7 +484,7 @@ impl<'v, T: VDelta> SpliceItems for SliceItems<'v, T> {
     }
 }
 
-impl<'v, T: VDelta> SpliceDeltas for SliceItems<'v, T> {
+impl<'v, T: Delta> SpliceDeltas for SliceItems<'v, T> {
     #[inline(always)]
     fn splice_deltas<E, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, M, B>(
         slabs: &mut Vec<Slab<E::Tail>>,
@@ -506,7 +506,7 @@ impl<'v, T: VDelta> SpliceDeltas for SliceItems<'v, T> {
     }
 }
 
-impl<'v, T: VDelta> BoundedItems for SliceItems<'v, T> {
+impl<'v, T: Delta> BoundedItems for SliceItems<'v, T> {
     proof fn lemma_told(&self) {
     }
 }
@@ -545,7 +545,7 @@ pub(super) proof fn lemma_delta_run_exact_impl(r: DeltaRun, k: int)
     assert(crop(x) == x);
 }
 
-pub(super) proof fn lemma_delta_run_fits_impl<T: VDelta>(r: DeltaRun)
+pub(super) proof fn lemma_delta_run_fits_impl<T: Delta>(r: DeltaRun)
     requires
         delta_run_in_range::<T>(r),
     ensures
@@ -564,7 +564,7 @@ pub(super) proof fn lemma_delta_run_fits_impl<T: VDelta>(r: DeltaRun)
     }
 }
 
-pub(super) proof fn lemma_delta_runs_push_impl<T: VDelta>(rs: Seq<DeltaRun>, r: DeltaRun)
+pub(super) proof fn lemma_delta_runs_push_impl<T: Delta>(rs: Seq<DeltaRun>, r: DeltaRun)
     ensures
         delta_runs_kept(rs.push(r)) == delta_runs_kept(rs) + delta_run_kept(r),
         delta_runs_values::<T>(rs.push(r)) == delta_runs_values::<T>(rs) + delta_run_values::<T>(r),
@@ -576,7 +576,7 @@ pub(super) proof fn lemma_delta_runs_push_impl<T: VDelta>(rs: Seq<DeltaRun>, r: 
     ));
 }
 
-pub(super) proof fn lemma_delta_runs_one_impl<T: VDelta>(r: DeltaRun)
+pub(super) proof fn lemma_delta_runs_one_impl<T: Delta>(r: DeltaRun)
     ensures
         delta_runs_values::<T>(seq![r]) == delta_run_values::<T>(r),
         delta_runs_values::<T>(Seq::empty()) == Seq::<T>::empty(),
@@ -593,7 +593,7 @@ pub(super) proof fn lemma_delta_runs_one_impl<T: VDelta>(r: DeltaRun)
 
 /// Runs that each hold only values a delta column of `T` can keep hold
 /// only such values together.
-pub(crate) proof fn lemma_delta_runs_dom<T: VDelta>(rs: Seq<DeltaRun>)
+pub(crate) proof fn lemma_delta_runs_dom<T: Delta>(rs: Seq<DeltaRun>)
     requires
         delta_runs_fit::<T>(rs),
     ensures
@@ -830,7 +830,7 @@ impl<'v> BoundedItems for RunItems<'v> {
 
 /// How a delta column of the type is kept: the column underneath, of
 /// `i64`s or of `Option<i64>`s, and how its values are deltas.
-pub(crate) trait DKind<C: Codec>: VDelta {
+pub(crate) trait DKind<C: Codec>: Delta {
     /// What the column underneath holds.
     type I: ColumnValueRef<C>;
 
@@ -886,7 +886,7 @@ pub(crate) trait DKind<C: Codec>: VDelta {
 
     /// A fill as a value of the column underneath: the one whose delta
     /// it is.
-    fn fill_item(f: <Self as VDelta>::Fill) -> (r: DItem<Self, C>)
+    fn fill_item(f: <Self as Delta>::Fill) -> (r: DItem<Self, C>)
         ensures
             <Self::B as DeltaOps<DItem<Self, C>>>::dv(r) == Self::fill_delta(f),
     ;
@@ -912,16 +912,16 @@ pub(crate) trait DKind<C: Codec>: VDelta {
     ;
 }
 
-impl<T: VDeltaNum, C: Codec> DKind<C> for T {
+impl<T: DeltaNum, C: Codec> DKind<C> for T {
     type I = i64;
 
-    type B = VDeltas<i64, C>;
+    type B = Deltas<i64, C>;
 
-    type L = VWrite<i64, C>;
+    type L = Write<i64, C>;
 
-    type O = VOps<i64, C>;
+    type O = Ops<i64, C>;
 
-    type W = VDeltas<i64, C>;
+    type W = Deltas<i64, C>;
 
     #[inline(always)]
     fn to_edit(core: DCore<T, C>) -> ECore<T, C> {
@@ -961,16 +961,16 @@ impl<T: VDeltaNum, C: Codec> DKind<C> for T {
     }
 }
 
-impl<T: VDeltaNum, C: Codec> DKind<C> for Option<T> {
+impl<T: DeltaNum, C: Codec> DKind<C> for Option<T> {
     type I = Option<i64>;
 
-    type B = VDeltas<Option<i64>, C>;
+    type B = Deltas<Option<i64>, C>;
 
-    type L = VOptWrite<i64, C>;
+    type L = OptWrite<i64, C>;
 
-    type O = VOptOps<i64, C>;
+    type O = OptOps<i64, C>;
 
-    type W = VDeltas<Option<i64>, C>;
+    type W = Deltas<Option<i64>, C>;
 
     #[inline(always)]
     fn to_edit(core: DCore<Option<T>, C>) -> ECore<Option<T>, C> {
@@ -1027,7 +1027,7 @@ pub(super) type ECore<T, C> = DCol<<T as DKind<C>>::L, <T as DKind<C>>::O, <T as
 
 /// Values that fit are kept as what a column can keep, and are the
 /// values of what they are kept as.
-pub(crate) proof fn lemma_kept<T: VDelta>(vs: Seq<T>)
+pub(crate) proof fn lemma_kept<T: Delta>(vs: Seq<T>)
     requires
         all_fit(vs),
     ensures
@@ -2160,8 +2160,8 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
 #[inline(always)]
 pub(super) fn vdeltanum_try_to_i64_u64(this: u64) -> (r: Option<i64>)
     ensures
-        r == if <u64 as VDeltaNum>::fits(this) {
-            Some(<u64 as VDeltaNum>::n64(this))
+        r == if <u64 as DeltaNum>::fits(this) {
+            Some(<u64 as DeltaNum>::n64(this))
         } else {
             None::<i64>
         },
@@ -2176,8 +2176,8 @@ pub(super) fn vdeltanum_try_to_i64_u64(this: u64) -> (r: Option<i64>)
 #[inline(always)]
 pub(super) fn vdeltanum_try_to_i64_usize(this: usize) -> (r: Option<i64>)
     ensures
-        r == if <usize as VDeltaNum>::fits(this) {
-            Some(<usize as VDeltaNum>::n64(this))
+        r == if <usize as DeltaNum>::fits(this) {
+            Some(<usize as DeltaNum>::n64(this))
         } else {
             None::<i64>
         },
@@ -2192,7 +2192,7 @@ pub(super) fn vdeltanum_try_to_i64_usize(this: usize) -> (r: Option<i64>)
 #[inline(always)]
 pub(super) fn vdeltanum_hi_usize() -> (r: i64)
     ensures
-        r == <usize as VDeltaNum>::most(),
+        r == <usize as DeltaNum>::most(),
 {
     if usize::MAX as u64 > 0x7fff_ffff_ffff_ffff {
         0x7fff_ffff_ffff_ffff
@@ -2201,19 +2201,19 @@ pub(super) fn vdeltanum_hi_usize() -> (r: i64)
     }
 }
 
-pub(super) proof fn vdelta_lemma_delta_t<T: VDeltaNum>(v: T, d: Option<i64>)
+pub(super) proof fn vdelta_lemma_delta_t<T: DeltaNum>(v: T, d: Option<i64>)
     ensures
-        <T as VDelta>::least() <= 0 <= <T as VDelta>::most(),
-        v.fits() ==> dom(v.dv(), <T as VDelta>::least(), <T as VDelta>::most(), <T as VDelta>::nullable()) && <T as VDelta>::of(v.dv()) == v,
-        dom(d, <T as VDelta>::least(), <T as VDelta>::most(), <T as VDelta>::nullable()) ==> <T as VDelta>::of(d).fits() && <T as VDelta>::of(d).dv() == d,
+        <T as Delta>::least() <= 0 <= <T as Delta>::most(),
+        v.fits() ==> dom(v.dv(), <T as Delta>::least(), <T as Delta>::most(), <T as Delta>::nullable()) && <T as Delta>::of(v.dv()) == v,
+        dom(d, <T as Delta>::least(), <T as Delta>::most(), <T as Delta>::nullable()) ==> <T as Delta>::of(d).fits() && <T as Delta>::of(d).dv() == d,
 {
-    <T as VDeltaNum>::lemma_num(v, 0);
+    <T as DeltaNum>::lemma_num(v, 0);
     if d is Some {
-        <T as VDeltaNum>::lemma_num(v, d->0);
+        <T as DeltaNum>::lemma_num(v, d->0);
     }
 }
 
-pub(super) proof fn vdelta_lemma_order_t<T: VDeltaNum>(a: T, b: T)
+pub(super) proof fn vdelta_lemma_order_t<T: DeltaNum>(a: T, b: T)
     ensures
         a.fits() && b.fits() ==> <T as VSpec>::below(a, b) == delta_below(a.dv(), b.dv()),
         a.fits() && !b.fits() ==> <T as VSpec>::below(a, b),
@@ -2224,70 +2224,70 @@ pub(super) proof fn vdelta_lemma_order_t<T: VDeltaNum>(a: T, b: T)
 
 #[inline(always)]
 #[allow(clippy::manual_map)]  // a match is what the proof follows
-pub(super) fn vdelta_try_i64_t<T: VDeltaNum>(this: T) -> (r: Option<Option<i64>>)
+pub(super) fn vdelta_try_i64_t<T: DeltaNum>(this: T) -> (r: Option<Option<i64>>)
     ensures
-        r == if <T as VDelta>::fits(this) {
-            Some(<T as VDelta>::dv(this))
+        r == if <T as Delta>::fits(this) {
+            Some(<T as Delta>::dv(this))
         } else {
             None::<Option<i64>>
         },
 {
-    match <T as VDeltaNum>::try_to_i64(this) {
+    match <T as DeltaNum>::try_to_i64(this) {
         Some(n) => Some(Some(n)),
         None => None,
     }
 }
 
 #[inline(always)]
-pub(super) fn vdelta_from_i64_t<T: VDeltaNum>(d: Option<i64>) -> (r: T)
+pub(super) fn vdelta_from_i64_t<T: DeltaNum>(d: Option<i64>) -> (r: T)
     requires
-        dom(d, <T as VDelta>::least(), <T as VDelta>::most(), <T as VDelta>::nullable()),
+        dom(d, <T as Delta>::least(), <T as Delta>::most(), <T as Delta>::nullable()),
     ensures
-        r == <T as VDelta>::of(d),
+        r == <T as Delta>::of(d),
 {
     match d {
-        Some(n) => <T as VDeltaNum>::from_i64(n),
+        Some(n) => <T as DeltaNum>::from_i64(n),
         None => {
             // not reached: the type has no null
             proof {
-                <T as VDeltaNum>::lemma_num(<T as VDeltaNum>::of64(0), 0);
+                <T as DeltaNum>::lemma_num(<T as DeltaNum>::of64(0), 0);
             }
-            <T as VDeltaNum>::from_i64(0)
+            <T as DeltaNum>::from_i64(0)
         },
     }
 }
 
-pub(super) proof fn vdelta_lemma_delta_option_t<T: VDeltaNum>(v: Option<T>, d: Option<i64>)
+pub(super) proof fn vdelta_lemma_delta_option_t<T: DeltaNum>(v: Option<T>, d: Option<i64>)
     ensures
-        <Option<T> as VDelta>::least() <= 0 <= <Option<T> as VDelta>::most(),
-        v.fits() ==> dom(v.dv(), <Option<T> as VDelta>::least(), <Option<T> as VDelta>::most(), <Option<T> as VDelta>::nullable()) && <Option<T> as VDelta>::of(v.dv()) == v,
-        dom(d, <Option<T> as VDelta>::least(), <Option<T> as VDelta>::most(), <Option<T> as VDelta>::nullable()) ==> <Option<T> as VDelta>::of(d).fits() && <Option<T> as VDelta>::of(d).dv() == d,
+        <Option<T> as Delta>::least() <= 0 <= <Option<T> as Delta>::most(),
+        v.fits() ==> dom(v.dv(), <Option<T> as Delta>::least(), <Option<T> as Delta>::most(), <Option<T> as Delta>::nullable()) && <Option<T> as Delta>::of(v.dv()) == v,
+        dom(d, <Option<T> as Delta>::least(), <Option<T> as Delta>::most(), <Option<T> as Delta>::nullable()) ==> <Option<T> as Delta>::of(d).fits() && <Option<T> as Delta>::of(d).dv() == d,
 {
     if v is Some {
-        <T as VDeltaNum>::lemma_num(v->0, 0);
+        <T as DeltaNum>::lemma_num(v->0, 0);
     }
     if d is Some {
-        <T as VDeltaNum>::lemma_num(T::of64(0), d->0);
+        <T as DeltaNum>::lemma_num(T::of64(0), d->0);
     } else {
-        <T as VDeltaNum>::lemma_num(T::of64(0), 0);
+        <T as DeltaNum>::lemma_num(T::of64(0), 0);
     }
 }
 
 #[inline(always)]
 #[allow(clippy::manual_map)]  // a match is what the proof follows
-pub(super) fn vdelta_to_i64_option_t<T: VDeltaNum>(this: Option<T>) -> (r: Option<i64>)
+pub(super) fn vdelta_to_i64_option_t<T: DeltaNum>(this: Option<T>) -> (r: Option<i64>)
     requires
-        <Option<T> as VDelta>::fits(this),
+        <Option<T> as Delta>::fits(this),
     ensures
-        r == <Option<T> as VDelta>::dv(this),
+        r == <Option<T> as Delta>::dv(this),
 {
     match this {
-        Some(v) => Some(<T as VDeltaNum>::to_i64(v)),
+        Some(v) => Some(<T as DeltaNum>::to_i64(v)),
         None => None,
     }
 }
 
-pub(super) proof fn vdelta_lemma_order_option_t<T: VDeltaNum>(a: Option<T>, b: Option<T>)
+pub(super) proof fn vdelta_lemma_order_option_t<T: DeltaNum>(a: Option<T>, b: Option<T>)
     ensures
         a.fits() && b.fits() ==> <Option<T> as VSpec>::below(a, b) == delta_below(a.dv(), b.dv()),
         a.fits() && !b.fits() ==> <Option<T> as VSpec>::below(a, b),
@@ -2302,16 +2302,16 @@ pub(super) proof fn vdelta_lemma_order_option_t<T: VDeltaNum>(a: Option<T>, b: O
 
 #[inline(always)]
 #[allow(clippy::manual_map)]  // a match is what the proof follows
-pub(super) fn vdelta_try_i64_option_t<T: VDeltaNum>(this: Option<T>) -> (r: Option<Option<i64>>)
+pub(super) fn vdelta_try_i64_option_t<T: DeltaNum>(this: Option<T>) -> (r: Option<Option<i64>>)
     ensures
-        r == if <Option<T> as VDelta>::fits(this) {
-            Some(<Option<T> as VDelta>::dv(this))
+        r == if <Option<T> as Delta>::fits(this) {
+            Some(<Option<T> as Delta>::dv(this))
         } else {
             None::<Option<i64>>
         },
 {
     match this {
-        Some(v) => match <T as VDeltaNum>::try_to_i64(v) {
+        Some(v) => match <T as DeltaNum>::try_to_i64(v) {
             Some(n) => Some(Some(n)),
             None => None,
         },
@@ -2321,14 +2321,14 @@ pub(super) fn vdelta_try_i64_option_t<T: VDeltaNum>(this: Option<T>) -> (r: Opti
 
 #[inline(always)]
 #[allow(clippy::manual_map)]  // a match is what the proof follows
-pub(super) fn vdelta_from_i64_option_t<T: VDeltaNum>(d: Option<i64>) -> (r: Option<T>)
+pub(super) fn vdelta_from_i64_option_t<T: DeltaNum>(d: Option<i64>) -> (r: Option<T>)
     requires
-        dom(d, <Option<T> as VDelta>::least(), <Option<T> as VDelta>::most(), <Option<T> as VDelta>::nullable()),
+        dom(d, <Option<T> as Delta>::least(), <Option<T> as Delta>::most(), <Option<T> as Delta>::nullable()),
     ensures
-        r == <Option<T> as VDelta>::of(d),
+        r == <Option<T> as Delta>::of(d),
 {
     match d {
-        Some(n) => Some(<T as VDeltaNum>::from_i64(n)),
+        Some(n) => Some(<T as DeltaNum>::from_i64(n)),
         None => None,
     }
 }
@@ -2348,31 +2348,31 @@ impl<T: DeltaValue<C>, C: Codec> std::fmt::Debug for DeltaColumn<T, C> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{VDelta, VDeltaNum};
+    use super::super::{Delta, DeltaNum};
 
     /// The conversions, and the bounds of what fits (`lo..=hi`, which are
     /// those hexane has always had): a value fits as itself and
     /// comes back as itself, and a null is none.
     fn converts<T>(lo: i64, hi: i64, samples: &[T])
     where
-        T: VDeltaNum + std::fmt::Debug + PartialEq + Copy,
+        T: DeltaNum + std::fmt::Debug + PartialEq + Copy,
     {
-        assert_eq!((<T as VDeltaNum>::lo(), <T as VDeltaNum>::hi()), (lo, hi));
-        assert_eq!((<T as VDelta>::lo(), <T as VDelta>::hi()), (lo, hi));
+        assert_eq!((<T as DeltaNum>::lo(), <T as DeltaNum>::hi()), (lo, hi));
+        assert_eq!((<T as Delta>::lo(), <T as Delta>::hi()), (lo, hi));
         assert_eq!(
-            (<Option<T> as VDelta>::lo(), <Option<T> as VDelta>::hi()),
+            (<Option<T> as Delta>::lo(), <Option<T> as Delta>::hi()),
             (lo, hi)
         );
-        assert_eq!(<Option<T> as VDelta>::to_i64(None), None);
-        assert_eq!(<Option<T> as VDelta>::from_i64(None), None);
+        assert_eq!(<Option<T> as Delta>::to_i64(None), None);
+        assert_eq!(<Option<T> as Delta>::from_i64(None), None);
         for &v in samples {
-            let n = <T as VDeltaNum>::to_i64(v);
+            let n = <T as DeltaNum>::to_i64(v);
             assert!(lo <= n && n <= hi, "{v:?}");
-            assert_eq!(<T as VDelta>::to_i64(v), Some(n));
-            assert_eq!(<Option<T> as VDelta>::to_i64(Some(v)), Some(n));
-            assert_eq!(<T as VDeltaNum>::from_i64(n), v);
-            assert_eq!(<T as VDelta>::from_i64(Some(n)), v);
-            assert_eq!(<Option<T> as VDelta>::from_i64(Some(n)), Some(v));
+            assert_eq!(<T as Delta>::to_i64(v), Some(n));
+            assert_eq!(<Option<T> as Delta>::to_i64(Some(v)), Some(n));
+            assert_eq!(<T as DeltaNum>::from_i64(n), v);
+            assert_eq!(<T as Delta>::from_i64(Some(n)), v);
+            assert_eq!(<Option<T> as Delta>::from_i64(Some(n)), Some(v));
         }
     }
 

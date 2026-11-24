@@ -22,7 +22,7 @@ use super::codec::Codec;
 use super::counts::lemma_bool_size;
 #[cfg(verus_keep_ghost)]
 use super::value::{lemma_opt_sizes, lemma_plain_sizes};
-use super::value::{RleValue, VOptWrite, VWrite};
+use super::value::{OptWrite, RleValue, Write};
 #[cfg(verus_keep_ghost)]
 use crate::bool_edit::run_of;
 use crate::bool_edit::{BoolEdit, BoolLoader, BoolModel, BoolRecoder};
@@ -359,7 +359,7 @@ pub(crate) trait Plain: for <'s>Lift<'s, W = Self> {
     ;
 }
 
-impl<T: RleValue, C: Codec> Plain for VWrite<T, C> {
+impl<T: RleValue, C: Codec> Plain for Write<T, C> {
     proof fn lemma_plain(v: T) {
     }
 
@@ -371,7 +371,7 @@ impl<T: RleValue, C: Codec> Plain for VWrite<T, C> {
     }
 }
 
-impl<T: RleValue, C: Codec> Plain for VOptWrite<T, C> {
+impl<T: RleValue, C: Codec> Plain for OptWrite<T, C> {
     proof fn lemma_plain(v: Option<T>) {
     }
 

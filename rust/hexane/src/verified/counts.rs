@@ -6,7 +6,7 @@
 //! every codec ([`Codec`]).
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`counts/imp.rs`), which has
 //! its contract word for word and is proved there.
 
@@ -26,6 +26,6 @@ pub(crate) use imp::lemma_bool_size;
 #[allow(unused_imports)]
 use imp::*;
 #[allow(unused_imports)]
-pub(crate) use imp::{VCounts, VB};
+pub(crate) use imp::{Bools, Counts};
 
 verus! {} // verus!

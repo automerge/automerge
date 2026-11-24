@@ -113,7 +113,7 @@
 //! [`counted_by_a_clone`]), and what the count is after an edit is
 //! there to compute with ([`the_count_after`]).
 //!
-//! A column is of a kind of index ([`VIndex`]), and what is said here
+//! A column is of a kind of index ([`Index`]), and what is said here
 //! of every value type and codec is said of every kind too: a client
 //! that is given a column or an iterator takes one of any kind, and so
 //! do those of [`round_trip`], [`load_then_save`],
@@ -409,13 +409,13 @@ use super::{
     min_i, only, past, produced, ranges_ascend, refused, run_units, run_values, runs_of, scan_of,
     scan_taken, sorted, sorted_for, splice_does, spliced_cut, splices_do, sum_of, summed, sums_fit,
     times, total_len, total_str_len, total_str_len_opt, ulebsize, unit_runs, window, windows,
-    AccColumn, AccIndex, AccIter, AccIterState, AccSeek, AccValue, Codec, Column, ColumnLoadIter,
-    ColumnValueRef, Decoder, DeltaColumn, DeltaDecoder, DeltaEdit, DeltaEncoder, DeltaEncoderState,
-    DeltaIter, DeltaIterState, DeltaRuns, DeltaValue, Edit, Encoder, EncoderState, FindByRange,
-    Get, Iter, IterState, LenBitIndex, LenIndex, PrefixColumn, PrefixIter, PrefixIterState,
-    PrefixSeek, PrefixValue, PrefixedValue, Ranges, RawColumn, RawColumnIter, RleValue, Runs,
-    Shiftable, SumIndex, Unshift, UnsignedPrefix, VAccum, VAccumulated, VAdds, VAmount, VDelta,
-    VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum,
+    AccColumn, AccIndex, AccIter, AccIterState, AccSeek, AccValue, Accum, Accumulated, Adds,
+    Amount, Codec, Column, ColumnLoadIter, ColumnValueRef, Decoder, Delta, DeltaColumn,
+    DeltaDecoder, DeltaEdit, DeltaEncoder, DeltaEncoderState, DeltaIter, DeltaIterState, DeltaRuns,
+    DeltaValue, Edit, Encoder, EncoderState, FindByRange, Get, Index, Iter, IterState, LenBitIndex,
+    LenIndex, Newtype, PrefixColumn, PrefixIter, PrefixIterState, PrefixSeek, PrefixValue,
+    PrefixedValue, Ranges, RawColumn, RawColumnIter, RleValue, Runs, Shiftable, Sum, SumIndex,
+    Unshift, UnsignedPrefix, VGet, VGroup, VKeeps, VSpec,
 };
 #[cfg(feature = "bijou64")]
 use crate::Bijou64;
@@ -442,7 +442,7 @@ verus! {
 /// ([`Get`]: for a number, the number), and what they are in a
 /// specification is [`VGet::svs`] of them (for numbers, themselves).
 #[allow(dead_code)]
-fn round_trip<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(input: &Vec<Get<'v, V>>)
+fn round_trip<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(input: &Vec<Get<'v, V>>)
     requires
         V::size_bound(VGet::svs(input@)) <= 0xffff_fff5,
         input@.len() <= usize::MAX - 3,
@@ -509,7 +509,7 @@ pub enum Action {
     Increment,
 }
 
-impl VNewtype for Action {
+impl Newtype for Action {
     type Base = u64;
 
     open spec fn base(v: Action) -> u64 {
@@ -679,7 +679,7 @@ fn bytes_or_null(a: &[u8], none: &[u8])
 /// What loads, saves back to the bytes it was loaded from: no two byte
 /// strings load as the same column. For any bytes, of any provenance.
 #[allow(dead_code)]
-fn load_then_save<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(bytes: &[u8]) {
+fn load_then_save<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(bytes: &[u8]) {
     if let Ok(col) = Column::<V, C, K>::load(bytes) {
         proof {
             Column::<V, C>::lemma_encoding(bytes@);
@@ -694,7 +694,7 @@ fn load_then_save<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(bytes: &[u8])
 /// ([`VKeeps::keeps`]), and a column they load as is of their values,
 /// for which its kind is kept. For every value type, codec and kind.
 #[allow(dead_code)]
-fn load_as_a_kind<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(bytes: &[u8]) -> (r: Option<Column<V, C, K>>)
+fn load_as_a_kind<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(bytes: &[u8]) -> (r: Option<Column<V, C, K>>)
     ensures
         Column::<V, C>::loadable(bytes@) && K::keeps(Column::<V, C>::values(bytes@)) ==> r is Some,
         r matches Some(c) ==> c@ == Column::<V, C>::values(bytes@) && K::keeps(c@),
@@ -880,7 +880,7 @@ fn only_nulls(x: &[u8], none: &[u8])
 /// the same bytes, and an edit of one leaves the other as it was. For
 /// every value type and codec.
 #[allow(dead_code)]
-fn clone_then_diverge<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(xs: &Vec<Get<'v, V>>, a: Get<'v, V>) {
+fn clone_then_diverge<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(xs: &Vec<Get<'v, V>>, a: Get<'v, V>) {
     let mut col = Column::<V, C, K>::new();
     col.splice_slice(0, 0, xs.as_slice());
     let ghost vs = VGet::svs(xs@);
@@ -943,7 +943,7 @@ fn clone_of_clone(x: &[u8]) {
 /// The client hands vectors over, of which Verus's library says what
 /// their iterators give. It proves nothing of an iterator itself.
 #[allow(dead_code)]
-fn collect_then_extend<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(a: Vec<Get<'v, V>>, b: Vec<Get<'v, V>>, c: Vec<Get<'v, V>>) {
+fn collect_then_extend<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(a: Vec<Get<'v, V>>, b: Vec<Get<'v, V>>, c: Vec<Get<'v, V>>) {
     let ghost (av, bv, cv) = (VGet::svs(a@), VGet::svs(b@), VGet::svs(c@));
     proof {
         VGet::lemma_svs(a@);
@@ -1011,7 +1011,7 @@ proof fn lemma_counted<G: VGet>(rs: Seq<Run<G>>)
 /// value, and the column is as much longer as the runs' counts are
 /// together. For every value type and codec.
 #[allow(dead_code)]
-fn runs_in<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(a: Get<'v, V>, b: Get<'v, V>, c: Get<'v, V>, more: Vec<Run<Get<'v, V>>>)
+fn runs_in<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(a: Get<'v, V>, b: Get<'v, V>, c: Get<'v, V>, more: Vec<Run<Get<'v, V>>>)
     requires
         a.sv() != b.sv(),
 {
@@ -1217,7 +1217,7 @@ proof fn lemma_sum_of(lens: Seq<usize>, i: int)
 /// save to less than 4 GiB finds no fault in what it saves. For every
 /// value type and codec.
 #[allow(dead_code)]
-fn slabs_and_validation<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(input: &Vec<Get<'v, V>>)
+fn slabs_and_validation<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(input: &Vec<Get<'v, V>>)
     requires
         V::size_bound(VGet::svs(input@)) <= u32::MAX,
 {
@@ -1268,7 +1268,7 @@ fn slabs_of_each(a: &Vec<u64>, b: &Vec<bool>)
 /// A column loaded from less than 4 GiB of bytes finds no fault in what
 /// it saves, which is those bytes. For any bytes, of any provenance.
 #[allow(dead_code)]
-fn load_then_validate<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(bytes: &[u8])
+fn load_then_validate<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(bytes: &[u8])
     requires
         bytes@.len() <= u32::MAX,
 {
@@ -1307,7 +1307,7 @@ fn later_of<'v, V: ColumnValueRef<C>, C: Codec>(a: Get<'v, V>, b: Get<'v, V>) ->
 /// order still. For every value type and codec, from the laws of the
 /// order alone ([`VSpec::lemma_below`]).
 #[allow(dead_code)]
-fn insert_in_order<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, x: Get<'v, V>) -> (at:
+fn insert_in_order<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, x: Get<'v, V>) -> (at:
     usize)
     requires
         sorted::<V>(old(col)@),
@@ -1378,7 +1378,7 @@ fn find_number(col: &Column<u32>, x: u32) -> (r: Range<usize>)
 }
 
 /// The client's own type is in the order of the numbers it is stored
-/// as, which is the client's to choose ([`VNewtype::base`]): `Set` (1)
+/// as, which is the client's to choose ([`Newtype::base`]): `Set` (1)
 /// is before `Delete` (3). In a column of some `Set`s and then some
 /// `Delete`s, the search for `Delete` gives the `Delete`s; that for
 /// `Increment` (4), which is after both, the empty range at the end;
@@ -1621,7 +1621,7 @@ fn find_the_gap(col: &Column<i64>, x: i64, m: usize) -> (r: Range<usize>)
 /// that each place holds what the function gave for the value that was
 /// there (`mapped`).
 #[allow(dead_code)]
-fn remap_as_it_is<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>)
+fn remap_as_it_is<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>)
     ensures
         final(col)@ == old(col)@,
 {
@@ -1819,7 +1819,7 @@ fn one_more(col: &mut Column<Option<u64>>)
 /// order: here each goes into a `Vec`, which then holds what the column
 /// does. For every value type and codec.
 #[allow(dead_code)]
-fn read_in_a_loop<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>) -> (out: Vec<Get<'a, V>>)
+fn read_in_a_loop<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &'a Column<V, C, K>) -> (out: Vec<Get<'a, V>>)
     ensures
         <Get<'a, V> as VGet>::svs(out@) == col@,
 {
@@ -1918,7 +1918,7 @@ fn every_other(col: &Column<i64>)
 /// The value two places on, if a column is that long: for every value
 /// type and codec.
 #[allow(dead_code)]
-fn the_third<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>) -> (r: Option<Get<'a, V>>)
+fn the_third<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &'a Column<V, C, K>) -> (r: Option<Get<'a, V>>)
     ensures
         match r {
             Some(v) => col@.len() > 2 && v.sv() == col@[2],
@@ -1982,7 +1982,7 @@ fn the_greatest(col: &Column<u64>) -> (r: u64)
 /// then goes its own way; and an iterator of no column gives nothing.
 /// For every value type and codec.
 #[allow(dead_code)]
-fn two_readers<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>)
+fn two_readers<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &'a Column<V, C, K>)
     requires
         col@.len() == 3,
 {
@@ -2010,7 +2010,7 @@ fn two_readers<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Col
 /// An iterator's window moved to a range of the column: a `for` loop
 /// then reads the column's values there. For every value type and codec.
 #[allow(dead_code)]
-fn in_the_range<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>, a: usize, b: usize) -> (out: Vec<
+fn in_the_range<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &'a Column<V, C, K>, a: usize, b: usize) -> (out: Vec<
     Get<'a, V>,
 >)
     requires
@@ -2079,7 +2079,7 @@ fn where_it_stands(col: &Column<u64>)
 /// gave, and its window ends there: where the range ended, or the
 /// column if that came first. For every value type and codec.
 #[allow(dead_code)]
-fn read_out<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, a: usize, b: usize) -> (r: (usize, usize, usize))
+fn read_out<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &Column<V, C, K>, a: usize, b: usize) -> (r: (usize, usize, usize))
     requires
         a <= b,
         a <= col@.len(),
@@ -2129,7 +2129,7 @@ fn read_out<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, 
 /// from the one to the other, and how many values the second window then
 /// has left: for every value type and codec.
 #[allow(dead_code)]
-fn at_two_places<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>, i: usize, j: usize, n: usize) -> (r: (
+fn at_two_places<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &'a Column<V, C, K>, i: usize, j: usize, n: usize) -> (r: (
     Get<'a, V>,
     Get<'a, V>,
     usize,
@@ -2157,7 +2157,7 @@ fn at_two_places<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a C
 /// How long an iterator's window is: that many values it has left,
 /// unless the window ends past the column and it has fewer.
 #[allow(dead_code)]
-fn window_len<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &Iter<'_, V, C, K>) -> (r: usize)
+fn window_len<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: &Iter<'_, V, C, K>) -> (r: usize)
     ensures
         r >= it.rest().len(),
         it.end_pos() <= it.column().len() ==> r == it.rest().len(),
@@ -2279,7 +2279,7 @@ fn told_by_the_call(col: &Column<u64>)
 /// the length: asked of the window's end alone. If it does, the iterator
 /// has left as many values as lie between where it stands and that end.
 #[allow(dead_code)]
-fn ends_within<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &Iter<'_, V, C, K>, len: usize) -> (r: bool)
+fn ends_within<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: &Iter<'_, V, C, K>, len: usize) -> (r: bool)
     requires
         len == it.column().len(),
     ensures
@@ -2298,7 +2298,7 @@ fn ends_within<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &Iter<'_, V,
 /// often as the column has it at its start and no more often; and no run
 /// only of a column with no value. For every value type and codec.
 #[allow(dead_code)]
-fn the_first_run<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
+fn the_first_run<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &'a Column<V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
     ensures
         match r {
             Some(run) => {
@@ -2321,7 +2321,7 @@ fn the_first_run<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a C
 /// and an iterator that gives no run has its window end where it stands.
 /// For every value type and codec.
 #[allow(dead_code)]
-fn runs_in_a_window<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(a: Get<'v, V>, b: Get<'v, V>)
+fn runs_in_a_window<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(a: Get<'v, V>, b: Get<'v, V>)
     requires
         a.sv() != b.sv(),
 {
@@ -2427,7 +2427,7 @@ proof fn lemma_runs_apart<T>(o: Seq<T>)
 /// its count says; none is of no value, and no two that follow one
 /// another are of the same value. For every value type and codec.
 #[allow(dead_code)]
-fn in_runs<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>) -> (out: Vec<Run<Get<'a, V>>>)
+fn in_runs<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &'a Column<V, C, K>) -> (out: Vec<Run<Get<'a, V>>>)
     ensures
         run_values(out@) == col@,
         forall|i: int| 0 <= i < out@.len() ==> (#[trigger] out@[i]).count >= 1,
@@ -2496,7 +2496,7 @@ proof fn lemma_counted_step<G>(rs: Seq<Run<G>>, k: int)
 /// counts add up to the length of the range, and adding them does not
 /// overflow. For every value type and codec.
 #[allow(dead_code)]
-fn count_by_runs<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, a: usize, b: usize) -> (n: usize)
+fn count_by_runs<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &Column<V, C, K>, a: usize, b: usize) -> (n: usize)
     requires
         a <= b <= col@.len(),
     ensures
@@ -2532,7 +2532,7 @@ fn count_by_runs<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V
 /// new column, make a column of the same values. For every value type
 /// and codec, and from a column of any kind of index into one of any.
 #[allow(dead_code)]
-fn copied_by_runs<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, K2: VIndex<V, C>>(col: &Column<V, C, K>) -> (r:
+fn copied_by_runs<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>, K2: Index<V, C>>(col: &Column<V, C, K>) -> (r:
     Column<V, C, K2>)
     ensures
         r@ == col@,
@@ -2574,7 +2574,7 @@ fn run_by_run(col: &Column<bool>)
 /// iterator had, as it gives them and as specifications have them; and
 /// what is left is those less the run.
 #[allow(dead_code)]
-fn told_by_a_run<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'a, V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
+fn told_by_a_run<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: Iter<'a, V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
     ensures
         match r {
             Some(run) => head_run(it.items(), run.value, run.count as int) && head_run(
@@ -2608,7 +2608,7 @@ fn told_by_a_run<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'
 /// The same of the iterator of runs: what its `next` says of the
 /// iterator of values whose runs it gives.
 #[allow(dead_code)]
-fn told_by_the_runs<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'a, V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
+fn told_by_the_runs<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: Iter<'a, V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
     ensures
         match r {
             Some(run) => head_run(it.items(), run.value, run.count as int) && head_run(
@@ -2642,7 +2642,7 @@ fn told_by_the_runs<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Ite
 
 /// Any iterator has left no more values than a `usize` counts, and as
 /// many as a specification has of them.
-proof fn no_more_than_counted<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'a, V, C, K>)
+proof fn no_more_than_counted<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: Iter<'a, V, C, K>)
     ensures
         it.items().len() <= usize::MAX,
         it.rest().len() == it.items().len(),
@@ -2655,7 +2655,7 @@ proof fn no_more_than_counted<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C
 /// is that is `x`, or that none of them is; and where that leaves the
 /// iterator.
 #[allow(dead_code)]
-fn told_by_a_scan<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'a, V, C, K>, x: Get<'_, V>) -> (r: Option<usize>)
+fn told_by_a_scan<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: Iter<'a, V, C, K>, x: Get<'_, V>) -> (r: Option<usize>)
     ensures
         match r {
             Some(k) => {
@@ -2690,7 +2690,7 @@ fn told_by_a_scan<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<
 /// the column's values alone: a scan of an iterator over that window.
 /// For every value type and codec.
 #[allow(dead_code)]
-fn first_place_in<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, x: Get<'_, V>, a: usize, b: usize) -> (r:
+fn first_place_in<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &Column<V, C, K>, x: Get<'_, V>, a: usize, b: usize) -> (r:
     Option<usize>)
     requires
         a <= b <= col@.len(),
@@ -2726,7 +2726,7 @@ fn first_place_in<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<
 /// the last one stopped: the places come in rising order, each holds
 /// `x`, and no other place does. For every value type and codec.
 #[allow(dead_code)]
-fn all_places<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, x: Get<'_, V>) -> (out: Vec<usize>)
+fn all_places<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &Column<V, C, K>, x: Get<'_, V>) -> (out: Vec<usize>)
     ensures
         forall|i: int, j: int| 0 <= i < j < out@.len() ==> out@[i] < out@[j],
         forall|i: int| 0 <= i < out@.len() ==> out@[i] < col@.len() && col@[out@[i] as int] == x.sv(),
@@ -2794,7 +2794,7 @@ fn all_places<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C
 /// if they are in order as far as `x` can tell; and where that leaves
 /// the iterator.
 #[allow(dead_code)]
-fn told_by_a_seek<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'a, V, C, K>, x: Get<'_, V>, range: Range<usize>) -> (r:
+fn told_by_a_seek<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: Iter<'a, V, C, K>, x: Get<'_, V>, range: Range<usize>) -> (r:
     Range<usize>)
     requires
         it.pos() <= range.start <= range.end <= it.pos() + it.rest().len(),
@@ -2825,7 +2825,7 @@ fn told_by_a_seek<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<
 /// takes it to where the range starts, or leaves it where it is if that
 /// is behind it; and so does a range that ends behind the iterator.
 #[allow(dead_code)]
-fn seek_out_of_range<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'a, V, C, K>, x: Get<'_, V>, range: Range<usize>) -> (r:
+fn seek_out_of_range<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: Iter<'a, V, C, K>, x: Get<'_, V>, range: Range<usize>) -> (r:
     Range<usize>)
     ensures
         r.start == r.end || (range.start < range.end && it.pos() < range.end && range.start < it.pos()
@@ -2850,7 +2850,7 @@ fn seek_out_of_range<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: It
 /// stand, with the same end to its window. For every value type and
 /// codec.
 #[allow(dead_code)]
-fn find_in_the_rest<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &mut Iter<'_, V, C, K>, x: Get<'_, V>) -> (r: Range<usize>)
+fn find_in_the_rest<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: &mut Iter<'_, V, C, K>, x: Get<'_, V>) -> (r: Range<usize>)
     requires
         sorted::<V>(old(it).rest()),
     ensures
@@ -2925,7 +2925,7 @@ fn seek_then_read(col: &Column<u64>, x: u64) -> (r: Range<usize>)
 /// the iterator has left its column's values in that window, and that
 /// the state fits the column the iterator reads.
 #[allow(dead_code)]
-fn told_by_a_suspend<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &Iter<'a, V, C, K>, col: &Column<V, C, K>) -> (s:
+fn told_by_a_suspend<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: &Iter<'a, V, C, K>, col: &Column<V, C, K>) -> (s:
     IterState)
     ensures
         s.pos() == it.pos(),
@@ -2943,7 +2943,7 @@ fn told_by_a_suspend<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &I
 /// does, and has left this column's values in the state's window, which
 /// is its own window too unless the state stands at the column's end.
 #[allow(dead_code)]
-fn told_by_a_resume<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(s: &IterState, col: &'a Column<V, C, K>) -> (r: Result<
+fn told_by_a_resume<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(s: &IterState, col: &'a Column<V, C, K>) -> (r: Result<
     Iter<'a, V, C, K>,
     PackError,
 >)
@@ -2963,7 +2963,7 @@ fn told_by_a_resume<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(s: &Ite
 /// for on its own: an iterator that reads a column has that column's
 /// values for its own, and one that reads none has none.
 #[allow(dead_code)]
-fn told_by_the_source<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &Iter<'a, V, C, K>, col: &Column<V, C, K>)
+fn told_by_the_source<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: &Iter<'a, V, C, K>, col: &Column<V, C, K>)
     ensures
         it.source() == Some(*col) ==> it.column() == col@,
         it.source() is None ==> it.column().len() == 0,
@@ -2977,7 +2977,7 @@ fn told_by_the_source<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &
 /// it reads. Suspended and resumed on that column, it is sure to be
 /// given back, where it stood and with the same values left.
 #[allow(dead_code)]
-fn handed_over<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'_, V, C, K>, col: &'a Column<V, C, K>) -> (on:
+fn handed_over<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: Iter<'_, V, C, K>, col: &'a Column<V, C, K>) -> (on:
     Iter<'a, V, C, K>)
     requires
         it.source() == Some(*col),
@@ -2999,7 +2999,7 @@ fn handed_over<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: Iter<'_,
 /// to be given, and reads the value at `k + 1`. For every value type
 /// and codec.
 #[allow(dead_code)]
-fn stop_and_go_on<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>, k: usize) -> (r: (
+fn stop_and_go_on<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &'a Column<V, C, K>, k: usize) -> (r: (
     Option<Get<'a, V>>,
     Option<Get<'a, V>>,
 ))
@@ -3028,7 +3028,7 @@ fn stop_and_go_on<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a 
 /// The states of an iterator over a range of a column and of one over
 /// all of it fit the column, and stand and end where the iterators do.
 #[allow(dead_code)]
-fn of_a_range<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, a: usize, b: usize) -> (r: (
+fn of_a_range<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &Column<V, C, K>, a: usize, b: usize) -> (r: (
     IterState,
     IterState,
 ))
@@ -3048,7 +3048,7 @@ fn of_a_range<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C
 /// column; if it does fit one, the iterator given stands at 0 with
 /// nothing to give.
 #[allow(dead_code)]
-fn of_no_column<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>) -> (r: bool)
+fn of_no_column<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &Column<V, C, K>) -> (r: bool)
 {
     let it = Iter::<V, C, K>::default();
     assert(it.source() is None);
@@ -3067,7 +3067,7 @@ fn of_no_column<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V,
 /// No move of an iterator changes the column it reads: of any iterator,
 /// each move asked on its own.
 #[allow(dead_code)]
-fn reads_the_same_column<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn reads_the_same_column<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     it: &mut Iter<'a, V, C, K>,
     which: u8,
     n: usize,
@@ -3130,7 +3130,7 @@ fn after_every_move(col: &Column<u64>, x: u64) -> (s: IterState)
 /// is the one the state was taken of: if an iterator is given, the
 /// value it gives is that column's at the state's place.
 #[allow(dead_code)]
-fn resumed_on_any<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(s: &IterState, col: &'a Column<V, C, K>) -> (r: Option<
+fn resumed_on_any<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(s: &IterState, col: &'a Column<V, C, K>) -> (r: Option<
     Get<'a, V>,
 >)
     ensures
@@ -3392,7 +3392,7 @@ fn encode_then_load<'v, V: ColumnValueRef<C>, C: Codec>(input: &Vec<Get<'v, V>>)
 /// A column's values, given to an encoder by the column's iterator, are
 /// saved as the column saves them.
 #[allow(dead_code)]
-fn reencoded<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>) -> (r: Vec<u8>)
+fn reencoded<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &Column<V, C, K>) -> (r: Vec<u8>)
     ensures
         r@ == Column::<V, C>::encoding(col@),
 {
@@ -5310,7 +5310,7 @@ fn load_opt_text(bytes: &[u8]) {
 /// after a push the column counts one more, and refuses the state. For
 /// every value type and codec.
 #[allow(dead_code)]
-fn ended_by_a_push<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>) -> (r: bool)
+fn ended_by_a_push<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>) -> (r: bool)
     ensures
         !r,
         final(col)@ == old(col)@.push(v.sv()),
@@ -5330,7 +5330,7 @@ fn ended_by_a_push<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Co
 /// is one whatever its iterator gives, and a remap is one though it
 /// leaves each value as it was.
 #[allow(dead_code)]
-fn ended_by_each_edit<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn ended_by_each_edit<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     col: &mut Column<V, C, K>,
     v: Get<'v, V>,
     more: Vec<Get<'v, V>>,
@@ -5385,7 +5385,7 @@ fn ended_by_each_edit<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
 /// nothing, an extend by nothing, and splices of what an iterator with
 /// no item gives, values or runs.
 #[allow(dead_code)]
-fn no_edits<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize, none: &[Get<'v, V>])
+fn no_edits<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, at: usize, none: &[Get<'v, V>])
     requires
         at <= old(col)@.len(),
         none@.len() == 0,
@@ -5423,7 +5423,7 @@ fn no_edits<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Colum
 /// A column of no value is not edited by a `clear`: it counts what it
 /// did. One of any value is.
 #[allow(dead_code)]
-fn cleared<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>)
+fn cleared<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>)
     ensures
         final(col)@.len() == 0,
         old(col)@.len() == 0 ==> final(col).edits() == old(col).edits(),
@@ -5437,7 +5437,7 @@ fn cleared<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, 
 /// column's count after `k` of them, for any `k` a `usize` holds, is
 /// not what it was (`lemma_after_edits`).
 #[allow(dead_code)]
-fn ended_by_many<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>, k: usize) -> (r: bool)
+fn ended_by_many<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>, k: usize) -> (r: bool)
     requires
         k > 0,
     ensures
@@ -5470,7 +5470,7 @@ fn ended_by_many<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Colu
 /// removal of what was pushed the column holds what it did, and refuses
 /// the state taken before the two.
 #[allow(dead_code)]
-fn ended_though_undone<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>) -> (r: bool)
+fn ended_though_undone<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>) -> (r: bool)
     ensures
         !r,
         final(col)@ == old(col)@,
@@ -5498,7 +5498,7 @@ fn ended_though_undone<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mu
 /// state of the column, and the column, which nothing has edited, gives
 /// an iterator for it still.
 #[allow(dead_code)]
-fn a_copy_edited<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, v: Get<'_, V>) -> (r: (bool, bool))
+fn a_copy_edited<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &Column<V, C, K>, v: Get<'_, V>) -> (r: (bool, bool))
     ensures
         !r.0,
         r.1,
@@ -5518,7 +5518,7 @@ fn a_copy_edited<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V
 /// for on its own. A splice of a slice: an edit more if it deletes a
 /// value or the slice has one.
 #[allow(dead_code)]
-fn counted_by_a_splice<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn counted_by_a_splice<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     col: &mut Column<V, C, K>,
     at: usize,
     del: usize,
@@ -5538,7 +5538,7 @@ fn counted_by_a_splice<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
 /// runs: an edit more if it deletes a value or leaves the column of
 /// another length.
 #[allow(dead_code)]
-fn counted_by_a_splice_iter<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, I: IntoIterator<Item = Get<'v, V>>>(
+fn counted_by_a_splice_iter<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>, I: IntoIterator<Item = Get<'v, V>>>(
     col: &mut Column<V, C, K>,
     at: usize,
     del: usize,
@@ -5555,7 +5555,7 @@ fn counted_by_a_splice_iter<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>,
 }
 
 #[allow(dead_code)]
-fn counted_by_a_splice_runs<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, I: IntoIterator<Item = Run<Get<'v, V>>>>(
+fn counted_by_a_splice_runs<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>, I: IntoIterator<Item = Run<Get<'v, V>>>>(
     col: &mut Column<V, C, K>,
     at: usize,
     del: usize,
@@ -5574,7 +5574,7 @@ fn counted_by_a_splice_runs<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>,
 /// An `extend`, by any iterator: an edit more if the column is the
 /// longer for it.
 #[allow(dead_code)]
-fn counted_by_an_extend<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, I: IntoIterator<Item = Get<'v, V>>>(
+fn counted_by_an_extend<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>, I: IntoIterator<Item = Get<'v, V>>>(
     col: &mut Column<V, C, K>,
     values: I,
 )
@@ -5587,7 +5587,7 @@ fn counted_by_an_extend<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, I: 
 
 /// An insert, a push and a removal: an edit more, each.
 #[allow(dead_code)]
-fn counted_by_an_insert<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize, v: Get<'_, V>)
+fn counted_by_an_insert<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, at: usize, v: Get<'_, V>)
     requires
         at <= old(col)@.len(),
     ensures
@@ -5597,7 +5597,7 @@ fn counted_by_an_insert<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &m
 }
 
 #[allow(dead_code)]
-fn counted_by_a_push<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>)
+fn counted_by_a_push<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>)
     ensures
         final(col).edits() == after_edit(old(col).edits()),
 {
@@ -5605,7 +5605,7 @@ fn counted_by_a_push<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut 
 }
 
 #[allow(dead_code)]
-fn counted_by_a_remove<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize)
+fn counted_by_a_remove<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, at: usize)
     requires
         at < old(col)@.len(),
     ensures
@@ -5616,7 +5616,7 @@ fn counted_by_a_remove<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mu
 
 /// A `truncate`: an edit more if the column was longer than asked for.
 #[allow(dead_code)]
-fn counted_by_a_truncate<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, len: usize)
+fn counted_by_a_truncate<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, len: usize)
     ensures
         len < old(col)@.len() ==> final(col).edits() == after_edit(old(col).edits()),
         len >= old(col)@.len() ==> final(col).edits() == old(col).edits(),
@@ -5626,7 +5626,7 @@ fn counted_by_a_truncate<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &
 
 /// A `remove_n`: an edit more unless it removes no value.
 #[allow(dead_code)]
-fn counted_by_a_remove_n<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize, n: usize)
+fn counted_by_a_remove_n<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, at: usize, n: usize)
     requires
         at <= old(col)@.len(),
         n <= old(col)@.len() - at,
@@ -5639,7 +5639,7 @@ fn counted_by_a_remove_n<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &
 
 /// A `clear`: an edit more if the column held a value.
 #[allow(dead_code)]
-fn counted_by_a_clear<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>)
+fn counted_by_a_clear<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>)
     ensures
         old(col)@.len() > 0 ==> final(col).edits() == after_edit(old(col).edits()),
         old(col)@.len() == 0 ==> final(col).edits() == old(col).edits(),
@@ -5650,7 +5650,7 @@ fn counted_by_a_clear<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut
 /// A remap: an edit more, whatever the function and whatever the
 /// column.
 #[allow(dead_code)]
-fn counted_by_a_remap<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, F: Fn(V) -> V>(col: &mut Column<V, C, K>, f: F)
+fn counted_by_a_remap<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>, F: Fn(V) -> V>(col: &mut Column<V, C, K>, f: F)
     requires
         forall|v: V| old(col)@.contains(V::sv_of(v)) ==> #[trigger] call_requires(f, (v,)),
     ensures
@@ -5661,7 +5661,7 @@ fn counted_by_a_remap<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, F: Fn(V) 
 
 /// And a copy: what the column counts.
 #[allow(dead_code)]
-fn counted_by_a_clone<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>) -> (r: Column<V, C, K>)
+fn counted_by_a_clone<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &Column<V, C, K>) -> (r: Column<V, C, K>)
     ensures
         r.edits() == col.edits(),
         r@ == col@,
@@ -5737,7 +5737,7 @@ fn decode_all<'a, V: ColumnValueRef<C>, C: Codec>(bytes: &'a [u8]) -> (out: Vec<
 /// when it runs, and it reads as many as the column has. For every
 /// value type and codec.
 #[allow(dead_code)]
-fn decoded_as_held<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>) -> (r: bool)
+fn decoded_as_held<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &Column<V, C, K>) -> (r: bool)
     ensures
         r,
 {
@@ -6141,7 +6141,7 @@ fn find_decoded(bytes: &[u8], x: u32) -> (r: (usize, usize))
 /// value type and codec, from what the order is said to be
 /// ([`VSpec::lemma_below`]).
 #[allow(dead_code)]
-fn scanned_as_searched<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>, x: Get<'_, V>) -> (r: bool)
+fn scanned_as_searched<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &Column<V, C, K>, x: Get<'_, V>) -> (r: bool)
     requires
         sorted::<V>(col@),
     ensures
@@ -8204,7 +8204,7 @@ fn told_by_a_prefix_seek<'a, V: PrefixValue>(seek: &PrefixSeek<'a, V>) -> (r: (u
 #[allow(dead_code)]
 pub struct Meta(pub u64);
 
-impl VNewtype for Meta {
+impl Newtype for Meta {
     type Base = u64;
 
     open spec fn base(v: Meta) -> u64 {
@@ -8223,7 +8223,7 @@ impl VNewtype for Meta {
     }
 }
 
-impl VAmount for Meta {
+impl Amount for Meta {
     type Sum = u64;
 
     open spec fn amount_of(v: Meta) -> int {
@@ -8475,7 +8475,7 @@ proof fn lemma_flags_times(n: nat, b: Flags)
     }
 }
 
-impl VAccum for Flags {
+impl Accum for Flags {
     fn new_zero() -> Flags {
         Flags(0)
     }
@@ -8513,7 +8513,7 @@ impl VAccum for Flags {
 #[allow(dead_code)]
 pub struct Mark(pub u64);
 
-impl VNewtype for Mark {
+impl Newtype for Mark {
     type Base = u64;
 
     open spec fn base(v: Mark) -> u64 {
@@ -8532,7 +8532,7 @@ impl VNewtype for Mark {
     }
 }
 
-impl VAdds for Mark {
+impl Adds for Mark {
     type Acc = Flags;
 
     open spec fn adds_of(v: Mark) -> Flags {
@@ -8634,7 +8634,7 @@ impl VGroup for Board {
     }
 }
 
-impl VAccum for Board {
+impl Accum for Board {
     fn new_zero() -> Board {
         Board { lit: 0, turned: false }
     }
@@ -8662,7 +8662,7 @@ impl VAccum for Board {
 #[allow(dead_code)]
 pub struct Step(pub u64);
 
-impl VNewtype for Step {
+impl Newtype for Step {
     type Base = u64;
 
     open spec fn base(v: Step) -> u64 {
@@ -8681,7 +8681,7 @@ impl VNewtype for Step {
     }
 }
 
-impl VAdds for Step {
+impl Adds for Step {
     type Acc = Board;
 
     open spec fn adds_of(v: Step) -> Board {
@@ -8696,7 +8696,7 @@ impl VAdds for Step {
 /// What one, two and three values add up to, in the order they are in:
 /// a client's own unfolding of [`accumulated`], which it can read.
 #[allow(dead_code)]
-proof fn the_acc_of_three<V: VAccumulated>(a: <V as VSpec>::S, b: <V as VSpec>::S, c: <V as VSpec>::S)
+proof fn the_acc_of_three<V: Accumulated>(a: <V as VSpec>::S, b: <V as VSpec>::S, c: <V as VSpec>::S)
     ensures
         accumulated::<V>(seq![a]) == V::adds(a),
         accumulated::<V>(seq![a, b]) == <V::Acc as VGroup>::plus(V::adds(a), V::adds(b)),
@@ -8761,7 +8761,7 @@ fn a_null_adds_no_mark(a: Mark, b: Mark) -> (r: Flags)
 /// where the position is past the end. For every type an accumulator
 /// column holds, and every codec.
 #[allow(dead_code)]
-fn told_by_an_acc_prefix<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, index: usize) -> (r:
+fn told_by_an_acc_prefix<V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, index: usize) -> (r:
     V::Acc)
     ensures
         index <= col@.len() ==> r == accumulated::<V>(col@.take(index as int)),
@@ -8773,7 +8773,7 @@ fn told_by_an_acc_prefix<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &Ac
 /// What `get_total` says, on its own: what the values through the
 /// position add up to.
 #[allow(dead_code)]
-fn told_by_an_acc_total<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, index: usize) -> (r:
+fn told_by_an_acc_total<V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, index: usize) -> (r:
     V::Acc)
     ensures
         index < col@.len() ==> r == accumulated::<V>(col@.take(index + 1)),
@@ -8786,7 +8786,7 @@ fn told_by_an_acc_total<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &Acc
 /// up to, of those of them that the column has, and nothing where there
 /// are none.
 #[allow(dead_code)]
-fn told_by_an_acc_range<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+fn told_by_an_acc_range<V: Accumulated + ColumnValueRef<C>, C: Codec>(
     col: &AccColumn<V, C>,
     start: usize,
     end: usize,
@@ -8803,7 +8803,7 @@ fn told_by_an_acc_range<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
 /// `n` times over, for every accumulator, whether it adds them as the
 /// trait gives it or in a way of its own.
 #[allow(dead_code)]
-fn told_by_add_times<A: VAccum>(a: &mut A, b: &A, n: usize)
+fn told_by_add_times<A: Accum>(a: &mut A, b: &A, n: usize)
     ensures
         *final(a) == A::plus(*old(a), times::<A>(n as nat, *b)),
 {
@@ -8814,7 +8814,7 @@ fn told_by_add_times<A: VAccum>(a: &mut A, b: &A, n: usize)
 /// accumulator: what a client that is given one counts on. Here, that
 /// a new one is what no values add up to.
 #[allow(dead_code)]
-fn told_by_new_zero<A: VAccum>() -> (r: A)
+fn told_by_new_zero<A: Accum>() -> (r: A)
     ensures
         r == A::zero(),
 {
@@ -8823,7 +8823,7 @@ fn told_by_new_zero<A: VAccum>() -> (r: A)
 
 /// What `add_acc` says, on its own: the accumulator, and then `b`.
 #[allow(dead_code)]
-fn told_by_add_acc<A: VAccum>(a: &mut A, b: &A)
+fn told_by_add_acc<A: Accum>(a: &mut A, b: &A)
     ensures
         *final(a) == A::plus(*old(a), *b),
 {
@@ -8833,7 +8833,7 @@ fn told_by_add_acc<A: VAccum>(a: &mut A, b: &A)
 /// What `sub_acc` says, on its own: what, added after `b`, gives the
 /// accumulator there was.
 #[allow(dead_code)]
-fn told_by_sub_acc<A: VAccum>(a: &mut A, b: &A)
+fn told_by_sub_acc<A: Accum>(a: &mut A, b: &A)
     ensures
         *final(a) == A::minus(*old(a), *b),
 {
@@ -8842,7 +8842,7 @@ fn told_by_sub_acc<A: VAccum>(a: &mut A, b: &A)
 
 /// What `dup` says, on its own: a copy.
 #[allow(dead_code)]
-fn told_by_dup<A: VAccum>(a: &A) -> (r: A)
+fn told_by_dup<A: Accum>(a: &A) -> (r: A)
     ensures
         r == *a,
 {
@@ -8852,7 +8852,7 @@ fn told_by_dup<A: VAccum>(a: &A) -> (r: A)
 /// What `acc_of` says, on its own: what the value adds, for every type
 /// of a client's that says it.
 #[allow(dead_code)]
-fn told_by_acc_of<T: VAdds>(v: T) -> (r: <T as VAdds>::Acc)
+fn told_by_acc_of<T: Adds>(v: T) -> (r: <T as Adds>::Acc)
     ensures
         r == T::adds_of(v),
 {
@@ -8864,7 +8864,7 @@ fn told_by_acc_of<T: VAdds>(v: T) -> (r: <T as VAdds>::Acc)
 /// whether or not it adds the same in either order. What is taken away
 /// is what was there first.
 #[allow(dead_code)]
-fn added_then_taken_away<A: VAccum>(a: &A, b: &A) -> (r: A)
+fn added_then_taken_away<A: Accum>(a: &A, b: &A) -> (r: A)
     ensures
         r == *b,
 {
@@ -8882,7 +8882,7 @@ fn added_then_taken_away<A: VAccum>(a: &A, b: &A) -> (r: A)
 /// range do, is what those before its end do: the three answers of a
 /// column agree, whatever the accumulator and in the order it adds.
 #[allow(dead_code)]
-fn a_range_added_after<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+fn a_range_added_after<V: Accumulated + ColumnValueRef<C>, C: Codec>(
     col: &AccColumn<V, C>,
     start: usize,
     end: usize,
@@ -8904,7 +8904,7 @@ fn a_range_added_after<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
 /// It is what `sum_range` answers, by the laws of the accumulator
 /// alone.
 #[allow(dead_code)]
-fn a_range_by_taking_away<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+fn a_range_by_taking_away<V: Accumulated + ColumnValueRef<C>, C: Codec>(
     col: &AccColumn<V, C>,
     start: usize,
     end: usize,
@@ -8929,7 +8929,7 @@ fn a_range_by_taking_away<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
 /// wherever they load as a plain column, with the values a plain column
 /// would have of them.
 #[allow(dead_code)]
-fn load_as_an_acc<V: VAccumulated + ColumnValueRef<C>, C: Codec>(bytes: &[u8]) -> (r: Option<AccColumn<V, C>>)
+fn load_as_an_acc<V: Accumulated + ColumnValueRef<C>, C: Codec>(bytes: &[u8]) -> (r: Option<AccColumn<V, C>>)
     ensures
         Column::<V, C>::loadable(bytes@) ==> r is Some,
         r matches Some(c) ==> c@ == Column::<V, C>::values(bytes@),
@@ -8940,7 +8940,7 @@ fn load_as_an_acc<V: VAccumulated + ColumnValueRef<C>, C: Codec>(bytes: &[u8]) -
 /// A plain column's values as an accumulator column, made of its runs:
 /// there is one of any values.
 #[allow(dead_code)]
-fn added_up<V: VAccumulated + ColumnValueRef<C>, C: Codec>(plain: &Column<V, C>) -> (r: AccColumn<V, C>)
+fn added_up<V: Accumulated + ColumnValueRef<C>, C: Codec>(plain: &Column<V, C>) -> (r: AccColumn<V, C>)
     ensures
         r@ == plain@,
 {
@@ -8971,7 +8971,7 @@ fn a_mark_put_in(col: &mut AccColumn<Mark>, at: usize, v: Mark) -> (r: Flags)
 /// the accumulator's to do in one step where it has a shorter way. For
 /// every type of a client's that says what its values add.
 #[allow(dead_code)]
-fn added_by_runs<T: VAdds, C: Codec>(col: &AccColumn<T, C>) -> (r: <T as VAdds>::Acc)
+fn added_by_runs<T: Adds, C: Codec>(col: &AccColumn<T, C>) -> (r: <T as Adds>::Acc)
     ensures
         r == accumulated::<T>(col@),
 {
@@ -8983,7 +8983,7 @@ fn added_by_runs<T: VAdds, C: Codec>(col: &AccColumn<T, C>) -> (r: <T as VAdds>:
         lemma_runs_of_values(all);
         assert(run_values(rs.take(0)).len() == 0);
     }
-    let mut acc = <<T as VAdds>::Acc as VAccum>::new_zero();
+    let mut acc = <<T as Adds>::Acc as Accum>::new_zero();
     for run in at: it.runs()
         invariant
             at.seq() == rs,
@@ -9058,7 +9058,7 @@ fn steps_in_order() -> (r: (Board, Board))
 /// it add up to. For every type an accumulator column holds, and every
 /// codec.
 #[allow(dead_code)]
-fn running_accs<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>) -> (out: Vec<V::Acc>)
+fn running_accs<V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>) -> (out: Vec<V::Acc>)
     ensures
         out@.len() == col@.len(),
         forall|i: int| 0 <= i < out@.len() ==> #[trigger] out@[i] == accumulated::<V>(col@.take(i + 1)),
@@ -9084,7 +9084,7 @@ fn running_accs<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V
 /// values before it add up to: counted from the column's start, though
 /// the iterator reads only the range.
 #[allow(dead_code)]
-fn accs_in_a_range<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, a: usize, b: usize) -> (out:
+fn accs_in_a_range<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, a: usize, b: usize) -> (out:
     Vec<(Get<'a, V>, V::Acc)>)
     requires
         a <= b <= col@.len(),
@@ -9118,7 +9118,7 @@ fn accs_in_a_range<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a A
 /// position, what the values before it add up to and what those through
 /// it do, which is the first and then what the value adds.
 #[allow(dead_code)]
-fn a_value_with_its_accs<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, i: usize) -> (r: (
+fn a_value_with_its_accs<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, i: usize) -> (r: (
     V::Acc,
     Get<'a, V>,
     V::Acc,
@@ -9138,7 +9138,7 @@ fn a_value_with_its_accs<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col:
 /// The sums that come with a value are the sums the column answers
 /// with for its position.
 #[allow(dead_code)]
-fn accs_two_ways<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, i: usize) -> (r: (
+fn accs_two_ways<V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, i: usize) -> (r: (
     (V::Acc, V::Acc),
     (V::Acc, V::Acc),
 ))
@@ -9156,7 +9156,7 @@ fn accs_two_ways<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<
 /// through the value is the running sum after, and the second is the
 /// first and then what the value adds.
 #[allow(dead_code)]
-fn a_step_with_its_accs<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>) -> (r: Option<
+fn a_step_with_its_accs<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>) -> (r: Option<
     (V::Acc, Get<'a, V>, V::Acc),
 >)
     ensures
@@ -9187,7 +9187,7 @@ fn a_step_with_its_accs<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &
 /// where the range ends. It is what the column answers with for the
 /// range.
 #[allow(dead_code)]
-fn added_by_moving<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, a: usize, b: usize) -> (r: (
+fn added_by_moving<V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, a: usize, b: usize) -> (r: (
     V::Acc,
     V::Acc,
 ))
@@ -9207,7 +9207,7 @@ fn added_by_moving<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColum
 /// Two values read with one iterator, which steps over the values
 /// before each: the sums through them count the values stepped over.
 #[allow(dead_code)]
-fn two_skips_added<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, i: usize, j: usize) -> (r: (
+fn two_skips_added<V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, i: usize, j: usize) -> (r: (
     V::Acc,
     V::Acc,
 ))
@@ -9226,7 +9226,7 @@ fn two_skips_added<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColum
 /// The running sum of an iterator whose sum counts from the column's
 /// start is what the column answers with for where it stands.
 #[allow(dead_code)]
-fn a_running_acc_two_ways<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+fn a_running_acc_two_ways<V: Accumulated + ColumnValueRef<C>, C: Codec>(
     it: &AccIter<'_, V, C>,
     col: &AccColumn<V, C>,
 ) -> (r: (V::Acc, V::Acc))
@@ -9313,7 +9313,7 @@ fn moved_with_accs(col: &AccColumn<Step>)
 /// its sum counts from: the running sum is what the column's values
 /// from there up to the iterator add up to.
 #[allow(dead_code)]
-fn told_of_the_running_acc<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: V::Acc)
+fn told_of_the_running_acc<V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: V::Acc)
     ensures
         it.base_pos() <= it.pos() <= it.column().len(),
         r == it.total(),
@@ -9325,7 +9325,7 @@ fn told_of_the_running_acc<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &A
 /// The running sum under its other name: before the value the iterator
 /// is to give next.
 #[allow(dead_code)]
-fn told_of_the_acc_before<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: V::Acc)
+fn told_of_the_acc_before<V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: V::Acc)
     ensures
         it.base_pos() <= it.pos() <= it.column().len(),
         r == it.total(),
@@ -9338,7 +9338,7 @@ fn told_of_the_acc_before<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &Ac
 /// the values left, with the sums before it and through it; and that it
 /// reads the values of its column.
 #[allow(dead_code)]
-fn told_of_the_accs_left<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>)
+fn told_of_the_accs_left<V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>)
     ensures
         it.items().len() == it.rest().len(),
         forall|i: int|
@@ -9366,7 +9366,7 @@ fn told_of_the_accs_left<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &Acc
 /// iterator reads the column, has all its values left, and its sum
 /// counts from the column's start and is what no values add up to.
 #[allow(dead_code)]
-fn told_by_an_acc_iter<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>) -> (it: AccIter<
+fn told_by_an_acc_iter<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>) -> (it: AccIter<
     'a,
     V,
     C,
@@ -9387,7 +9387,7 @@ fn told_by_an_acc_iter<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &
 /// of the range left, and its sum counts from the column's start, so it
 /// is what the values before the range add up to.
 #[allow(dead_code)]
-fn told_by_an_acc_iter_range<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+fn told_by_an_acc_iter_range<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(
     col: &'a AccColumn<V, C>,
     start: usize,
     end: usize,
@@ -9409,7 +9409,7 @@ fn told_by_an_acc_iter_range<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
 /// What `get_prefixed` says by itself of an accumulator column, of any
 /// position.
 #[allow(dead_code)]
-fn told_by_an_acc_get_prefixed<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, index: usize) -> (r:
+fn told_by_an_acc_get_prefixed<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, index: usize) -> (r:
     Option<AccValue<'a, V>>)
     ensures
         index < col@.len() ==> {
@@ -9427,7 +9427,7 @@ fn told_by_an_acc_get_prefixed<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec
 /// What a value with its sums says of the sum through it: a copy of the
 /// one it holds.
 #[allow(dead_code)]
-fn told_by_an_acc_values_total<'a, V: VAccumulated>(pv: &AccValue<'a, V>) -> (r: V::Acc)
+fn told_by_an_acc_values_total<'a, V: Accumulated>(pv: &AccValue<'a, V>) -> (r: V::Acc)
     ensures
         r == pv.total,
         r == pv.total(),
@@ -9439,7 +9439,7 @@ fn told_by_an_acc_values_total<'a, V: VAccumulated>(pv: &AccValue<'a, V>) -> (r:
 /// through it, and then what undoes what the value adds, which is what
 /// gives nothing when added after that.
 #[allow(dead_code)]
-fn told_by_an_acc_values_prefix<'a, V: VAccumulated>(pv: &AccValue<'a, V>) -> (r: V::Acc)
+fn told_by_an_acc_values_prefix<'a, V: Accumulated>(pv: &AccValue<'a, V>) -> (r: V::Acc)
     ensures
         r == pv.prefix(),
         r == <V::Acc as VGroup>::plus(
@@ -9452,7 +9452,7 @@ fn told_by_an_acc_values_prefix<'a, V: VAccumulated>(pv: &AccValue<'a, V>) -> (r
 
 /// What a copy of a value with its sums is: the same.
 #[allow(dead_code)]
-fn told_by_an_acc_values_clone<'a, V: VAccumulated>(pv: &AccValue<'a, V>) -> (r: AccValue<'a, V>)
+fn told_by_an_acc_values_clone<'a, V: Accumulated>(pv: &AccValue<'a, V>) -> (r: AccValue<'a, V>)
     ensures
         r == *pv,
         r.value == pv.value,
@@ -9465,7 +9465,7 @@ fn told_by_an_acc_values_clone<'a, V: VAccumulated>(pv: &AccValue<'a, V>) -> (r:
 /// adds, that sum is the one before the value: of any value with its
 /// sums, a client's own as well.
 #[allow(dead_code)]
-proof fn told_of_the_sum_undone<'a, V: VAccumulated>(pv: AccValue<'a, V>, p: V::Acc)
+proof fn told_of_the_sum_undone<'a, V: Accumulated>(pv: AccValue<'a, V>, p: V::Acc)
     requires
         pv.total() == <V::Acc as VGroup>::plus(p, V::adds(pv.value.sv())),
     ensures
@@ -9478,7 +9478,7 @@ proof fn told_of_the_sum_undone<'a, V: VAccumulated>(pv: AccValue<'a, V>, p: V::
 /// the words of the iterator's own specification, and in those of
 /// Verus's specification of an iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_next<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>) -> (r: Option<
+fn told_by_an_acc_next<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>) -> (r: Option<
     AccValue<'a, V>,
 >)
     ensures
@@ -9514,7 +9514,7 @@ fn told_by_an_acc_next<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &m
 
 /// What `nth` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_nth<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>, n: usize) -> (r: Option<
+fn told_by_an_acc_nth<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>, n: usize) -> (r: Option<
     AccValue<'a, V>,
 >)
     ensures
@@ -9549,7 +9549,7 @@ fn told_by_an_acc_nth<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mu
 /// themselves. Asked where it stands, it says where: within its
 /// window, in its column and not before where its sum counts from.
 #[allow(dead_code)]
-fn told_by_an_acc_iters_place<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: usize)
+fn told_by_an_acc_iters_place<V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: usize)
     ensures
         r == it.pos(),
         it.base_pos() <= it.pos() <= it.end_pos(),
@@ -9565,7 +9565,7 @@ fn told_by_an_acc_iters_place<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it:
 /// Asked how far its window reaches, an iterator says how many
 /// positions, which may be past the column.
 #[allow(dead_code)]
-fn told_by_an_acc_iters_reach<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: usize)
+fn told_by_an_acc_iters_reach<V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: usize)
     ensures
         r == it.end_pos() - it.pos(),
 {
@@ -9574,7 +9574,7 @@ fn told_by_an_acc_iters_reach<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it:
 
 /// Asked how many values it has left, an iterator says how many.
 #[allow(dead_code)]
-fn told_by_an_acc_iters_len<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: usize)
+fn told_by_an_acc_iters_len<V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: usize)
     ensures
         r == it.rest().len(),
         r == it.items().len(),
@@ -9585,7 +9585,7 @@ fn told_by_an_acc_iters_len<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &
 /// Asked how many values it may yet give, an iterator says exactly how
 /// many it has left, as its least and as its most.
 #[allow(dead_code)]
-fn told_by_an_acc_size_hint<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: (
+fn told_by_an_acc_size_hint<V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: (
     usize,
     Option<usize>,
 ))
@@ -9599,7 +9599,7 @@ fn told_by_an_acc_size_hint<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &
 
 /// Asked for the window's end alone, an iterator says as much.
 #[allow(dead_code)]
-fn told_by_an_acc_iters_end<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: usize)
+fn told_by_an_acc_iters_end<V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'_, V, C>) -> (r: usize)
     ensures
         r == it.end_pos(),
         it.base_pos() <= it.pos() <= it.end_pos(),
@@ -9616,7 +9616,7 @@ fn told_by_an_acc_iters_end<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &
 /// and its sum counts from where it stands and is what no values add
 /// up to.
 #[allow(dead_code)]
-fn told_by_an_acc_reset<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>)
+fn told_by_an_acc_reset<V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>)
     ensures
         final(it).rest() == old(it).rest(),
         final(it).column() == old(it).column(),
@@ -9631,7 +9631,7 @@ fn told_by_an_acc_reset<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut 
 
 /// What `set_max` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_set_max<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>, end: usize)
+fn told_by_an_acc_set_max<V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>, end: usize)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -9650,7 +9650,7 @@ fn told_by_an_acc_set_max<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mu
 
 /// What `advance_to` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_advance_to<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>, target: usize)
+fn told_by_an_acc_advance_to<V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>, target: usize)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -9675,7 +9675,7 @@ fn told_by_an_acc_advance_to<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: 
 
 /// What `advance_by` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_advance_by<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>, amount: usize)
+fn told_by_an_acc_advance_by<V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>, amount: usize)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -9696,7 +9696,7 @@ fn told_by_an_acc_advance_by<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: 
 
 /// What `shift` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_shift<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>, range: Range<usize>)
+fn told_by_an_acc_shift<V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'_, V, C>, range: Range<usize>)
     ensures
         final(it).column() == old(it).column(),
         final(it).source() == old(it).source(),
@@ -9740,7 +9740,7 @@ fn told_by_an_acc_shift<V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut 
 /// What `shift_next` says by itself of an accumulator column's
 /// iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_shift_next<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+fn told_by_an_acc_shift_next<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(
     it: &mut AccIter<'a, V, C>,
     range: Range<usize>,
 ) -> (r: Option<AccValue<'a, V>>)
@@ -9786,7 +9786,7 @@ fn told_by_an_acc_shift_next<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
 /// runs' counts have added up to its length. For every type an
 /// accumulator column holds, and every codec.
 #[allow(dead_code)]
-fn added_by_run_moves<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>) -> (r: (V::Acc, usize))
+fn added_by_run_moves<V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>) -> (r: (V::Acc, usize))
     ensures
         r.0 == accumulated::<V>(col@),
         r.1 == col@.len(),
@@ -9821,7 +9821,7 @@ fn added_by_run_moves<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccCo
 /// long and no more, and the running sum is as it was and then what the
 /// run's value adds, as many times over as the run is long.
 #[allow(dead_code)]
-fn a_run_with_its_accs<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>) -> (r: Option<
+fn a_run_with_its_accs<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>) -> (r: Option<
     (usize, Get<'a, V>, V::Acc),
 >)
     ensures
@@ -9876,7 +9876,7 @@ fn a_run_of_marks(it: &mut AccIter<'_, Mark>) -> (r: Option<(usize, Mark, Flags)
 /// iterator has left are those of the values it has left, and spliced
 /// into a new column they make a column of those values.
 #[allow(dead_code)]
-fn accs_copied_by_runs<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, a: usize, b: usize) -> (r:
+fn accs_copied_by_runs<V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, a: usize, b: usize) -> (r:
     Column<V, C, LenIndex>)
     requires
         a <= b <= col@.len(),
@@ -9897,7 +9897,7 @@ fn accs_copied_by_runs<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccC
 /// What the values of a range add up to, said two ways: by `delta`,
 /// asked for the value after the range, and by `sum_range`.
 #[allow(dead_code)]
-fn a_range_added_two_ways<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, a: usize, b: usize) -> (r: (
+fn a_range_added_two_ways<V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, a: usize, b: usize) -> (r: (
     V::Acc,
     V::Acc,
 ))
@@ -9916,7 +9916,7 @@ fn a_range_added_two_ways<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &A
 /// column, it is sure to be given back: where it stood, with the same
 /// values left and the same running sum, counted from the same place.
 #[allow(dead_code)]
-fn handed_over_with_its_acc<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+fn handed_over_with_its_acc<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(
     it: AccIter<'_, V, C>,
     col: &'a AccColumn<V, C>,
 ) -> (on: AccIter<'a, V, C>)
@@ -9943,7 +9943,7 @@ fn handed_over_with_its_acc<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
 /// edited, it is sure to be given, and its sum goes on to count from
 /// `a`: read to `b`, it is what the values of `a..b` add up to.
 #[allow(dead_code)]
-fn added_in_two_goes<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, a: usize, m: usize, b: usize) -> (r:
+fn added_in_two_goes<V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &AccColumn<V, C>, a: usize, m: usize, b: usize) -> (r:
     V::Acc)
     requires
         a <= m <= b <= col@.len(),
@@ -9967,7 +9967,7 @@ fn added_in_two_goes<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccCol
 /// edits that one does; after a push the column counts one more, and
 /// refuses the state.
 #[allow(dead_code)]
-fn accs_ended_by_a_push<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &mut AccColumn<V, C>, v: Get<'_, V>) -> (r: bool)
+fn accs_ended_by_a_push<V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &mut AccColumn<V, C>, v: Get<'_, V>) -> (r: bool)
     ensures
         !r,
         final(col)@ == old(col)@.push(v.sv()),
@@ -10060,7 +10060,7 @@ fn steps_read_in_order() -> (r: ((Board, Board), (Board, Board)))
 
 /// What `next_run` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_next_run<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>) -> (r: Option<
+fn told_by_an_acc_next_run<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>) -> (r: Option<
     Run<AccValue<'a, V>>,
 >)
     ensures
@@ -10100,7 +10100,7 @@ fn told_by_an_acc_next_run<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it
 /// iterator it is made of, which is the accumulator column's without
 /// its sums, and so stands where that stood with the same values left.
 #[allow(dead_code)]
-fn told_by_an_acc_runs<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: AccIter<'a, V, C>) -> (r: Runs<
+fn told_by_an_acc_runs<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(it: AccIter<'a, V, C>) -> (r: Runs<
     'a,
     V,
     C,
@@ -10119,7 +10119,7 @@ fn told_by_an_acc_runs<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: Ac
 
 /// What `delta_nth` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_delta_nth<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>, n: usize) -> (r:
+fn told_by_an_acc_delta_nth<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &mut AccIter<'a, V, C>, n: usize) -> (r:
     Option<AccSeek<'a, V>>)
     ensures
         n < old(it).rest().len() ==> {
@@ -10155,7 +10155,7 @@ fn told_by_an_acc_delta_nth<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(i
 /// What `suspend` says by itself of an accumulator column's iterator,
 /// and what its state says of where its sum counts from.
 #[allow(dead_code)]
-fn told_by_an_acc_suspend<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+fn told_by_an_acc_suspend<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(
     it: &AccIter<'a, V, C>,
     col: &AccColumn<V, C>,
 ) -> (s: AccIterState<V>)
@@ -10178,7 +10178,7 @@ fn told_by_an_acc_suspend<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
 /// column's iterator and any accumulator column, each thing asked for
 /// on its own.
 #[allow(dead_code)]
-fn told_by_an_acc_resume<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+fn told_by_an_acc_resume<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(
     s: &AccIterState<V>,
     col: &'a AccColumn<V, C>,
 ) -> (r: Result<AccIter<'a, V, C>, PackError>)
@@ -10200,7 +10200,7 @@ fn told_by_an_acc_resume<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
 /// edits, and the state is a place in the column as a plain iterator's
 /// state is.
 #[allow(dead_code)]
-fn told_by_an_acc_states_fit<V: VAccumulated + ColumnValueRef<C>, C: Codec>(s: &AccIterState<V>, col: &AccColumn<V, C>)
+fn told_by_an_acc_states_fit<V: Accumulated + ColumnValueRef<C>, C: Codec>(s: &AccIterState<V>, col: &AccColumn<V, C>)
     requires
         s.fits(col),
     ensures
@@ -10216,7 +10216,7 @@ fn told_by_an_acc_states_fit<V: VAccumulated + ColumnValueRef<C>, C: Codec>(s: &
 
 /// What `clone` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_clone<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'a, V, C>) -> (r: AccIter<
+fn told_by_an_acc_clone<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(it: &AccIter<'a, V, C>) -> (r: AccIter<
     'a,
     V,
     C,
@@ -10236,7 +10236,7 @@ fn told_by_an_acc_clone<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(it: &
 
 /// What `default` says by itself of an accumulator column's iterator.
 #[allow(dead_code)]
-fn told_by_an_acc_default<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>() -> (r: AccIter<'a, V, C>)
+fn told_by_an_acc_default<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>() -> (r: AccIter<'a, V, C>)
     ensures
         r.items().len() == 0,
         r.rest().len() == 0,
@@ -10253,7 +10253,7 @@ fn told_by_an_acc_default<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>() -
 /// What `delta` says by itself of an accumulator column, of any two
 /// positions in order.
 #[allow(dead_code)]
-fn told_by_an_acc_delta<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, from: usize, to: usize) -> (r:
+fn told_by_an_acc_delta<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, from: usize, to: usize) -> (r:
     Option<AccSeek<'a, V>>)
     requires
         from <= to,
@@ -10274,7 +10274,7 @@ fn told_by_an_acc_delta<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: 
 
 /// What a copy of a value found is: the same, part for part.
 #[allow(dead_code)]
-fn told_by_an_acc_seek<'a, V: VAccumulated>(seek: &AccSeek<'a, V>) -> (r: AccSeek<'a, V>)
+fn told_by_an_acc_seek<'a, V: Accumulated>(seek: &AccSeek<'a, V>) -> (r: AccSeek<'a, V>)
     ensures
         r == *seek,
         r.pos == seek.pos,
@@ -10287,7 +10287,7 @@ fn told_by_an_acc_seek<'a, V: VAccumulated>(seek: &AccSeek<'a, V>) -> (r: AccSee
 /// The parts of a value found are there to take: where it is, what was
 /// passed over, the value and the sum through it.
 #[allow(dead_code)]
-fn the_parts_of_a_find<'a, V: VAccumulated>(seek: AccSeek<'a, V>) -> (r: (usize, V::Acc, Get<'a, V>, V::Acc))
+fn the_parts_of_a_find<'a, V: Accumulated>(seek: AccSeek<'a, V>) -> (r: (usize, V::Acc, Get<'a, V>, V::Acc))
     ensures
         r.0 == seek.pos,
         r.1 == seek.delta,
@@ -11350,7 +11350,7 @@ proof fn delta_run_kth(r: DeltaRun, k: int, lo: int, hi: int)
 /// kept and in what is read, and where they all fit so do the runs
 /// together.
 #[allow(dead_code)]
-proof fn delta_runs_more<T: VDelta>(rs: Seq<DeltaRun>, r: DeltaRun)
+proof fn delta_runs_more<T: Delta>(rs: Seq<DeltaRun>, r: DeltaRun)
     requires
         delta_runs_fit::<T>(rs),
         delta_run_fits::<T>(r),
@@ -11365,7 +11365,7 @@ proof fn delta_runs_more<T: VDelta>(rs: Seq<DeltaRun>, r: DeltaRun)
 /// One run alone has its own values and fits as it does; no runs have no
 /// values, and fit.
 #[allow(dead_code)]
-proof fn delta_runs_ends<T: VDelta>(r: DeltaRun)
+proof fn delta_runs_ends<T: Delta>(r: DeltaRun)
     ensures
         delta_runs_values::<T>(seq![r]) == delta_run_values::<T>(r),
         delta_runs_values::<T>(Seq::<DeltaRun>::empty()) == Seq::<T>::empty(),
@@ -12485,7 +12485,7 @@ fn delta_two_runs_differ<T: DeltaValue<C>, C: Codec>(it: &mut DeltaIter<'_, T, C
 /// `n` differences `d` with the number before index `a` has those
 /// values, and is one the type can keep.
 #[allow(dead_code)]
-proof fn delta_a_run_between<T: VDelta>(vs: Seq<T>, a: int, n: usize, d: Option<i64>)
+proof fn delta_a_run_between<T: Delta>(vs: Seq<T>, a: int, n: usize, d: Option<i64>)
     requires
         all_fit(vs),
         0 <= a,
@@ -12502,7 +12502,7 @@ proof fn delta_a_run_between<T: VDelta>(vs: Seq<T>, a: int, n: usize, d: Option<
 /// of the differences from `a` to `b`, each with the number before it,
 /// have the values from `a` to `b`, and the type can keep them.
 #[allow(dead_code)]
-proof fn delta_runs_between<T: VDelta>(vs: Seq<T>, a: int, b: int)
+proof fn delta_runs_between<T: Delta>(vs: Seq<T>, a: int, b: int)
     requires
         all_fit(vs),
         0 <= a <= b <= vs.len(),
@@ -12520,7 +12520,7 @@ proof fn delta_runs_between<T: VDelta>(vs: Seq<T>, a: int, b: int)
 /// none, and of one run and more that run, with the number before index
 /// `a`, and then the others from where it ends.
 #[allow(dead_code)]
-proof fn delta_runs_from<T: VDelta>(vs: Seq<T>, a: int, r: Run<Option<i64>>, rs: Seq<Run<Option<i64>>>)
+proof fn delta_runs_from<T: Delta>(vs: Seq<T>, a: int, r: Run<Option<i64>>, rs: Seq<Run<Option<i64>>>)
     ensures
         delta_runs_at(vs, a, Seq::empty()) == Seq::<DeltaRun>::empty(),
         delta_runs_at(vs, a, seq![r] + rs) == seq![
@@ -16305,7 +16305,7 @@ fn deltas_streamed_with_bijou64(a: i64, b: i64) -> (r: Vec<i64>)
 /// and the column counts one edit more. For every value type, codec and
 /// kind of index.
 #[allow(dead_code)]
-fn edit_like_a_splice<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn edit_like_a_splice<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     col: &mut Column<V, C, K>,
     at: usize,
     del: usize,
@@ -16355,7 +16355,7 @@ fn edit_as_documented() -> (r: Vec<u64>)
 /// written; an insertion moves its place in the column being written,
 /// a deletion its place among the original values.
 #[allow(dead_code)]
-fn places_of_a_cursor<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn places_of_a_cursor<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     col: &mut Column<V, C, K>,
     at: usize,
     v: Get<'_, V>,
@@ -16386,7 +16386,7 @@ fn places_of_a_cursor<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
 /// Two values put in at two places by one cursor, in one pass: the
 /// column counts one edit, where two splices count two.
 #[allow(dead_code)]
-fn two_places_one_edit<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn two_places_one_edit<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     col: &mut Column<V, C, K>,
     a: usize,
     b: usize,
@@ -16413,7 +16413,7 @@ fn two_places_one_edit<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
 /// A cursor that only passes over values gives the column it was
 /// opened on, and the column counts no edit.
 #[allow(dead_code)]
-fn only_passed_over<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn only_passed_over<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     col: &mut Column<V, C, K>,
     a: usize,
     b: usize,
@@ -16438,7 +16438,7 @@ fn only_passed_over<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
 
 /// A seek past the end stands at the end, where an insertion is a push.
 #[allow(dead_code)]
-fn pushed_by_a_cursor<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>)
+fn pushed_by_a_cursor<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, v: Get<'_, V>)
     ensures
         final(col)@ == old(col)@.push(v.sv()),
         final(col).edits() == after_edit(old(col).edits()),
@@ -16458,7 +16458,7 @@ fn pushed_by_a_cursor<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut
 /// A deletion of more values than are left drops those that are: the
 /// column cut short at `at`, and an edit counted only if a value went.
 #[allow(dead_code)]
-fn cut_short<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize)
+fn cut_short<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, at: usize)
     ensures
         final(col)@ == if at <= old(col)@.len() {
             old(col)@.take(at as int)
@@ -16491,7 +16491,7 @@ fn cut_short<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V
 /// and then the runs an iterator gives, a run of count 0 being no
 /// value.
 #[allow(dead_code)]
-fn runs_by_a_cursor<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn runs_by_a_cursor<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     col: &mut Column<V, C, K>,
     at: usize,
     a: Get<'v, V>,
@@ -16527,7 +16527,7 @@ fn runs_by_a_cursor<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
 /// the laws of iterators, put in by a cursor: the column holds their
 /// values there, and counts an edit if they have a value.
 #[allow(dead_code)]
-fn any_runs_by_a_cursor<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, I: Iterator<Item = Run<Get<'v, V>>>>(
+fn any_runs_by_a_cursor<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>, I: Iterator<Item = Run<Get<'v, V>>>>(
     col: &mut Column<V, C, K>,
     at: usize,
     runs: I,
@@ -16552,7 +16552,7 @@ fn any_runs_by_a_cursor<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, I: 
 /// only looks, so the column is as it was and counts no edit. For
 /// every value type.
 #[allow(dead_code)]
-fn is_it_there<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize, v: Get<'_, V>) -> (r:
+fn is_it_there<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, at: usize, v: Get<'_, V>) -> (r:
     bool)
     requires
         at <= old(col)@.len(),
@@ -16631,7 +16631,7 @@ fn flag_turned(col: &mut Column<bool>, at: usize)
 /// A value put in the place of another; where it is the value that was
 /// there, the column counts no edit.
 #[allow(dead_code)]
-fn put_in_its_place<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize, v: Get<'_, V>)
+fn put_in_its_place<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, at: usize, v: Get<'_, V>)
     requires
         at < old(col)@.len(),
     ensures
@@ -16759,7 +16759,7 @@ fn sums_after_a_cursor(col: &mut PrefixColumn<u64>, at: usize, v: u64)
 /// What each step of a cursor says, asked for on its own. A cursor
 /// opened: at the front, nothing written, nothing changed.
 #[allow(dead_code)]
-fn told_by_an_edit<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>) -> (e: Edit<
+fn told_by_an_edit<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>) -> (e: Edit<
     '_,
     V,
     C,
@@ -16779,7 +16779,7 @@ fn told_by_an_edit<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Co
 
 /// A cursor opened at a place: the values before it written.
 #[allow(dead_code)]
-fn told_by_an_edit_at<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Column<V, C, K>, at: usize) -> (e:
+fn told_by_an_edit_at<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &mut Column<V, C, K>, at: usize) -> (e:
     Edit<'_, V, C, K>)
     requires
         at <= old(col)@.len(),
@@ -16797,7 +16797,7 @@ fn told_by_an_edit_at<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut
 
 /// A cursor is among its original values, and says where it is.
 #[allow(dead_code)]
-fn told_by_a_cursors_places<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &Edit<'_, V, C, K>) -> (r: (usize, usize))
+fn told_by_a_cursors_places<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(e: &Edit<'_, V, C, K>) -> (r: (usize, usize))
     requires
         e.wf(),
     ensures
@@ -16814,7 +16814,7 @@ fn told_by_a_cursors_places<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: 
 
 /// Values passed over are written as they are.
 #[allow(dead_code)]
-fn told_by_a_cursors_advance<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, n: usize)
+fn told_by_a_cursors_advance<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(e: &mut Edit<'_, V, C, K>, n: usize)
     requires
         old(e).wf(),
     ensures
@@ -16833,7 +16833,7 @@ fn told_by_a_cursors_advance<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e:
 
 /// A seek goes to its place, or to the end where the place is past it.
 #[allow(dead_code)]
-fn told_by_a_cursors_seek<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, to: usize)
+fn told_by_a_cursors_seek<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(e: &mut Edit<'_, V, C, K>, to: usize)
     requires
         old(e).wf(),
         old(e).at() <= to,
@@ -16852,7 +16852,7 @@ fn told_by_a_cursors_seek<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &m
 
 /// A value put in is written, and the cursor stays where it is.
 #[allow(dead_code)]
-fn told_by_a_cursors_insert<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, v: Get<'_, V>)
+fn told_by_a_cursors_insert<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(e: &mut Edit<'_, V, C, K>, v: Get<'_, V>)
     requires
         old(e).wf(),
     ensures
@@ -16866,7 +16866,7 @@ fn told_by_a_cursors_insert<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: 
 
 /// A run put in is written whole; a run of no value changes nothing.
 #[allow(dead_code)]
-fn told_by_a_cursors_insert_run<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, v: Get<'_, V>, n: usize)
+fn told_by_a_cursors_insert_run<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(e: &mut Edit<'_, V, C, K>, v: Get<'_, V>, n: usize)
     requires
         old(e).wf(),
     ensures
@@ -16881,7 +16881,7 @@ fn told_by_a_cursors_insert_run<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>
 /// Runs put in are written one after another, and change the column if
 /// they have a value.
 #[allow(dead_code)]
-fn told_by_a_cursors_insert_runs<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, I: Iterator<Item = Run<Get<'v, V>>>>(
+fn told_by_a_cursors_insert_runs<'v, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>, I: Iterator<Item = Run<Get<'v, V>>>>(
     e: &mut Edit<'_, V, C, K>,
     runs: I,
 )
@@ -16900,7 +16900,7 @@ fn told_by_a_cursors_insert_runs<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V
 /// A look at the value the cursor stands at leaves the cursor as it
 /// was.
 #[allow(dead_code)]
-fn told_by_a_cursors_peek<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, v: Get<'_, V>) -> (r: Option<
+fn told_by_a_cursors_peek<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(e: &mut Edit<'_, V, C, K>, v: Get<'_, V>) -> (r: Option<
     bool,
 >)
     requires
@@ -16926,7 +16926,7 @@ fn told_by_a_cursors_peek<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &m
 /// and has changed the column unless the value was there. At the end
 /// there is no place, and nothing is done.
 #[allow(dead_code)]
-fn told_by_a_cursors_replace_with<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, v: Get<'_, V>)
+fn told_by_a_cursors_replace_with<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(e: &mut Edit<'_, V, C, K>, v: Get<'_, V>)
     requires
         old(e).wf(),
     ensures
@@ -16947,7 +16947,7 @@ fn told_by_a_cursors_replace_with<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C
 /// Values dropped are passed over and not written; the cursor has
 /// changed the column if there was one to drop.
 #[allow(dead_code)]
-fn told_by_a_cursors_delete<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, n: usize)
+fn told_by_a_cursors_delete<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(e: &mut Edit<'_, V, C, K>, n: usize)
     requires
         old(e).wf(),
     ensures
@@ -16962,7 +16962,7 @@ fn told_by_a_cursors_delete<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: 
 /// What every step keeps: the cursor's original values, the count it
 /// began with, and the column it will give.
 #[allow(dead_code)]
-fn told_what_a_step_keeps<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &mut Edit<'_, V, C, K>, n: usize, v: Get<'_, V>)
+fn told_what_a_step_keeps<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(e: &mut Edit<'_, V, C, K>, n: usize, v: Get<'_, V>)
     requires
         old(e).wf(),
     ensures
@@ -16978,7 +16978,7 @@ fn told_what_a_step_keeps<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: &m
 /// rest of the original values, and counts an edit if a step changed
 /// it.
 #[allow(dead_code)]
-fn told_by_a_cursors_finish<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(e: Edit<'_, V, C, K>)
+fn told_by_a_cursors_finish<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(e: Edit<'_, V, C, K>)
     requires
         e.wf(),
     ensures
@@ -17654,7 +17654,7 @@ fn told_by_a_delta_cursors_finish<T: DeltaValue<C>, C: Codec>(e: DeltaEdit<'_, T
 /// values, then the source's. For every value type, codec and kind of
 /// index.
 #[allow(dead_code)]
-fn copied_onto_the_end<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn copied_onto_the_end<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     dst: &mut Column<V, C, K>,
     src: Column<V, C, K>,
 )
@@ -17685,7 +17685,7 @@ fn copied_onto_the_end<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
 /// a reversed range), the rest kept. The column counts an edit if a
 /// value went or came.
 #[allow(dead_code)]
-fn copied_in_place<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn copied_in_place<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     dst: &mut Column<V, C, K>,
     src: Column<V, C, K>,
     at: usize,
@@ -17730,7 +17730,7 @@ fn copied_in_place<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
 /// Two splices in one pass: at `a`, the values of `src` in `r..m`; at
 /// `b`, those in `m..t`, where `b` deletes one value. One edit counted.
 #[allow(dead_code)]
-fn copied_at_two_places<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn copied_at_two_places<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     dst: &mut Column<V, C, K>,
     src: Column<V, C, K>,
     a: usize,
@@ -17776,7 +17776,7 @@ fn copied_at_two_places<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
 /// No splices, or splices that delete nothing and copy nothing: the
 /// column is as it was, and counts no edit.
 #[allow(dead_code)]
-fn copied_nothing<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn copied_nothing<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     dst: &mut Column<V, C, K>,
     src: Column<V, C, K>,
     at: usize,
@@ -17810,7 +17810,7 @@ fn copied_nothing<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
 
 /// `copy_ranges`'s contract, told back.
 #[allow(dead_code)]
-fn told_by_copy_ranges<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn told_by_copy_ranges<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     dst: &mut Column<V, C, K>,
     src: Column<V, C, K>,
     splices: &[Splice],
@@ -18035,7 +18035,7 @@ fn timestamps_copied() -> (r: Vec<i64>)
 /// walked with `ranges` and kept: the ranges' values of the column. For
 /// every value type, codec and kind of index.
 #[allow(dead_code)]
-fn kept_over_ranges<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
+fn kept_over_ranges<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(
     col: &'a Column<V, C, K>,
     rs: &[Range<usize>],
 ) -> (out: Vec<Get<'a, V>>)
@@ -18085,7 +18085,7 @@ fn kept_over_ranges<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
 /// one it then gives, and the column's first. For every value type,
 /// codec and kind of index.
 #[allow(dead_code)]
-fn peeked_then_given<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>) -> (r: (
+fn peeked_then_given<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &'a Column<V, C, K>) -> (r: (
     Option<Get<'a, V>>,
     Option<Get<'a, V>>,
 ))
@@ -18114,7 +18114,7 @@ fn peeked_then_given<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &
 /// A lookahead moved to a range at once: what it gives then is the
 /// range's values of the column (it may start at the value it looks at).
 #[allow(dead_code)]
-fn unshifted_to<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &'a Column<V, C, K>, a: usize, b: usize) -> (r:
+fn unshifted_to<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(col: &'a Column<V, C, K>, a: usize, b: usize) -> (r:
     Option<Get<'a, V>>)
     ensures
         match r {
@@ -18657,7 +18657,7 @@ fn prefix_told_by_adapters<'a, 'r, V: PrefixValue + ColumnValueRef<C>, C: Codec>
 /// moved there: with what the column's values accumulate to
 /// through it. For every value type and codec.
 #[allow(dead_code)]
-fn acc_first_by_lookahead<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, a: usize, b: usize) -> (r:
+fn acc_first_by_lookahead<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, a: usize, b: usize) -> (r:
     Option<AccValue<'a, V>>)
     ensures
         match r {
@@ -18689,7 +18689,7 @@ fn acc_first_by_lookahead<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col
 /// The first value of a range of an accumulator column, through a walk over
 /// ranges: with what the column's values accumulate to through it.
 #[allow(dead_code)]
-fn acc_first_over_ranges<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, a: usize, b: usize) -> (r:
+fn acc_first_over_ranges<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, a: usize, b: usize) -> (r:
     Option<AccValue<'a, V>>)
     ensures
         match r {
@@ -18732,7 +18732,7 @@ fn acc_first_over_ranges<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col:
 /// moved to the range and stepped by `Shiftable`'s own moves: with what
 /// the values accumulate to through them. For every value type and codec.
 #[allow(dead_code)]
-fn acc_two_of_range<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, a: usize, b: usize) -> (r:
+fn acc_two_of_range<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(col: &'a AccColumn<V, C>, a: usize, b: usize) -> (r:
     (Option<AccValue<'a, V>>, Option<AccValue<'a, V>>))
     ensures
         r.0 is Some <==> a < b && a < col@.len(),
@@ -18768,7 +18768,7 @@ fn acc_two_of_range<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a 
 /// What an accumulator iterator's lookahead and walk over ranges are, told
 /// back. For every value type and codec.
 #[allow(dead_code)]
-fn acc_told_by_adapters<'a, 'r, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+fn acc_told_by_adapters<'a, 'r, V: Accumulated + ColumnValueRef<C>, C: Codec>(
     a: AccIter<'a, V, C>,
     b: AccIter<'a, V, C>,
     rs: &'r [Range<usize>],
@@ -19244,7 +19244,7 @@ fn first_run_and_column<'a, V: ColumnValueRef<C>, C: Codec>(bytes: &'a [u8]) -> 
 /// and kind of index.
 #[allow(dead_code)]
 #[verifier::exec_allows_no_decreases_clause]
-fn loaded_runs<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(bytes: &'a [u8]) -> (r: Result<
+fn loaded_runs<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(bytes: &'a [u8]) -> (r: Result<
     (Vec<Run<Get<'a, V>>>, Column<V, C, K>),
     PackError,
 >)
@@ -19324,7 +19324,7 @@ fn filled_by_load<'a, V: ColumnValueRef<C>, C: Codec>(v: Get<'a, V>, n: usize) -
 /// What a load run by run is, as it starts, told back. For every value
 /// type, codec and kind of index.
 #[allow(dead_code)]
-fn told_by_load_iter<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, F: MaybeFill<Get<'a, V>>>(
+fn told_by_load_iter<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>, F: MaybeFill<Get<'a, V>>>(
     bytes: &'a [u8],
     opts: LoadOpts<F>,
 ) -> (r: ColumnLoadIter<'a, V, C, K>)
@@ -19344,7 +19344,7 @@ fn told_by_load_iter<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, F: May
 /// What a step of a load run by run does, told back. For every value
 /// type, codec and kind of index.
 #[allow(dead_code)]
-fn told_by_try_next_run<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: &mut ColumnLoadIter<'a, V, C, K>) -> (r:
+fn told_by_try_next_run<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: &mut ColumnLoadIter<'a, V, C, K>) -> (r:
     Result<Option<Run<Get<'a, V>>>, PackError>)
     requires
         old(it).wf(),
@@ -19367,7 +19367,7 @@ fn told_by_try_next_run<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it:
 /// What the end of a load run by run gives, told back. For every value
 /// type, codec and kind of index.
 #[allow(dead_code)]
-fn told_by_load_finalize<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(it: ColumnLoadIter<'a, V, C, K>) -> (r:
+fn told_by_load_finalize<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>>(it: ColumnLoadIter<'a, V, C, K>) -> (r:
     Result<Column<V, C, K>, PackError>)
     requires
         it.wf(),

@@ -14,7 +14,7 @@
 //! [`next_delta_run_max`]: DeltaDecoder::next_delta_run_max
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`dec/imp.rs`), which has
 //! its contract word for word and is proved there.
 
@@ -25,7 +25,7 @@
 use super::{all_fit, deltas, vals};
 use super::{DIt, DKind, DeltaValue, DE, DX};
 #[cfg(verus_keep_ghost)]
-use super::{DeltaColumn, VDelta};
+use super::{Delta, DeltaColumn};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{ReadsAgree, Slabs};
 #[cfg(verus_keep_ghost)]
@@ -138,7 +138,7 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaDecoder<'a, T, C> {
     /// the type's, which is what is proved: bytes that are taken are a
     /// saved delta column. It is not said that every saved delta column
     /// is taken, as it is not said of
-    /// [`load`](crate::verified::DeltaColumn::load).
+    /// [`load`](crate::DeltaColumn::load).
     #[inline(always)]
     pub fn try_new(bytes: &'a [u8]) -> (r: Result<Self, PackError>)
         ensures

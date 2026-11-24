@@ -4,9 +4,8 @@
 
 The columns are now the verified API: every public function has a
 contract, which [Verus](https://github.com/verus-lang/verus) proves (see
-the README's "Formal verification", and the module docs of
-`hexane::verified`). The earlier implementation, and the glue it took on
-trust, are **removed**. The types and functions keep their names wherever
+the README's "Formal verification", and the crate's documentation). The
+earlier implementation, and the glue it took on trust, are **removed**. The types and functions keep their names wherever
 they had a counterpart: `Column`, `Iter`, `IterState`, `Runs`,
 `ColumnLoadIter`, `Edit`, `PrefixColumn`, `PrefixIter`, `PrefixIterState`,
 `PrefixedValue`, `PrefixSeek`, `DeltaColumn`, `DeltaIter`,
@@ -17,13 +16,13 @@ they had a counterpart: `Column`, `Iter`, `IterState`, `Runs`,
 `RleValue`, `DeltaValue`, `PrefixValue`, `UnsignedPrefix`, `lebsize`,
 `ulebsize`, `LoadOpts`, `Run`, `DeltaRun`, `Splice`, `PackError`,
 `Leb128`, `Bijou64`, and the `leb128` and `bijou` modules. They are at
-the crate root, and also at `hexane::verified`. What changed for a
+the crate root. What changed for a
 client:
 
 * Values are given and taken in their borrowed form, `Get<'a, V>`: `&str`
   for a `String` column, `&[u8]` for `Vec<u8>`, the value itself for
   numbers and `bool`. `AsColumnRef` is gone.
-* A client's own value type implements `VNewtype` (stored as one of the
+* A client's own value type implements `Newtype` (stored as one of the
   built-in numbers: `to_base`, `from_base`) or `RleValue` (an encoding of
   its own: `same`, `compare`, `try_unpack`, `unpack`, `value_len`, and
   `pack(&self, &mut Vec<u8>) -> usize`), not `ColumnValue` and the old
@@ -39,10 +38,10 @@ client:
   `iter_range` and `get` read its values (`values()` is gone), and
   `prefix_iter`, `prefix_iter_range` and `get_prefixed` read them with
   their sums. Its values are the built-in numbers, `bool` and their
-  options, or a client's type that implements `VAmount` (what a value
+  options, or a client's type that implements `Amount` (what a value
   adds, and the integer type the sums are kept in). A client's own
   accumulator, which `PrefixValue::Prefix` was, is an `AccColumn<T>`,
-  with `VAdds` (what a value adds), `VAccum` and `VGroup`. A column whose
+  with `Adds` (what a value adds), `Accum` and `VGroup`. A column whose
   sums would not fit is refused on load, and an edit that would make one
   panics. So, for now, does a load of an empty column with a fill
   (`LoadOpts::with_fill`) whose sums would not fit: it returned an error.
@@ -65,8 +64,8 @@ client:
 
 ### Added
 
-* `AccColumn`, `AccIter` and the accumulator traits; `VNewtype` and
-  `VAmount` for a client's own types.
+* `AccColumn`, `AccIter` and the accumulator traits; `Newtype` and
+  `Amount` for a client's own types.
 * `DeltaColumn::splice` of an iterator, `Extend` and `FromIterator`.
 * `tests/golden`: digests of what the earlier implementation wrote, read
   and refused in every test of `tests/verified_api.rs`, recorded while it

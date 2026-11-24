@@ -2,14 +2,14 @@
 //! in one pass: [`Column::copy_ranges`].
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`copy/imp.rs`), which has
 //! its contract word for word and is proved there.
 
 use super::model::Model;
 #[cfg(verus_keep_ghost)]
 use super::{after_call, Held, VGet};
-use super::{Codec, Column, ColumnValueRef, VIndex};
+use super::{Codec, Column, ColumnValueRef, Index};
 #[cfg(verus_keep_ghost)]
 use crate::splices::{applied, in_order, ranges_ascend, splices_do};
 use crate::Splice;
@@ -21,7 +21,7 @@ use imp::*;
 
 verus! {
 
-impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
     /// Copy ranges of `src` into the column, at several places in one
     /// pass. Each splice `sp` of `splices`, one after another, deletes
     /// `sp.delete` values at `sp.pos` and puts there the values of `src`

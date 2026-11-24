@@ -491,7 +491,7 @@ pub(super) proof fn lemma_singles_impl<T>(xs: Seq<T>)
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Iter<'a, V, C, K> {
     pub(super) proof fn lemma_shift_impl(&self)
         ensures
             0 <= self.shift_at(),
@@ -763,7 +763,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Iter<'a, V, C, K> {
     pub(super) proof fn lemma_shift_model_impl(&self)
         ensures
             <Get<'a, V> as VGet>::svs(self.shift_vals()) == self.column(),
@@ -842,7 +842,7 @@ pub(crate) proof fn lemma_run_units<T>(xs: Seq<T>)
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Runs<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Runs<'a, V, C, K> {
     /// The first run of what is left, and the values it stands for.
     pub(super) fn take_run(&mut self) -> (r: Option<Run<Get<'a, V>>>)
         ensures
@@ -880,7 +880,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Runs<'a, V, C, K> {
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Runs<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Runs<'a, V, C, K> {
     pub(super) proof fn lemma_shift_impl(&self)
         ensures
             0 <= self.shift_at(),
@@ -1012,7 +1012,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Runs<'a, V, C, K> {
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Runs<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Runs<'a, V, C, K> {
     pub(super) proof fn lemma_shift_model_impl(&self)
         ensures
             self.shift_vals().len() == self.iter().column().len(),

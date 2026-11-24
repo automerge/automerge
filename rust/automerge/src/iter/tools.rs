@@ -316,7 +316,7 @@ where
 /// The column is a plain one, or the values of a prefix column (`K` is the
 /// kind of index the column is kept with).
 #[derive(Clone, Default, Debug)]
-pub(crate) struct BoolColumnSkipper<'a, K: hexane::VIndex<bool> = hexane::LenIndex> {
+pub(crate) struct BoolColumnSkipper<'a, K: hexane::Index<bool> = hexane::LenIndex> {
     iter: hexane::Iter<'a, bool, hexane::Leb128, K>,
     range: Range<usize>,
     cursor: usize,
@@ -324,7 +324,7 @@ pub(crate) struct BoolColumnSkipper<'a, K: hexane::VIndex<bool> = hexane::LenInd
     exhausted: bool,
 }
 
-impl<'a, K: hexane::VIndex<bool>> BoolColumnSkipper<'a, K> {
+impl<'a, K: hexane::Index<bool>> BoolColumnSkipper<'a, K> {
     pub(crate) fn new(
         iter: hexane::Iter<'a, bool, hexane::Leb128, K>,
         range: Range<usize>,
@@ -340,9 +340,9 @@ impl<'a, K: hexane::VIndex<bool>> BoolColumnSkipper<'a, K> {
     }
 }
 
-impl<K: hexane::VIndex<bool> + std::fmt::Debug> Skipper for BoolColumnSkipper<'_, K> {}
+impl<K: hexane::Index<bool> + std::fmt::Debug> Skipper for BoolColumnSkipper<'_, K> {}
 
-impl<K: hexane::VIndex<bool> + std::fmt::Debug> Shiftable for BoolColumnSkipper<'_, K> {
+impl<K: hexane::Index<bool> + std::fmt::Debug> Shiftable for BoolColumnSkipper<'_, K> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         self.range = range.clone();
         self.cursor = range.start;
@@ -363,7 +363,7 @@ impl<K: hexane::VIndex<bool> + std::fmt::Debug> Shiftable for BoolColumnSkipper<
     }
 }
 
-impl<K: hexane::VIndex<bool>> Iterator for BoolColumnSkipper<'_, K> {
+impl<K: hexane::Index<bool>> Iterator for BoolColumnSkipper<'_, K> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {

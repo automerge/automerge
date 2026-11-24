@@ -14,12 +14,12 @@
 //! this codec as it is for [`Leb128`](crate::Leb128), with nothing said
 //! twice.
 //!
-//! `use hexane::verified::bijou::Column` gives the API of
+//! `use hexane::bijou::Column` gives the API of
 //! [`Column`](super::Column) with the [`Bijou64`] wire
 //! format, so a consuming crate picks its codec with one import:
 //!
 //! ```
-//! use hexane::verified::bijou::Column;
+//! use hexane::bijou::Column;
 //!
 //! let mut col = Column::<u32>::new();
 //! col.push(300u32);
@@ -27,12 +27,11 @@
 //! assert_eq!(col.get(0), Some(300));
 //! ```
 //!
-//! What such a column saves is what [`hexane::bijou::Column`](crate::bijou)
-//! saves of the same values, and each loads what the other saved: the
-//! tests hold the two to that, as they do for LEB128.
+//! The tests tie what such a column saves to what hexane's earlier
+//! bijou64 columns saved, as they do for LEB128.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`bijou/imp.rs`), which has
 //! its contract word for word and is proved there.
 

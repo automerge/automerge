@@ -1,12 +1,12 @@
-//! Delta columns: the numbers a delta column holds ([`VDelta`]), how the
-//! values of the column underneath are deltas (`VDeltas`), sources of
+//! Delta columns: the numbers a delta column holds ([`Delta`]), how the
+//! values of the column underneath are deltas (`Deltas`), sources of
 //! values that say what they give
 //! (`SliceValues`, `SliceItems`), so that what the verified cores build
 //! from them is known, and the column ([`DeltaColumn`]). The
 //! column's iterator ([`DeltaIter`]) is in `delta/iter.rs`.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`delta/imp.rs`), which has
 //! its contract word for word and is proved there.
 
@@ -41,7 +41,7 @@ use super::model::Model;
 #[cfg(verus_keep_ghost)]
 use super::only;
 use super::seal;
-use super::value::{RleValue, VOps, VOptOps, VOptWrite, VWrite};
+use super::value::{Ops, OptOps, OptWrite, RleValue, Write};
 #[cfg(verus_keep_ghost)]
 use super::VGet;
 #[cfg(verus_keep_ghost)]
@@ -79,7 +79,7 @@ mod imp;
 #[allow(unused_imports)]
 use imp::*;
 #[allow(unused_imports)]
-pub(crate) use imp::{bounds_of, DKind, RunItems, SliceItems, SliceValues, VDeltas};
+pub(crate) use imp::{bounds_of, DKind, Deltas, RunItems, SliceItems, SliceValues};
 #[cfg(verus_keep_ghost)]
 #[allow(unused_imports)]
 pub(crate) use imp::{
@@ -96,7 +96,7 @@ verus! {
 /// `usize`. A delta column keeps its values' running sums as `i64`s, so
 /// of the wider types it holds the numbers up to `i64::MAX` only
 /// (`fits`).
-pub trait VDeltaNum: RleValue + seal::DeltaSeal {
+pub trait DeltaNum: RleValue + seal::DeltaSeal {
     /// Whether a delta column can hold the number: always, but for a
     /// `u64` or a `usize` above `i64::MAX`.
     spec fn fits(self) -> bool;
@@ -176,7 +176,7 @@ pub trait VDeltaNum: RleValue + seal::DeltaSeal {
     ;
 }
 
-impl VDeltaNum for u32 {
+impl DeltaNum for u32 {
     open spec fn fits(self) -> bool {
         true
     }
@@ -229,7 +229,7 @@ impl VDeltaNum for u32 {
     }
 }
 
-impl VDeltaNum for u64 {
+impl DeltaNum for u64 {
     open spec fn fits(self) -> bool {
         self <= 0x7fff_ffff_ffff_ffff
     }
@@ -282,7 +282,7 @@ impl VDeltaNum for u64 {
     }
 }
 
-impl VDeltaNum for i32 {
+impl DeltaNum for i32 {
     open spec fn fits(self) -> bool {
         true
     }
@@ -335,7 +335,7 @@ impl VDeltaNum for i32 {
     }
 }
 
-impl VDeltaNum for i64 {
+impl DeltaNum for i64 {
     open spec fn fits(self) -> bool {
         true
     }
@@ -388,7 +388,7 @@ impl VDeltaNum for i64 {
     }
 }
 
-impl VDeltaNum for usize {
+impl DeltaNum for usize {
     open spec fn fits(self) -> bool {
         self <= 0x7fff_ffff_ffff_ffff
     }
@@ -458,9 +458,9 @@ pub open spec fn dom(d: Option<i64>, least: i64, most: i64, nullable: bool) -> b
     }
 }
 
-/// A value type of a delta column: a number ([`VDeltaNum`]) or an
+/// A value type of a delta column: a number ([`DeltaNum`]) or an
 /// `Option` of one, `None` the null.
-pub trait VDelta: VSpec<S = Self> + Copy + seal::DeltaValSeal {
+pub trait Delta: VSpec<S = Self> + Copy + seal::DeltaValSeal {
     /// What a load fills a delta column of the type with
     /// ([`DeltaColumn::load_with`]): the difference between
     /// each value and the one before it, an `i64`; for a type with a
@@ -468,7 +468,7 @@ pub trait VDelta: VSpec<S = Self> + Copy + seal::DeltaValSeal {
     type Fill: Copy;
 
     /// Whether a delta column can hold the value: a null, or a number
-    /// that fits ([`VDeltaNum::fits`]).
+    /// that fits ([`DeltaNum::fits`]).
     spec fn fits(self) -> bool;
 
     /// Whether the type has a null.
@@ -565,7 +565,7 @@ pub trait VDelta: VSpec<S = Self> + Copy + seal::DeltaValSeal {
 /// What a delta column of `T` can keep: a number from the least to the
 /// greatest that fits, or a null where `T` has one.
 #[doc(hidden)]
-pub open spec fn in_dom<T: VDelta>(d: Option<i64>) -> bool {
+pub open spec fn in_dom<T: Delta>(d: Option<i64>) -> bool {
     dom(d, T::least(), T::most(), T::nullable())
 }
 
@@ -587,7 +587,7 @@ pub open spec fn delta_below(a: Option<i64>, b: Option<i64>) -> bool {
 /// limit where one is `Unbounded`. A bound can be any value of the
 /// type: a null, which comes before every number, and a number too
 /// large for a delta column, which comes after all it keeps.
-pub open spec fn delta_within<T: VDelta>(lo: Bound<&T>, hi: Bound<&T>, v: T) -> bool {
+pub open spec fn delta_within<T: Delta>(lo: Bound<&T>, hi: Bound<&T>, v: T) -> bool {
     &&& v.dv() is Some
     &&& match lo {
         Bound::Included(a) => !T::below(v, *a),
@@ -601,11 +601,11 @@ pub open spec fn delta_within<T: VDelta>(lo: Bound<&T>, hi: Bound<&T>, v: T) -> 
     }
 }
 
-impl<T: VDeltaNum> VDelta for T {
+impl<T: DeltaNum> Delta for T {
     type Fill = i64;
 
     open spec fn fits(self) -> bool {
-        <T as VDeltaNum>::fits(self)
+        <T as DeltaNum>::fits(self)
     }
 
     open spec fn nullable() -> bool {
@@ -624,11 +624,11 @@ impl<T: VDeltaNum> VDelta for T {
     }
 
     open spec fn least() -> i64 {
-        <T as VDeltaNum>::least()
+        <T as DeltaNum>::least()
     }
 
     open spec fn most() -> i64 {
-        <T as VDeltaNum>::most()
+        <T as DeltaNum>::most()
     }
 
     proof fn lemma_delta(v: T, d: Option<i64>) {
@@ -637,7 +637,7 @@ impl<T: VDeltaNum> VDelta for T {
 
     #[inline(always)]
     fn to_i64(self) -> Option<i64> {
-        Some(<T as VDeltaNum>::to_i64(self))
+        Some(<T as DeltaNum>::to_i64(self))
     }
 
     proof fn lemma_order(a: T, b: T) {
@@ -657,12 +657,12 @@ impl<T: VDeltaNum> VDelta for T {
 
     #[inline(always)]
     fn lo() -> i64 {
-        <T as VDeltaNum>::lo()
+        <T as DeltaNum>::lo()
     }
 
     #[inline(always)]
     fn hi() -> i64 {
-        <T as VDeltaNum>::hi()
+        <T as DeltaNum>::hi()
     }
 
     open spec fn fill_delta(f: i64) -> Option<i64> {
@@ -675,7 +675,7 @@ impl<T: VDeltaNum> VDelta for T {
     }
 }
 
-impl<T: VDeltaNum> VDelta for Option<T> {
+impl<T: DeltaNum> Delta for Option<T> {
     type Fill = Option<i64>;
 
     open spec fn fits(self) -> bool {
@@ -704,11 +704,11 @@ impl<T: VDeltaNum> VDelta for Option<T> {
     }
 
     open spec fn least() -> i64 {
-        <T as VDeltaNum>::least()
+        <T as DeltaNum>::least()
     }
 
     open spec fn most() -> i64 {
-        <T as VDeltaNum>::most()
+        <T as DeltaNum>::most()
     }
 
     proof fn lemma_delta(v: Option<T>, d: Option<i64>) {
@@ -739,12 +739,12 @@ impl<T: VDeltaNum> VDelta for Option<T> {
 
     #[inline(always)]
     fn lo() -> i64 {
-        <T as VDeltaNum>::lo()
+        <T as DeltaNum>::lo()
     }
 
     #[inline(always)]
     fn hi() -> i64 {
-        <T as VDeltaNum>::hi()
+        <T as DeltaNum>::hi()
     }
 
     open spec fn fill_delta(f: Option<i64>) -> Option<i64> {
@@ -759,13 +759,13 @@ impl<T: VDeltaNum> VDelta for Option<T> {
 
 /// Values `vs` as a delta column keeps them.
 #[doc(hidden)]
-pub open spec fn dvs<T: VDelta>(vs: Seq<T>) -> Seq<Option<i64>> {
+pub open spec fn dvs<T: Delta>(vs: Seq<T>) -> Seq<Option<i64>> {
     vs.map_values(|v: T| v.dv())
 }
 
 /// Every one of values `vs` is one a delta column can hold
-/// ([`VDelta::fits`]).
-pub open spec fn all_fit<T: VDelta>(vs: Seq<T>) -> bool {
+/// ([`Delta::fits`]).
+pub open spec fn all_fit<T: Delta>(vs: Seq<T>) -> bool {
     forall|i: int| 0 <= i < vs.len() ==> (#[trigger] vs[i]).fits()
 }
 
@@ -804,24 +804,24 @@ pub open spec fn delta_runs_kept(rs: Seq<DeltaRun>) -> Seq<Option<i64>>
 /// `r.delta` more than the one before it; or `r.count` nulls, where
 /// `r.delta` is none. (`lemma_delta_run_exact` says which numbers they
 /// are.)
-pub open spec fn delta_run_values<T: VDelta>(r: DeltaRun) -> Seq<T> {
+pub open spec fn delta_run_values<T: Delta>(r: DeltaRun) -> Seq<T> {
     vals::<T>(delta_run_kept(r))
 }
 
 /// The values of the runs `rs` in a delta column of `T`: one run's
 /// after another's.
-pub open spec fn delta_runs_values<T: VDelta>(rs: Seq<DeltaRun>) -> Seq<T> {
+pub open spec fn delta_runs_values<T: Delta>(rs: Seq<DeltaRun>) -> Seq<T> {
     vals::<T>(delta_runs_kept(rs))
 }
 
 /// Every value of the run `r` is one a delta column of `T` can keep.
-pub open spec fn delta_run_fits<T: VDelta>(r: DeltaRun) -> bool {
+pub open spec fn delta_run_fits<T: Delta>(r: DeltaRun) -> bool {
     all_dom::<T>(delta_run_kept(r))
 }
 
 /// Every value of each of the runs `rs` is one a delta column of `T`
 /// can keep.
-pub open spec fn delta_runs_fit<T: VDelta>(rs: Seq<DeltaRun>) -> bool {
+pub open spec fn delta_runs_fit<T: Delta>(rs: Seq<DeltaRun>) -> bool {
     forall|i: int| 0 <= i < rs.len() ==> delta_run_fits::<T>(#[trigger] rs[i])
 }
 
@@ -831,7 +831,7 @@ pub open spec fn delta_runs_fit<T: VDelta>(rs: Seq<DeltaRun>) -> bool {
 /// `i64`, or where its first value and its last, taken as integers, are
 /// numbers of `T`. (The values of a run go one way, so its ends bound
 /// them.)
-pub open spec fn delta_run_in_range<T: VDelta>(r: DeltaRun) -> bool {
+pub open spec fn delta_run_in_range<T: Delta>(r: DeltaRun) -> bool {
     r.count == 0 || match r.delta {
         Some(d) => (T::least() == i64::MIN && T::most() == i64::MAX) || {
             &&& T::least() <= r.prefix + d <= T::most()
@@ -861,7 +861,7 @@ pub proof fn lemma_delta_run_exact(r: DeltaRun, k: int)
 
 /// A run that passes the check holds only values a delta column of `T`
 /// can keep.
-pub proof fn lemma_delta_run_fits<T: VDelta>(r: DeltaRun)
+pub proof fn lemma_delta_run_fits<T: Delta>(r: DeltaRun)
     requires
         delta_run_in_range::<T>(r),
     ensures
@@ -871,7 +871,7 @@ pub proof fn lemma_delta_run_fits<T: VDelta>(r: DeltaRun)
 }
 
 /// One more run adds its values.
-pub proof fn lemma_delta_runs_push<T: VDelta>(rs: Seq<DeltaRun>, r: DeltaRun)
+pub proof fn lemma_delta_runs_push<T: Delta>(rs: Seq<DeltaRun>, r: DeltaRun)
     ensures
         delta_runs_kept(rs.push(r)) == delta_runs_kept(rs) + delta_run_kept(r),
         delta_runs_values::<T>(rs.push(r)) == delta_runs_values::<T>(rs) + delta_run_values::<T>(r),
@@ -881,7 +881,7 @@ pub proof fn lemma_delta_runs_push<T: VDelta>(rs: Seq<DeltaRun>, r: DeltaRun)
 }
 
 /// The values of one run alone are its own, and no runs have none.
-pub proof fn lemma_delta_runs_one<T: VDelta>(r: DeltaRun)
+pub proof fn lemma_delta_runs_one<T: Delta>(r: DeltaRun)
     ensures
         delta_runs_values::<T>(seq![r]) == delta_run_values::<T>(r),
         delta_runs_values::<T>(Seq::empty()) == Seq::<T>::empty(),
@@ -892,7 +892,7 @@ pub proof fn lemma_delta_runs_one<T: VDelta>(r: DeltaRun)
 }
 
 /// A value type of a delta column under codec `C`: a number
-/// ([`VDeltaNum`]) or an `Option` of one.
+/// ([`DeltaNum`]) or an `Option` of one.
 #[allow(private_bounds)]
 pub trait DeltaValue<C: Codec = Leb128>: DKind<C> {
 
@@ -919,13 +919,13 @@ impl<T: DeltaValue<C>, C: Codec> View for DeltaColumn<T, C> {
 
 /// The values a delta column keeps as `ds`.
 #[doc(hidden)]
-pub open spec fn vals<T: VDelta>(ds: Seq<Option<i64>>) -> Seq<T> {
+pub open spec fn vals<T: Delta>(ds: Seq<Option<i64>>) -> Seq<T> {
     ds.map_values(|d: Option<i64>| T::of(d))
 }
 
 /// Each of `ds` is one a delta column of `T` can keep.
 #[doc(hidden)]
-pub open spec fn all_dom<T: VDelta>(ds: Seq<Option<i64>>) -> bool {
+pub open spec fn all_dom<T: Delta>(ds: Seq<Option<i64>>) -> bool {
     forall|i: int| 0 <= i < ds.len() ==> in_dom::<T>(#[trigger] ds[i])
 }
 
@@ -1455,7 +1455,7 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// runs a slab may hold.
     ///
     /// The fill of a delta column is a difference
-    /// ([`VDelta::Fill`]: an `i64`, and an `Option` of one for a type
+    /// ([`Delta::Fill`]: an `i64`, and an `Option` of one for a type
     /// with a null), as it is for
     /// [`DeltaColumn::load_with`](crate::DeltaColumn::load_with). With
     /// a length and a fill, empty `bytes` load as the run of that many

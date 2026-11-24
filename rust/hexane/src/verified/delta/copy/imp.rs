@@ -40,7 +40,7 @@ pub(super) proof fn lemma_applied_none<V>(d: Seq<V>, s: Seq<V>, sps: Seq<Splice>
 /// What a delta column of `T` keeps, with splices in order applied to it
 /// from another: the values of the splices applied to the values, and
 /// only values a delta column of `T` can keep.
-pub(super) proof fn lemma_applied_kept<T: VDelta>(d: Seq<Option<i64>>, s: Seq<Option<i64>>, sps: Seq<Splice>)
+pub(super) proof fn lemma_applied_kept<T: Delta>(d: Seq<Option<i64>>, s: Seq<Option<i64>>, sps: Seq<Splice>)
     requires
         in_order(sps, d.len() as int),
         all_dom::<T>(d),

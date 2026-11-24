@@ -17,12 +17,12 @@
 //! returns from promises that there are none (`delta_span_ok`).
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`enc/imp.rs`), which has
 //! its contract word for word and is proved there.
 #[cfg(verus_keep_ghost)]
 use super::{all_fit, DeltaColumn, DE, DX};
-use super::{DKind, DeltaValue, VDelta};
+use super::{DKind, Delta, DeltaValue};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::Slabs;
 #[cfg(verus_keep_ghost)]
@@ -49,7 +49,7 @@ verus! {
 
 /// Whether `b` is less than 2^63 above `a`; so it is, too, where one of
 /// them is null.
-pub open spec fn delta_near<T: VDelta>(a: T, b: T) -> bool {
+pub open spec fn delta_near<T: Delta>(a: T, b: T) -> bool {
     match (a.dv(), b.dv()) {
         (Some(x), Some(y)) => y - x <= i64::MAX,
         _ => true,
@@ -59,7 +59,7 @@ pub open spec fn delta_near<T: VDelta>(a: T, b: T) -> bool {
 /// Whether no two numbers among `vs` are 2^63 or more apart. A delta
 /// column holds no values that are, and an encoder panics for them when
 /// it is done ([`finish`](DeltaEncoderState::finish)).
-pub open spec fn delta_span_ok<T: VDelta>(vs: Seq<T>) -> bool {
+pub open spec fn delta_span_ok<T: Delta>(vs: Seq<T>) -> bool {
     forall|i: int, j: int| 0 <= i < vs.len() && 0 <= j < vs.len() ==> delta_near(#[trigger] vs[i], #[trigger] vs[j])
 }
 
@@ -68,7 +68,7 @@ pub open spec fn delta_span_ok<T: VDelta>(vs: Seq<T>) -> bool {
 /// `usize`'s and their `Option`s'), or the iterator keeps the laws Verus
 /// has for one and what it has to give fits.
 #[verifier::prophetic]
-pub open spec fn delta_iter_fits<T: VDelta, I: Iterator<Item = T>>(it: I) -> bool {
+pub open spec fn delta_iter_fits<T: Delta, I: Iterator<Item = T>>(it: I) -> bool {
     (forall|v: T| #[trigger] v.fits()) || (it.obeys_prophetic_iter_laws() && all_fit(it.remaining()))
 }
 

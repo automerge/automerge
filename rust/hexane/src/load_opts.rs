@@ -1,6 +1,6 @@
-//! The options of a load, for both APIs: what each option holds is
+//! The options of a load: what each option holds is
 //! specified here and verified with Verus, so that
-//! [`Column::load_with`](crate::verified::Column::load_with)
+//! [`Column::load_with`](crate::Column::load_with)
 //! can say what a load with them returns.
 
 use crate::column::DEFAULT_MAX_SEG;

@@ -20,13 +20,13 @@
 //! (`lemma_delta_finds`, `lemma_delta_finds_first`).
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`find/imp.rs`), which has
 //! its contract word for word and is proved there.
 
 use super::{bounds_of, DKind, DeltaColumn, DeltaValue, DE, DX};
 #[cfg(verus_keep_ghost)]
-use super::{delta_within, VDelta};
+use super::{delta_within, Delta};
 use crate::column::Slab;
 use crate::cursor::Slabs;
 use crate::delta::dfind::DFind;
@@ -53,7 +53,7 @@ verus! {
 /// find over the bounds gives ([`DeltaColumn::find_by_range`]).
 /// [`lemma_delta_finds`] says which places they are, and
 /// [`lemma_delta_finds_first`] which is the first.
-pub open spec fn delta_finds<T: VDelta>(vs: Seq<T>, lo: Bound<&T>, hi: Bound<&T>, from: int) -> Seq<usize>
+pub open spec fn delta_finds<T: Delta>(vs: Seq<T>, lo: Bound<&T>, hi: Bound<&T>, from: int) -> Seq<usize>
     decreases vs.len() - from,
 {
     if from < 0 || from >= vs.len() {
@@ -68,7 +68,7 @@ pub open spec fn delta_finds<T: VDelta>(vs: Seq<T>, lo: Bound<&T>, hi: Bound<&T>
 /// The finds of values `vs` from `from` on are places from `from` on
 /// whose values are within the bounds; they come in order, so none
 /// comes twice; and every such place is one of them.
-pub proof fn lemma_delta_finds<T: VDelta>(vs: Seq<T>, lo: Bound<&T>, hi: Bound<&T>, from: int)
+pub proof fn lemma_delta_finds<T: Delta>(vs: Seq<T>, lo: Bound<&T>, hi: Bound<&T>, from: int)
     requires
         0 <= from,
         vs.len() <= usize::MAX,
@@ -97,7 +97,7 @@ pub proof fn lemma_delta_finds<T: VDelta>(vs: Seq<T>, lo: Bound<&T>, hi: Bound<&
 /// place from `from` on whose value is within the bounds, and the finds
 /// after it are those from the next place on; and where there is no
 /// find, no value from `from` on is within the bounds.
-pub proof fn lemma_delta_finds_first<T: VDelta>(vs: Seq<T>, lo: Bound<&T>, hi: Bound<&T>, from: int)
+pub proof fn lemma_delta_finds_first<T: Delta>(vs: Seq<T>, lo: Bound<&T>, hi: Bound<&T>, from: int)
     requires
         0 <= from,
         vs.len() <= usize::MAX,
@@ -121,7 +121,7 @@ pub proof fn lemma_delta_finds_first<T: VDelta>(vs: Seq<T>, lo: Bound<&T>, hi: B
 
 /// A value `v` that a delta column can hold is within the bounds that
 /// include `t` and nothing else exactly if it is `t`, and no null.
-pub proof fn lemma_delta_within_one<T: VDelta>(t: T, v: T)
+pub proof fn lemma_delta_within_one<T: Delta>(t: T, v: T)
     requires
         v.fits(),
     ensures

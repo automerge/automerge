@@ -35,7 +35,7 @@ pub(super) type KEdit<V, C, K> = EditCore<
 /// Give the cursor `core` every run `feed` has, until it has no more.
 #[verifier::exec_allows_no_decreases_clause]
 #[inline(always)]
-pub(super) fn insert_feed<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, R: RunFeed<V::E>>(core: &mut KEdit<V, C, K>, feed: &mut R)
+pub(super) fn insert_feed<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>, R: RunFeed<V::E>>(core: &mut KEdit<V, C, K>, feed: &mut R)
     requires
         old(core).inv(),
         old(core).held(),
@@ -84,7 +84,7 @@ pub(super) fn insert_feed<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>, R: Ru
     }
 }
 
-impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
     #[inline(always)]
     pub(super) fn edit_impl(&mut self) -> (e: Edit<'_, V, C, K>)
         ensures
@@ -128,7 +128,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Edit<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Edit<'a, V, C, K> {
     pub(super) proof fn lemma_at_impl(&self)
         requires
             self.wf(),

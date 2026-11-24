@@ -20,7 +20,7 @@
 //! (`bad_format`), of which nothing is assumed.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`bytes/imp.rs`), which has
 //! its contract word for word and is proved there.
 
@@ -31,7 +31,7 @@ use super::codec::Codec;
 #[cfg(verus_keep_ghost)]
 use super::model::Model;
 use super::model::Plain;
-use super::{seal, ColumnValueRef, Owned, VForm, VGet, VSpec};
+use super::{seal, ColumnValueRef, Form, Owned, VGet, VSpec};
 #[cfg(verus_keep_ghost)]
 use crate::rle::lift::Lift;
 #[cfg(verus_keep_ghost)]
@@ -49,8 +49,8 @@ mod imp;
 use imp::*;
 #[allow(unused_imports)]
 pub(crate) use imp::{
-    bytes_len, compare_bytes, put_bytes, read_bytes, try_read_bytes, BytesCow, VBytesOps,
-    VBytesWrite, VOptBytesOps, VOptBytesWrite,
+    bytes_len, compare_bytes, put_bytes, read_bytes, try_read_bytes, BytesCow, BytesOps,
+    BytesWrite, OptBytesOps, OptBytesWrite,
 };
 #[cfg(verus_keep_ghost)]
 #[allow(unused_imports)]
@@ -171,7 +171,7 @@ impl VSpec for Vec<u8> {
     }
 }
 
-impl<'a> VForm<'a> for Vec<u8> {
+impl<'a> Form<'a> for Vec<u8> {
     type Get = &'a [u8];
 }
 
@@ -198,7 +198,7 @@ impl VSpec for Option<Vec<u8>> {
     }
 }
 
-impl<'a> VForm<'a> for Option<Vec<u8>> {
+impl<'a> Form<'a> for Option<Vec<u8>> {
     type Get = Option<&'a [u8]>;
 }
 

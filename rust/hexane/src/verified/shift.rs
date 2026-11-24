@@ -10,7 +10,7 @@
 //! iterator.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`shift/imp.rs`), which has
 //! its contract word for word and is proved there.
 
@@ -18,7 +18,7 @@
 use super::runs_of;
 #[cfg(verus_keep_ghost)]
 use super::VGet;
-use super::{Codec, ColumnValueRef, Get, Iter, Runs, VIndex};
+use super::{Codec, ColumnValueRef, Get, Index, Iter, Runs};
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{past, vals_of, window};
 #[cfg(verus_keep_ghost)]
@@ -508,7 +508,7 @@ pub proof fn lemma_singles<T>(xs: Seq<T>)
     imp::lemma_singles_impl::<T>(xs)
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Shiftable for Iter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Shiftable for Iter<'a, V, C, K> {
     closed spec fn shift_vals(&self) -> Seq<Get<'a, V>> {
         vals_of::<V::X>(self.slabs@)
     }
@@ -600,7 +600,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Shiftable for Iter<'a,
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Iter<'a, V, C, K> {
     /// The iterator's repositioning model ([`Shiftable`]) in the terms
     /// of its own specification: the values it ranges over are its
     /// column's, as items; its position is `pos()`; what it has left is
@@ -667,7 +667,7 @@ pub open spec fn units_of_runs<T>(rs: Seq<Run<T>>) -> Seq<Seq<Run<T>>> {
 /// The runs of a column, repositioned as its values are: the model is
 /// each value as a run of one, and an item, a run, stands for as many of
 /// those as it counts.
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Shiftable for Runs<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Shiftable for Runs<'a, V, C, K> {
     closed spec fn shift_vals(&self) -> Seq<Run<Get<'a, V>>> {
         unit_runs(self.0.shift_vals())
     }
@@ -759,7 +759,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Shiftable for Runs<'a,
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Runs<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Runs<'a, V, C, K> {
     /// The iterator's repositioning model ([`Shiftable`]) in the terms
     /// of its own specification: the values it ranges over are its
     /// column's, each a run of one; it stands where its iterator of

@@ -2,12 +2,12 @@
 //! places in one pass: [`DeltaColumn::copy_ranges`].
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`copy/imp.rs`), which has
 //! its contract word for word and is proved there.
 
 #[cfg(verus_keep_ghost)]
-use super::VDelta;
+use super::Delta;
 use super::{DeltaColumn, DeltaValue};
 #[cfg(verus_keep_ghost)]
 use crate::splices::{applied, in_order, ranges_ascend, splices_do};
@@ -25,7 +25,7 @@ verus! {
 
 impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// Copy ranges of `src` into the column, at several places in one
-    /// pass, as [`Column::copy_ranges`](crate::verified::Column::copy_ranges)
+    /// pass, as [`Column::copy_ranges`](crate::Column::copy_ranges)
     /// does: the column becomes `applied(self@, src@, splices@)`, and
     /// counts an edit more if a splice deletes a value or copies one
     /// (`splices_do`).

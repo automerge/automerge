@@ -100,7 +100,7 @@ impl From<&[u8]> for ValueMeta {
 }
 
 // A value's metadata is stored in a column as the number it is.
-impl hexane::VNewtype for ValueMeta {
+impl hexane::Newtype for ValueMeta {
     type Base = u64;
 
     fn to_base(self) -> u64 {
@@ -114,7 +114,7 @@ impl hexane::VNewtype for ValueMeta {
 
 // A prefix column of metadata sums the values' lengths, in a `u64`: the
 // sum before a value is where its bytes start in the value column.
-impl hexane::VAmount for ValueMeta {
+impl hexane::Amount for ValueMeta {
     type Sum = u64;
 
     // a length is less than 2^60 (the number's top 60 bits), so that any

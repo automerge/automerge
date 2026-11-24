@@ -86,7 +86,7 @@ pub(super) proof fn lemma_read<'a, T: DeltaValue<C>, C: Codec>(o: Seq<DIt<'a, T,
 
 /// The value at `i` of the column whose differences are `ds`: the sum
 /// of the differences through `i`, or a null.
-pub(super) proof fn lemma_at<T: VDelta>(ds: Seq<Option<i64>>, i: int)
+pub(super) proof fn lemma_at<T: Delta>(ds: Seq<Option<i64>>, i: int)
     requires
         all_dom::<T>(rz(0, ds)),
         0 <= i < ds.len(),
@@ -118,7 +118,7 @@ pub(super) proof fn lemma_run(ds: Seq<Option<i64>>, at: int, n: int, d: Option<i
 }
 
 /// The differences of the column whose differences are `ds` are `ds`.
-pub(super) proof fn lemma_deltas<T: VDelta>(ds: Seq<Option<i64>>)
+pub(super) proof fn lemma_deltas<T: Delta>(ds: Seq<Option<i64>>)
     requires
         all_dom::<T>(rz(0, ds)),
     ensures
@@ -179,7 +179,7 @@ pub(super) proof fn lemma_between(p: int, x: int, n: int, i: int, lo: int, hi: i
 /// A run of nulls after differences whose values are the type's leaves
 /// values that are the type's, where the type has nulls, and adds
 /// nothing.
-pub(super) proof fn lemma_null_run<T: VDelta>(ds: Seq<Option<i64>>, k: int, n: int)
+pub(super) proof fn lemma_null_run<T: Delta>(ds: Seq<Option<i64>>, k: int, n: int)
     requires
         0 <= k,
         0 <= n,
@@ -210,7 +210,7 @@ pub(super) proof fn lemma_null_run<T: VDelta>(ds: Seq<Option<i64>>, k: int, n: i
 /// A run of the difference `x` after differences whose values are the
 /// type's, its first and its last value the type's and no sum
 /// wrapping, leaves values that are the type's.
-pub(super) proof fn lemma_num_run<T: VDelta>(ds: Seq<Option<i64>>, k: int, n: int, x: i64)
+pub(super) proof fn lemma_num_run<T: Delta>(ds: Seq<Option<i64>>, k: int, n: int, x: i64)
     requires
         0 <= k,
         1 <= n,

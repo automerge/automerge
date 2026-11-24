@@ -167,7 +167,7 @@ pub(super) fn is_kept(u: Option<Option<i64>>, k: Option<i64>) -> (r: bool)
 
 /// Whether the type's numbers can be 2^63 or more apart.
 #[inline(always)]
-pub(super) fn is_wide<T: VDelta>() -> (r: bool)
+pub(super) fn is_wide<T: Delta>() -> (r: bool)
     ensures
         r == wide(T::least(), T::most()),
 {
@@ -280,7 +280,7 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaEncoderState<'a, T, C> {
             }
             return ;
         }
-        let k = <T as VDelta>::to_i64(value);
+        let k = <T as Delta>::to_i64(value);
         proof {
             T::lemma_delta(value, k);
             assert(self.s.on(buf@));
@@ -431,7 +431,7 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaEncoderState<'a, T, C> {
         if self.s.is_empty() {
             return true;
         }
-        match <T as VDelta>::try_i64(value) {
+        match <T as Delta>::try_i64(value) {
             Some(k) => {
                 let r = is_kept(self.uniform, k);
                 proof {

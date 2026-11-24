@@ -4,7 +4,7 @@
 //! [`iter`](DeltaColumn::iter) and
 //! [`iter_range`](DeltaColumn::iter_range) of a
 //! [`DeltaColumn`] give a [`DeltaIter`]. It moves as a
-//! [`Iter`](crate::verified::Iter) does and says the
+//! [`Iter`](crate::Iter) does and says the
 //! same of each move: what it has left (`rest`) is the column's values
 //! from where it stands ([`pos`](DeltaIter::pos)) to where its
 //! window ends ([`end_pos`](DeltaIter::end_pos)), as far as the
@@ -23,7 +23,7 @@
 //! column: no value is checked as it is read.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`iter/imp.rs`), which has
 //! its contract word for word and is proved there.
 

@@ -17,14 +17,14 @@
 //! the values before it add up to, for the sums of a prefix column fit.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`prefix/imp.rs`), which has
 //! its contract word for word and is proved there.
 
-use super::kind::{Kind, VIndex, VKeeps};
+use super::kind::{Index, Kind, VKeeps};
 #[cfg(verus_keep_ghost)]
 use super::sums::{summed, sums_fit};
-use super::sums::{PrefixValue, SumModel, SumOf, SumWeight, UnsignedPrefix, VSum};
+use super::sums::{PrefixValue, Sum, SumModel, SumOf, SumWeight, UnsignedPrefix};
 use super::{Codec, Column, ColumnValueRef};
 #[cfg(verus_keep_ghost)]
 use super::{Get, Held, VGet};
@@ -64,7 +64,7 @@ impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> VKeeps<V, C> for SumIndex {
     }
 }
 
-impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> VIndex<V, C> for SumIndex {
+impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Index<V, C> for SumIndex {
 
 }
 

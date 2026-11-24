@@ -34,7 +34,7 @@ pub(super) type KLoad<'a, V, C, K> = LoadCore<
     <<V as seal::Sealed<C>>::E as Loading<'a, <V as seal::Sealed<C>>::X>>::Ld,
 >;
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> ColumnLoadIter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> ColumnLoadIter<'a, V, C, K> {
     pub(super) fn try_next_run_impl(&mut self) -> (r: Result<Option<Run<Get<'a, V>>>, PackError>)
         requires
             old(self).wf(),
@@ -127,7 +127,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> ColumnLoadIter<'a, V, 
     }
 }
 
-impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
     pub(super) fn load_iter_impl<'a, F: MaybeFill<Get<'a, V>>>(bytes: &'a [u8], opts: LoadOpts<F>) -> (r: ColumnLoadIter<'a, V, C, K>)
         requires
             opts.max_segments() >= 2,

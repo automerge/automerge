@@ -33,14 +33,14 @@
 //! did.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`prefix_iter/imp.rs`), which has
 //! its contract word for word and is proved there.
 
 use super::prefix::SumIndex;
 #[cfg(verus_keep_ghost)]
 use super::sums::{summed, sums_fit};
-use super::sums::{PrefixValue, SumOf, SumWeight, UnsignedPrefix, VSum};
+use super::sums::{PrefixValue, Sum, SumOf, SumWeight, UnsignedPrefix};
 use super::Get;
 #[cfg(verus_keep_ghost)]
 use super::{head_run, VGet, VSpec};

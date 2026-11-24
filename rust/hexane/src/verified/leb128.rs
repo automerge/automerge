@@ -1,18 +1,18 @@
 //! The column types of the verified API with LEB128 as their codec.
 //!
-//! `use hexane::verified::leb128::Column` reads the same as
-//! `use hexane::verified::Column` ([`Leb128`] is the codec where
+//! `use hexane::leb128::Column` reads the same as
+//! `use hexane::Column` ([`Leb128`] is the codec where
 //! none is named) but states the wire format at the import, as the
 //! `bijou` module beside this one does for bijou64 (behind the `bijou64`
 //! feature). Code that mixes codecs can import both modules and qualify
 //! at the use site:
 //!
 //! ```
-//! use hexane::verified::leb128::Column;
+//! use hexane::leb128::Column;
 //!
 //! let mut col = Column::<u32>::new();
 //! col.push(300u32);
-//! let col = hexane::verified::Column::<u32>::load(&col.save()).unwrap();
+//! let col = hexane::Column::<u32>::load(&col.save()).unwrap();
 //! assert_eq!(col.get(0), Some(300));
 //! ```
 

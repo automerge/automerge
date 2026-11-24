@@ -45,7 +45,7 @@ verus! {
 /// How the values of the column underneath are differences.
 pub(super) type DB<T, C> = <T as DKind<C>>::B;
 
-pub(super) proof fn lemma_delta_finds_impl<T: VDelta>(vs: Seq<T>, lo: Bound<&T>, hi: Bound<&T>, from: int)
+pub(super) proof fn lemma_delta_finds_impl<T: Delta>(vs: Seq<T>, lo: Bound<&T>, hi: Bound<&T>, from: int)
     requires
         0 <= from,
         vs.len() <= usize::MAX,
@@ -106,7 +106,7 @@ pub(super) proof fn lemma_delta_finds_impl<T: VDelta>(vs: Seq<T>, lo: Bound<&T>,
     }
 }
 
-pub(super) proof fn lemma_delta_finds_first_impl<T: VDelta>(vs: Seq<T>, lo: Bound<&T>, hi: Bound<&T>, from: int)
+pub(super) proof fn lemma_delta_finds_first_impl<T: Delta>(vs: Seq<T>, lo: Bound<&T>, hi: Bound<&T>, from: int)
     requires
         0 <= from,
         vs.len() <= usize::MAX,
@@ -138,7 +138,7 @@ pub(super) proof fn lemma_delta_finds_first_impl<T: VDelta>(vs: Seq<T>, lo: Boun
     }
 }
 
-pub(super) proof fn lemma_delta_within_one_impl<T: VDelta>(t: T, v: T)
+pub(super) proof fn lemma_delta_within_one_impl<T: Delta>(t: T, v: T)
     requires
         v.fits(),
     ensures
@@ -203,7 +203,7 @@ pub(super) proof fn lemma_hits_next(ds: Seq<Option<i64>>, lo: i64, hi: i64, from
 /// Where the values within the bounds `lo` and `hi` are those kept as
 /// a number from `a` to `b`, the places of the one are the finds of the
 /// other.
-pub(super) proof fn lemma_hits_finds<T: VDelta>(ds: Seq<Option<i64>>, lo: Bound<&T>, hi: Bound<&T>, a: i64, b: i64, from: int)
+pub(super) proof fn lemma_hits_finds<T: Delta>(ds: Seq<Option<i64>>, lo: Bound<&T>, hi: Bound<&T>, a: i64, b: i64, from: int)
     requires
         forall|i: int| 0 <= i < ds.len() ==> in_dom::<T>(#[trigger] ds[i]),
         forall|d: Option<i64>|

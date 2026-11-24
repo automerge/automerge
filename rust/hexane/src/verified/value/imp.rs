@@ -26,7 +26,7 @@ verus! {
 
 /// Where `data` starts with the bytes of the base value `b`, a value
 /// whose bytes start `data` has the base value `b`.
-pub(super) proof fn lemma_base_front<T: VNewtype, C: Codec>(data: Seq<u8>, n: int, b: T::Base)
+pub(super) proof fn lemma_base_front<T: Newtype, C: Codec>(data: Seq<u8>, n: int, b: T::Base)
     requires
         0 <= n <= data.len(),
         data.take(n) == T::Base::enc::<C>(b),
@@ -47,15 +47,15 @@ pub(super) proof fn lemma_base_front<T: VNewtype, C: Codec>(data: Seq<u8>, n: in
 /// the wire.
 #[verifier::reject_recursive_types(T)]
 #[verifier::reject_recursive_types(C)]
-pub struct VOps<T, C>(PhantomData<(T, C)>);
+pub struct Ops<T, C>(PhantomData<(T, C)>);
 
 /// Values of `T` under codec `C`, none of them null: how they are
 /// written.
 #[verifier::reject_recursive_types(T)]
 #[verifier::reject_recursive_types(C)]
-pub struct VWrite<T, C>(PhantomData<(T, C)>);
+pub struct Write<T, C>(PhantomData<(T, C)>);
 
-impl<'a, T: RleValue, C: Codec> RleOps<'a> for VOps<T, C> {
+impl<'a, T: RleValue, C: Codec> RleOps<'a> for Ops<T, C> {
     type V = T;
 
     open spec fn nullable() -> bool {
@@ -153,8 +153,8 @@ impl<'a, T: RleValue, C: Codec> RleOps<'a> for VOps<T, C> {
     }
 }
 
-impl<'a, T: RleValue, C: Codec> WriteOps<'a> for VWrite<T, C> {
-    type R = VOps<T, C>;
+impl<'a, T: RleValue, C: Codec> WriteOps<'a> for Write<T, C> {
+    type R = Ops<T, C>;
 
     type Cow = T;
 
@@ -199,8 +199,8 @@ impl<'a, T: RleValue, C: Codec> WriteOps<'a> for VWrite<T, C> {
     }
 }
 
-impl<'s, T: RleValue, C: Codec> Lift<'s> for VWrite<T, C> {
-    type W = VWrite<T, C>;
+impl<'s, T: RleValue, C: Codec> Lift<'s> for Write<T, C> {
+    type W = Write<T, C>;
 
     open spec fn lift(v: T) -> T {
         v
@@ -213,7 +213,7 @@ impl<'s, T: RleValue, C: Codec> Lift<'s> for VWrite<T, C> {
     }
 
     proof fn axiom_unlift(w: T) {
-        assert(<VWrite<T, C> as Lift<'s>>::lift(w) == w);
+        assert(<Write<T, C> as Lift<'s>>::lift(w) == w);
     }
 
     #[inline(always)]
@@ -228,15 +228,15 @@ impl<'s, T: RleValue, C: Codec> Lift<'s> for VWrite<T, C> {
 /// the wire.
 #[verifier::reject_recursive_types(T)]
 #[verifier::reject_recursive_types(C)]
-pub struct VOptOps<T, C>(PhantomData<(T, C)>);
+pub struct OptOps<T, C>(PhantomData<(T, C)>);
 
 /// `Option`s of `T` under codec `C`, `None` the null: how they are
 /// written.
 #[verifier::reject_recursive_types(T)]
 #[verifier::reject_recursive_types(C)]
-pub struct VOptWrite<T, C>(PhantomData<(T, C)>);
+pub struct OptWrite<T, C>(PhantomData<(T, C)>);
 
-impl<'a, T: RleValue, C: Codec> RleOps<'a> for VOptOps<T, C> {
+impl<'a, T: RleValue, C: Codec> RleOps<'a> for OptOps<T, C> {
     type V = Option<T>;
 
     open spec fn nullable() -> bool {
@@ -369,8 +369,8 @@ impl<'a, T: RleValue, C: Codec> RleOps<'a> for VOptOps<T, C> {
     }
 }
 
-impl<'a, T: RleValue, C: Codec> WriteOps<'a> for VOptWrite<T, C> {
-    type R = VOptOps<T, C>;
+impl<'a, T: RleValue, C: Codec> WriteOps<'a> for OptWrite<T, C> {
+    type R = OptOps<T, C>;
 
     type Cow = Option<T>;
 
@@ -385,7 +385,7 @@ impl<'a, T: RleValue, C: Codec> WriteOps<'a> for VOptWrite<T, C> {
 
     #[inline(always)]
     fn cow_eq(a: &Option<T>, b: &Option<T>) -> bool {
-        <VOptOps<T, C> as RleOps<'a>>::same(a, b)
+        <OptOps<T, C> as RleOps<'a>>::same(a, b)
     }
 
     #[inline(always)]
@@ -423,8 +423,8 @@ impl<'a, T: RleValue, C: Codec> WriteOps<'a> for VOptWrite<T, C> {
     }
 }
 
-impl<'s, T: RleValue, C: Codec> Lift<'s> for VOptWrite<T, C> {
-    type W = VOptWrite<T, C>;
+impl<'s, T: RleValue, C: Codec> Lift<'s> for OptWrite<T, C> {
+    type W = OptWrite<T, C>;
 
     open spec fn lift(v: Option<T>) -> Option<T> {
         v
@@ -437,7 +437,7 @@ impl<'s, T: RleValue, C: Codec> Lift<'s> for VOptWrite<T, C> {
     }
 
     proof fn axiom_unlift(w: Option<T>) {
-        assert(<VOptWrite<T, C> as Lift<'s>>::lift(w) == w);
+        assert(<OptWrite<T, C> as Lift<'s>>::lift(w) == w);
     }
 
     #[inline(always)]
@@ -452,14 +452,14 @@ impl<'s, T: RleValue, C: Codec> Lift<'s> for VOptWrite<T, C> {
 /// bytes, and its values are at most ten bytes each.
 pub(crate) proof fn lemma_plain_sizes<T: RleValue, C: Codec>(vs: Seq<T>)
     ensures
-        heads_bound::<VOps<T, C>>(10),
-        encs::<VOps<T, C>>(vs).len() <= 10 * vs.len(),
+        heads_bound::<Ops<T, C>>(10),
+        encs::<Ops<T, C>>(vs).len() <= 10 * vs.len(),
     decreases vs.len(),
 {
-    assert forall|n: i64| (#[trigger] VOps::<T, C>::enc_signed(n)).len() <= 10 by {
+    assert forall|n: i64| (#[trigger] Ops::<T, C>::enc_signed(n)).len() <= 10 by {
         C::lemma_i(n, n, Seq::empty(), Seq::empty());
     }
-    assert forall|n: u64| (#[trigger] VOps::<T, C>::enc_unsigned(n)).len() <= 10 by {
+    assert forall|n: u64| (#[trigger] Ops::<T, C>::enc_unsigned(n)).len() <= 10 by {
         C::lemma_u(n, n, Seq::empty(), Seq::empty());
     }
     if vs.len() > 0 {
@@ -472,14 +472,14 @@ pub(crate) proof fn lemma_plain_sizes<T: RleValue, C: Codec>(vs: Seq<T>)
 /// one byte here, though it is none in the column).
 pub(crate) proof fn lemma_opt_sizes<T: RleValue, C: Codec>(vs: Seq<Option<T>>)
     ensures
-        heads_bound::<VOptOps<T, C>>(10),
-        encs::<VOptOps<T, C>>(vs).len() <= 10 * vs.len(),
+        heads_bound::<OptOps<T, C>>(10),
+        encs::<OptOps<T, C>>(vs).len() <= 10 * vs.len(),
     decreases vs.len(),
 {
-    assert forall|n: i64| (#[trigger] VOptOps::<T, C>::enc_signed(n)).len() <= 10 by {
+    assert forall|n: i64| (#[trigger] OptOps::<T, C>::enc_signed(n)).len() <= 10 by {
         C::lemma_i(n, n, Seq::empty(), Seq::empty());
     }
-    assert forall|n: u64| (#[trigger] VOptOps::<T, C>::enc_unsigned(n)).len() <= 10 by {
+    assert forall|n: u64| (#[trigger] OptOps::<T, C>::enc_unsigned(n)).len() <= 10 by {
         C::lemma_u(n, n, Seq::empty(), Seq::empty());
     }
     if vs.len() > 0 {
@@ -554,7 +554,7 @@ pub(super) fn vpack_pack_i64<C: Codec>(v: &i64, buf: &mut Vec<u8>) -> (n: usize)
     buf.len() - pos
 }
 
-pub(super) proof fn vpack_lemma_enc_t<T: VNewtype, C: Codec>(v: T, w: T, s: Seq<u8>, t: Seq<u8>)
+pub(super) proof fn vpack_lemma_enc_t<T: Newtype, C: Codec>(v: T, w: T, s: Seq<u8>, t: Seq<u8>)
     ensures
         0 < <T as RleValue>::enc::<C>(v).len() <= 10,
         <T as RleValue>::enc::<C>(v) + s == <T as RleValue>::enc::<C>(w) + t ==> v == w,
@@ -563,7 +563,7 @@ pub(super) proof fn vpack_lemma_enc_t<T: VNewtype, C: Codec>(v: T, w: T, s: Seq<
     T::lemma_base(v, w);
 }
 
-pub(super) proof fn vpack_lemma_num_t<T: VNewtype>(v: T, w: T)
+pub(super) proof fn vpack_lemma_num_t<T: Newtype>(v: T, w: T)
     ensures
         <T as RleValue>::num(v) == <T as RleValue>::num(w) ==> v == w,
 {
@@ -572,7 +572,7 @@ pub(super) proof fn vpack_lemma_num_t<T: VNewtype>(v: T, w: T)
 }
 
 #[inline(always)]
-pub(super) fn vpack_same_t<T: VNewtype>(a: &T, b: &T) -> (r: bool)
+pub(super) fn vpack_same_t<T: Newtype>(a: &T, b: &T) -> (r: bool)
     ensures
         r == (*a == *b),
 {
@@ -583,7 +583,7 @@ pub(super) fn vpack_same_t<T: VNewtype>(a: &T, b: &T) -> (r: bool)
 }
 
 #[inline(always)]
-pub(super) fn vpack_try_unpack_t<T: VNewtype, C: Codec>(data: &[u8]) -> (r: Result<(usize, T), PackError>)
+pub(super) fn vpack_try_unpack_t<T: Newtype, C: Codec>(data: &[u8]) -> (r: Result<(usize, T), PackError>)
     ensures
         match r {
             Ok((n, v)) => n <= data.len() && data@.take(n as int) == <T as RleValue>::enc::<C>(v),
@@ -605,7 +605,7 @@ pub(super) fn vpack_try_unpack_t<T: VNewtype, C: Codec>(data: &[u8]) -> (r: Resu
 }
 
 #[inline(always)]
-pub(super) fn vpack_unpack_t<T: VNewtype, C: Codec>(data: &[u8]) -> (r: (usize, T))
+pub(super) fn vpack_unpack_t<T: Newtype, C: Codec>(data: &[u8]) -> (r: (usize, T))
     requires
         exists|v: T| (#[trigger] <T as RleValue>::enc::<C>(v)).is_prefix_of(data@),
     ensures
@@ -630,10 +630,10 @@ pub(super) fn vpack_unpack_t<T: VNewtype, C: Codec>(data: &[u8]) -> (r: (usize, 
 pub(super) fn vnewtype_from_base_u32(b: u64) -> (r: Result<u32, PackError>)
     ensures
         match r {
-            Ok(v) => <u32 as VNewtype>::base(v) == b,
-            Err(_) => forall|v: u32| #[trigger] <u32 as VNewtype>::base(v) != b,
+            Ok(v) => <u32 as Newtype>::base(v) == b,
+            Err(_) => forall|v: u32| #[trigger] <u32 as Newtype>::base(v) != b,
         },
-    no_unwind when exists|v: u32| #[trigger] <u32 as VNewtype>::base(v) == b
+    no_unwind when exists|v: u32| #[trigger] <u32 as Newtype>::base(v) == b
 {
     if b <= u32::MAX as u64 {
         Ok(b as u32)
@@ -646,10 +646,10 @@ pub(super) fn vnewtype_from_base_u32(b: u64) -> (r: Result<u32, PackError>)
 pub(super) fn vnewtype_from_base_i32(b: i64) -> (r: Result<i32, PackError>)
     ensures
         match r {
-            Ok(v) => <i32 as VNewtype>::base(v) == b,
-            Err(_) => forall|v: i32| #[trigger] <i32 as VNewtype>::base(v) != b,
+            Ok(v) => <i32 as Newtype>::base(v) == b,
+            Err(_) => forall|v: i32| #[trigger] <i32 as Newtype>::base(v) != b,
         },
-    no_unwind when exists|v: i32| #[trigger] <i32 as VNewtype>::base(v) == b
+    no_unwind when exists|v: i32| #[trigger] <i32 as Newtype>::base(v) == b
 {
     if i32::MIN as i64 <= b && b <= i32::MAX as i64 {
         Ok(b as i32)
@@ -662,10 +662,10 @@ pub(super) fn vnewtype_from_base_i32(b: i64) -> (r: Result<i32, PackError>)
 pub(super) fn vnewtype_from_base_usize(b: u64) -> (r: Result<usize, PackError>)
     ensures
         match r {
-            Ok(v) => <usize as VNewtype>::base(v) == b,
-            Err(_) => forall|v: usize| #[trigger] <usize as VNewtype>::base(v) != b,
+            Ok(v) => <usize as Newtype>::base(v) == b,
+            Err(_) => forall|v: usize| #[trigger] <usize as Newtype>::base(v) != b,
         },
-    no_unwind when exists|v: usize| #[trigger] <usize as VNewtype>::base(v) == b
+    no_unwind when exists|v: usize| #[trigger] <usize as Newtype>::base(v) == b
 {
     if b <= usize::MAX as u64 {
         Ok(b as usize)
@@ -676,7 +676,7 @@ pub(super) fn vnewtype_from_base_usize(b: u64) -> (r: Result<usize, PackError>)
 
 pub(super) proof fn vnewtype_lemma_base_nonzerou32(v: NonZeroU32, w: NonZeroU32)
     ensures
-        <NonZeroU32 as VNewtype>::base(v) == <NonZeroU32 as VNewtype>::base(w) ==> v == w,
+        <NonZeroU32 as Newtype>::base(v) == <NonZeroU32 as Newtype>::base(w) ==> v == w,
 {
     broadcast use vstd::std_specs::nonzero::group_nonzero_axioms;
 
@@ -688,10 +688,10 @@ pub(super) proof fn vnewtype_lemma_base_nonzerou32(v: NonZeroU32, w: NonZeroU32)
 pub(super) fn vnewtype_from_base_nonzerou32(b: u32) -> (r: Result<NonZeroU32, PackError>)
     ensures
         match r {
-            Ok(v) => <NonZeroU32 as VNewtype>::base(v) == b,
-            Err(_) => forall|v: NonZeroU32| #[trigger] <NonZeroU32 as VNewtype>::base(v) != b,
+            Ok(v) => <NonZeroU32 as Newtype>::base(v) == b,
+            Err(_) => forall|v: NonZeroU32| #[trigger] <NonZeroU32 as Newtype>::base(v) != b,
         },
-    no_unwind when exists|v: NonZeroU32| #[trigger] <NonZeroU32 as VNewtype>::base(v) == b
+    no_unwind when exists|v: NonZeroU32| #[trigger] <NonZeroU32 as Newtype>::base(v) == b
 {
     broadcast use vstd::std_specs::nonzero::group_nonzero_axioms;
 

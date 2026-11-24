@@ -51,7 +51,7 @@ pub(super) proof fn lemma_undo<A: VGroup>(p: A, a: A)
     A::lemma_plus(p, p, p);
 }
 
-impl<'a, V: VAccumulated> AccValue<'a, V> {
+impl<'a, V: Accumulated> AccValue<'a, V> {
     pub(super) proof fn lemma_prefix_impl(&self, p: V::Acc)
         requires
             self.total() == <V::Acc as VGroup>::plus(p, V::adds(self.value.sv())),
@@ -75,7 +75,7 @@ impl<'a, V: VAccumulated> AccValue<'a, V> {
             r == self.prefix(),
     {
         let adds = V::to_acc(self.value);
-        let mut back = <V::Acc as VAccum>::new_zero();
+        let mut back = <V::Acc as Accum>::new_zero();
         back.sub_acc(&adds);
         let mut r = self.total.dup();
         r.add_acc(&back);
@@ -83,7 +83,7 @@ impl<'a, V: VAccumulated> AccValue<'a, V> {
     }
 }
 
-impl<'a, V: VAccumulated> AccSeek<'a, V> {
+impl<'a, V: Accumulated> AccSeek<'a, V> {
     pub(super) fn clone_impl(&self) -> (r: Self)
         ensures
             r == *self,
@@ -98,7 +98,7 @@ impl<'a, V: VAccumulated> AccSeek<'a, V> {
 
 // ── What the running sum is ─────────────────────────────────────────────────
 /// One more value adds its accumulator after what a range adds up to.
-pub(super) proof fn lemma_step<V: VAccumulated>(c: Seq<<V as VSpec>::S>, b: int, k: int)
+pub(super) proof fn lemma_step<V: Accumulated>(c: Seq<<V as VSpec>::S>, b: int, k: int)
     requires
         0 <= b <= k < c.len(),
     ensures
@@ -113,7 +113,7 @@ pub(super) proof fn lemma_step<V: VAccumulated>(c: Seq<<V as VSpec>::S>, b: int,
 /// The running sum of an iterator at `pos` whose sum counts from
 /// `base_at`, as the shared cores keep it, is what the values from
 /// `base_at` up to `pos` add up to.
-pub(super) proof fn lemma_running<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+pub(super) proof fn lemma_running<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(
     s: Seq<Slab<<V::E as Slabs>::Tail>>,
     base: V::Acc,
     sum: V::Acc,
@@ -147,7 +147,7 @@ pub(super) proof fn lemma_running<'a, V: VAccumulated + ColumnValueRef<C>, C: Co
 
 /// What the values before index `i` add up to, as the shared cores
 /// keep it, is `accumulated` of the column's first `i` values.
-pub(super) proof fn lemma_acc_before<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(s: Seq<Slab<<V::E as Slabs>::Tail>>, i: int)
+pub(super) proof fn lemma_acc_before<'a, V: Accumulated + ColumnValueRef<C>, C: Codec>(s: Seq<Slab<<V::E as Slabs>::Tail>>, i: int)
     requires
         0 <= i <= vals_of::<V::X>(s).len(),
     ensures
@@ -164,7 +164,7 @@ pub(super) proof fn lemma_acc_before<'a, V: VAccumulated + ColumnValueRef<C>, C:
     lemma_vacc::<V>(b);
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     /// The running sum is kept as the shared cores ask, over the index
     /// of the column.
     #[verifier::type_invariant]
@@ -339,8 +339,8 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
             r.total() == <V::Acc as VGroup>::zero(),
     {
         let inner: Iter<'a, V, C, AccIndex> = Iter { it: ICore::empty::<V::X>(), slabs: &[], col: None };
-        let zero = <V::Acc as VAccum>::new_zero();
-        let base = <V::Acc as VAccum>::new_zero();
+        let zero = <V::Acc as Accum>::new_zero();
+        let base = <V::Acc as Accum>::new_zero();
         proof {
             let s = inner.slabs@;
             <Get<'a, V> as VGet>::lemma_svs(inner.items());
@@ -826,7 +826,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     #[inline(always)]
     pub(super) fn next_impl(&mut self) -> (r: Option<AccValue<'a, V>>)
         ensures
@@ -957,7 +957,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     pub(super) fn clone_impl(&self) -> (r: Self)
         ensures
             r.items() == self.items(),
@@ -987,7 +987,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     }
 }
 
-impl<V: VAccumulated> AccIterState<V> {
+impl<V: Accumulated> AccIterState<V> {
     /// The sum counts from the iterator's place or before it.
     #[verifier::type_invariant]
     pub(super) open spec fn inv(&self) -> bool {
@@ -1059,7 +1059,7 @@ impl<V: VAccumulated> AccIterState<V> {
     }
 }
 
-impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
+impl<V: Accumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
     #[inline(always)]
     pub(super) fn prefix_iter_impl(&self) -> (it: AccIter<'_, V, C>)
         ensures
@@ -1073,8 +1073,8 @@ impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
     {
         let ix = self.acc_index();
         let inner = self.iter();
-        let zero = <V::Acc as VAccum>::new_zero();
-        let base = <V::Acc as VAccum>::new_zero();
+        let zero = <V::Acc as Accum>::new_zero();
+        let base = <V::Acc as Accum>::new_zero();
         proof {
             use_type_invariant(&inner);
             let s = inner.slabs@;
@@ -1164,7 +1164,7 @@ impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
     }
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     /// What the iterator has left is a window of those.
     pub(super) proof fn lemma_accumulated_items(&self)
         ensures
@@ -1187,7 +1187,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     pub(super) proof fn lemma_shift_impl(&self)
         ensures
             0 <= self.shift_at(),
@@ -1493,7 +1493,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
     pub(super) proof fn lemma_shift_model_impl(&self)
         ensures
             self.shift_vals() == self.accumulated_items(),
@@ -1531,7 +1531,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> AccIter<'a, V, C> {
 
 } // verus!
 
-impl<'a, V: VAccumulated> std::fmt::Debug for AccValue<'a, V>
+impl<'a, V: Accumulated> std::fmt::Debug for AccValue<'a, V>
 where
     Get<'a, V>: std::fmt::Debug,
 {
@@ -1543,7 +1543,7 @@ where
     }
 }
 
-impl<'a, V: VAccumulated> PartialEq for AccValue<'a, V>
+impl<'a, V: Accumulated> PartialEq for AccValue<'a, V>
 where
     Get<'a, V>: PartialEq,
     V::Acc: PartialEq,
@@ -1553,7 +1553,7 @@ where
     }
 }
 
-impl<'a, V: VAccumulated> std::fmt::Debug for AccSeek<'a, V>
+impl<'a, V: Accumulated> std::fmt::Debug for AccSeek<'a, V>
 where
     Get<'a, V>: std::fmt::Debug,
 {
@@ -1566,7 +1566,7 @@ where
     }
 }
 
-impl<'a, V: VAccumulated> PartialEq for AccSeek<'a, V>
+impl<'a, V: Accumulated> PartialEq for AccSeek<'a, V>
 where
     Get<'a, V>: PartialEq,
     V::Acc: PartialEq,
@@ -1576,7 +1576,7 @@ where
     }
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> std::fmt::Debug for AccIter<'a, V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> std::fmt::Debug for AccIter<'a, V, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AccIter")
             .field("total", &self.total)

@@ -730,7 +730,7 @@ impl<'a> ValueRef<'a> {
 // An actor index is stored in a column as the number it is. A number
 // that is no `u32` is no actor index: a load refuses it, so that no two
 // encodings load as the same value.
-impl hexane::VNewtype for ActorIdx {
+impl hexane::Newtype for ActorIdx {
     type Base = u64;
 
     fn to_base(self) -> u64 {
@@ -745,7 +745,7 @@ impl hexane::VNewtype for ActorIdx {
 }
 
 // An action is stored in a column as its number.
-impl hexane::VNewtype for Action {
+impl hexane::Newtype for Action {
     type Base = u64;
 
     fn to_base(self) -> u64 {

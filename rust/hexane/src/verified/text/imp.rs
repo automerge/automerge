@@ -257,13 +257,13 @@ pub(super) fn cow_of(o: String) -> (r: TextCow<'static>)
 /// Strings under codec `C`, none of them null: what they are on the
 /// wire.
 #[verifier::reject_recursive_types(C)]
-pub struct VTextOps<C>(PhantomData<C>);
+pub struct TextOps<C>(PhantomData<C>);
 
 /// Strings under codec `C`, none of them null: how they are written.
 #[verifier::reject_recursive_types(C)]
-pub struct VTextWrite<C>(PhantomData<C>);
+pub struct TextWrite<C>(PhantomData<C>);
 
-impl<'a, C: Codec> RleOps<'a> for VTextOps<C> {
+impl<'a, C: Codec> RleOps<'a> for TextOps<C> {
     type V = &'a str;
 
     open spec fn nullable() -> bool {
@@ -387,8 +387,8 @@ impl<'a, C: Codec> RleOps<'a> for VTextOps<C> {
     }
 }
 
-impl<'a, C: Codec> WriteOps<'a> for VTextWrite<C> {
-    type R = VTextOps<C>;
+impl<'a, C: Codec> WriteOps<'a> for TextWrite<C> {
+    type R = TextOps<C>;
 
     type Cow = TextCow<'a>;
 
@@ -437,8 +437,8 @@ impl<'a, C: Codec> WriteOps<'a> for VTextWrite<C> {
     }
 }
 
-impl<'s, C: Codec> Lift<'s> for VTextWrite<C> {
-    type W = VTextWrite<C>;
+impl<'s, C: Codec> Lift<'s> for TextWrite<C> {
+    type W = TextWrite<C>;
 
     /// The same string: a `str` is its characters, whatever it borrows
     /// from.
@@ -453,7 +453,7 @@ impl<'s, C: Codec> Lift<'s> for VTextWrite<C> {
     }
 
     proof fn axiom_unlift(w: &'static str) {
-        assert(<VTextWrite<C> as Lift<'s>>::lift(w) == w);
+        assert(<TextWrite<C> as Lift<'s>>::lift(w) == w);
     }
 
     #[inline(always)]
@@ -462,7 +462,7 @@ impl<'s, C: Codec> Lift<'s> for VTextWrite<C> {
     }
 }
 
-impl<C: Codec> Plain for VTextWrite<C> {
+impl<C: Codec> Plain for TextWrite<C> {
     proof fn lemma_plain(v: &'static str) {
     }
 
@@ -489,14 +489,14 @@ impl seal::SpecSeal for String {
 /// long.
 pub(crate) proof fn lemma_text_sizes<C: Codec>(vs: Seq<&'static str>)
     ensures
-        heads_bound::<VTextOps<C>>(10),
-        encs::<VTextOps<C>>(vs).len() <= 10 * vs.len() + total_str_len(<&'static str as VGet>::svs(vs)),
+        heads_bound::<TextOps<C>>(10),
+        encs::<TextOps<C>>(vs).len() <= 10 * vs.len() + total_str_len(<&'static str as VGet>::svs(vs)),
     decreases vs.len(),
 {
-    assert forall|n: i64| (#[trigger] VTextOps::<C>::enc_signed(n)).len() <= 10 by {
+    assert forall|n: i64| (#[trigger] TextOps::<C>::enc_signed(n)).len() <= 10 by {
         C::lemma_i(n, n, Seq::empty(), Seq::empty());
     }
-    assert forall|n: u64| (#[trigger] VTextOps::<C>::enc_unsigned(n)).len() <= 10 by {
+    assert forall|n: u64| (#[trigger] TextOps::<C>::enc_unsigned(n)).len() <= 10 by {
         C::lemma_u(n, n, Seq::empty(), Seq::empty());
     }
     let x = <&'static str as VGet>::svs(vs);
@@ -513,13 +513,13 @@ pub(crate) proof fn lemma_text_sizes<C: Codec>(vs: Seq<&'static str>)
 // ── Columns of strings ──────────────────────────────────────────────────────
 
 impl<C: Codec> seal::Sealed<C> for String {
-    type X = RleReads<VTextOps<C>>;
+    type X = RleReads<TextOps<C>>;
 
-    type E = RleModel<VTextWrite<C>>;
+    type E = RleModel<TextWrite<C>>;
 }
 
 impl<C: Codec> Owned<C> for String {
-    type N = REncoder<'static, VTextWrite<C>>;
+    type N = REncoder<'static, TextWrite<C>>;
 
     #[inline(always)]
     fn to_owned(g: &str) -> (v: String) {
@@ -542,14 +542,14 @@ impl<C: Codec> Owned<C> for String {
 /// `Option`s of strings under codec `C`, `None` the null: what they are
 /// on the wire.
 #[verifier::reject_recursive_types(C)]
-pub struct VOptTextOps<C>(PhantomData<C>);
+pub struct OptTextOps<C>(PhantomData<C>);
 
 /// `Option`s of strings under codec `C`, `None` the null: how they are
 /// written.
 #[verifier::reject_recursive_types(C)]
-pub struct VOptTextWrite<C>(PhantomData<C>);
+pub struct OptTextWrite<C>(PhantomData<C>);
 
-impl<'a, C: Codec> RleOps<'a> for VOptTextOps<C> {
+impl<'a, C: Codec> RleOps<'a> for OptTextOps<C> {
     type V = Option<&'a str>;
 
     open spec fn nullable() -> bool {
@@ -691,8 +691,8 @@ impl<'a, C: Codec> RleOps<'a> for VOptTextOps<C> {
     }
 }
 
-impl<'a, C: Codec> WriteOps<'a> for VOptTextWrite<C> {
-    type R = VOptTextOps<C>;
+impl<'a, C: Codec> WriteOps<'a> for OptTextWrite<C> {
+    type R = OptTextOps<C>;
 
     type Cow = Option<TextCow<'a>>;
 
@@ -765,8 +765,8 @@ impl<'a, C: Codec> WriteOps<'a> for VOptTextWrite<C> {
     }
 }
 
-impl<'s, C: Codec> Lift<'s> for VOptTextWrite<C> {
-    type W = VOptTextWrite<C>;
+impl<'s, C: Codec> Lift<'s> for OptTextWrite<C> {
+    type W = OptTextWrite<C>;
 
     /// The same string, or the null.
     open spec fn lift(v: Option<&'s str>) -> Option<&'static str> {
@@ -780,7 +780,7 @@ impl<'s, C: Codec> Lift<'s> for VOptTextWrite<C> {
     }
 
     proof fn axiom_unlift(w: Option<&'static str>) {
-        assert(<VOptTextWrite<C> as Lift<'s>>::lift(w) == w);
+        assert(<OptTextWrite<C> as Lift<'s>>::lift(w) == w);
     }
 
     #[inline(always)]
@@ -793,7 +793,7 @@ impl<'s, C: Codec> Lift<'s> for VOptTextWrite<C> {
     }
 }
 
-impl<C: Codec> Plain for VOptTextWrite<C> {
+impl<C: Codec> Plain for OptTextWrite<C> {
     proof fn lemma_plain(v: Option<&'static str>) {
     }
 
@@ -820,16 +820,16 @@ impl seal::SpecSeal for Option<String> {
 /// column).
 pub(crate) proof fn lemma_opt_text_sizes<C: Codec>(vs: Seq<Option<&'static str>>)
     ensures
-        heads_bound::<VOptTextOps<C>>(10),
-        encs::<VOptTextOps<C>>(vs).len() <= 10 * vs.len() + total_str_len_opt(
+        heads_bound::<OptTextOps<C>>(10),
+        encs::<OptTextOps<C>>(vs).len() <= 10 * vs.len() + total_str_len_opt(
             <Option<&'static str> as VGet>::svs(vs),
         ),
     decreases vs.len(),
 {
-    assert forall|n: i64| (#[trigger] VOptTextOps::<C>::enc_signed(n)).len() <= 10 by {
+    assert forall|n: i64| (#[trigger] OptTextOps::<C>::enc_signed(n)).len() <= 10 by {
         C::lemma_i(n, n, Seq::empty(), Seq::empty());
     }
-    assert forall|n: u64| (#[trigger] VOptTextOps::<C>::enc_unsigned(n)).len() <= 10 by {
+    assert forall|n: u64| (#[trigger] OptTextOps::<C>::enc_unsigned(n)).len() <= 10 by {
         C::lemma_u(n, n, Seq::empty(), Seq::empty());
     }
     let x = <Option<&'static str> as VGet>::svs(vs);
@@ -848,13 +848,13 @@ pub(crate) proof fn lemma_opt_text_sizes<C: Codec>(vs: Seq<Option<&'static str>>
 // ── Columns of strings that may be null ─────────────────────────────────────
 
 impl<C: Codec> seal::Sealed<C> for Option<String> {
-    type X = RleReads<VOptTextOps<C>>;
+    type X = RleReads<OptTextOps<C>>;
 
-    type E = RleModel<VOptTextWrite<C>>;
+    type E = RleModel<OptTextWrite<C>>;
 }
 
 impl<C: Codec> Owned<C> for Option<String> {
-    type N = REncoder<'static, VOptTextWrite<C>>;
+    type N = REncoder<'static, OptTextWrite<C>>;
 
     #[inline(always)]
     #[allow(clippy::manual_map)]  // Verus has no closure to read here
@@ -902,8 +902,8 @@ pub(super) proof fn vvalue_lemma_size_string<C: Codec>(d: Seq<u8>)
     ensures
         d.len() <= <String as ColumnValueRef<C>>::size_bound(saved_values::<String, C>(d)),
 {
-    <RleModel<VTextWrite<C>> as Model<RleReads<VTextOps<C>>>>::lemma_size(d);
-    lemma_text_sizes::<C>(slab_values::<VTextOps<C>>(d));
+    <RleModel<TextWrite<C>> as Model<RleReads<TextOps<C>>>>::lemma_size(d);
+    lemma_text_sizes::<C>(slab_values::<TextOps<C>>(d));
 }
 
 #[inline(always)]
@@ -963,8 +963,8 @@ pub(super) proof fn vvalue_lemma_size_option_string<C: Codec>(d: Seq<u8>)
     ensures
         d.len() <= <Option<String> as ColumnValueRef<C>>::size_bound(saved_values::<Option<String>, C>(d)),
 {
-    <RleModel<VOptTextWrite<C>> as Model<RleReads<VOptTextOps<C>>>>::lemma_size(d);
-    lemma_opt_text_sizes::<C>(slab_values::<VOptTextOps<C>>(d));
+    <RleModel<OptTextWrite<C>> as Model<RleReads<OptTextOps<C>>>>::lemma_size(d);
+    lemma_opt_text_sizes::<C>(slab_values::<OptTextOps<C>>(d));
 }
 
 #[inline(always)]

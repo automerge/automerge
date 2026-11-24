@@ -3,7 +3,7 @@ use crate::op_set2::op_set::RichTextQueryState;
 use crate::op_set2::MarkData;
 use crate::types::{Clock, OpId};
 use hexane::PackError;
-use hexane::{AccColumn, AccIndex, VAccum, VAdds, VGroup, VNewtype};
+use hexane::{AccColumn, AccIndex, Accum, Adds, Newtype, VGroup};
 
 use rustc_hash::FxHashSet;
 use std::collections::HashMap;
@@ -74,7 +74,7 @@ impl HasActorIndices for MarkIdx {
 // A mark is stored in a column as the number `as_i64` gives. A number
 // that is no mark's is refused, so that no two encodings load as the same
 // mark.
-impl VNewtype for MarkIdx {
+impl Newtype for MarkIdx {
     type Base = i64;
 
     fn to_base(self) -> i64 {
@@ -207,7 +207,7 @@ impl Sub for MarkAcc {
 }
 
 // A mark adds itself to the marks open and closed before it.
-impl VAdds for MarkIdx {
+impl Adds for MarkIdx {
     type Acc = MarkAcc;
 
     fn acc_of(v: MarkIdx) -> MarkAcc {
@@ -221,7 +221,7 @@ impl VAdds for MarkIdx {
 // checked by Verus.
 impl VGroup for MarkAcc {}
 
-impl VAccum for MarkAcc {
+impl Accum for MarkAcc {
     fn new_zero() -> Self {
         MarkAcc::default()
     }

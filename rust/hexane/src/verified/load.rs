@@ -1,11 +1,11 @@
 //! A column's load, run by run ([`Column::load_iter`]).
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`load/imp.rs`), which has
 //! its contract word for word and is proved there.
 
-use super::kind::{Kind, VIndex};
+use super::kind::{Index, Kind};
 use super::model::Loading;
 #[cfg(verus_keep_ghost)]
 use super::model::Model;
@@ -39,7 +39,7 @@ verus! {
 ///
 /// [`try_next_run`]: Self::try_next_run
 /// [`finalize`]: Self::finalize
-pub struct ColumnLoadIter<'a, V: ColumnValueRef<C>, C: Codec = Leb128, K: VIndex<V, C> = LenIndex> {
+pub struct ColumnLoadIter<'a, V: ColumnValueRef<C>, C: Codec = Leb128, K: Index<V, C> = LenIndex> {
     core: KLoad<'a, V, C, K>,
     /// empty bytes, and a fill value with a length: one run of that
     fill: Option<(Get<'a, V>, usize)>,
@@ -49,7 +49,7 @@ pub struct ColumnLoadIter<'a, V: ColumnValueRef<C>, C: Codec = Leb128, K: VIndex
     max_segments: usize,
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> ColumnLoadIter<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> ColumnLoadIter<'a, V, C, K> {
     /// What the load keeps to, from one call to the next.
     pub closed spec fn wf(&self) -> bool {
         &&& self.core.inv()
@@ -156,7 +156,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> ColumnLoadIter<'a, V, 
     }
 }
 
-impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
     /// A load of the saved column `bytes`, with options ([`LoadOpts`]),
     /// run by run: [`ColumnLoadIter::try_next_run`] gives its runs in
     /// turn, and [`ColumnLoadIter::finalize`] the column, as

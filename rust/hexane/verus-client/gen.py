@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The acceptance clients of `hexane::verified` as a crate outside hexane.
+"""The acceptance clients of hexane's API as a crate outside hexane.
 
     gen.py [OUTDIR]        (default: ../../target/verus-client)
 
@@ -34,7 +34,7 @@ names = [n.strip() for n in m.group(1).replace("\n", " ").split(",") if n.strip(
 EXEC_FNS = {"refused", "lebsize", "ulebsize"}  # lower-case names that are code, not specification
 ghost = [n for n in names if n[0].islower() and n not in EXEC_FNS]
 code = [n for n in names if n not in ghost]
-imports = "#[cfg(verus_keep_ghost)]\nuse hexane::verified::{%s};\nuse hexane::verified::{%s};\n" % (
+imports = "#[cfg(verus_keep_ghost)]\nuse hexane::{%s};\nuse hexane::{%s};\n" % (
     ", ".join(ghost),
     ", ".join(code),
 )
@@ -43,8 +43,8 @@ assert t.count("use crate::{") == 1
 t = t.replace("use crate::{", "use hexane::{")
 # the modules that name a codec, and the second codec itself
 for a, b in [
-    ("use super::bijou;\n", "use hexane::verified::bijou;\n"),
-    ("use super::leb128;\n", "use hexane::verified::leb128;\n"),
+    ("use super::bijou;\n", "use hexane::bijou;\n"),
+    ("use super::leb128;\n", "use hexane::leb128;\n"),
     ("use crate::Bijou64;\n", "use hexane::Bijou64;\n"),
 ]:
     assert t.count(a) == 1, a
@@ -55,7 +55,7 @@ assert "super::" not in t and "crate::" not in t, "an import this script does no
 doc_end = t.index("\n\n") + 1
 assert all(line.startswith("//!") for line in t[:doc_end].splitlines())
 t = (
-    "//! The acceptance clients of `hexane::verified` as a crate outside hexane\n"
+    "//! The acceptance clients of hexane's API as a crate outside hexane\n"
     "//! (generated from hexane's src/verified/client_proof.rs; do not edit).\n"
     "//!\n"
     + t[:doc_end].replace("\n//! This module exists only while Verus checks the crate.\n", "\n")

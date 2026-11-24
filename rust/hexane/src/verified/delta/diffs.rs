@@ -14,13 +14,13 @@
 //! runs of a window.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`diffs/imp.rs`), which has
 //! its contract word for word and is proved there.
 
 use super::{
     all_dom, all_fit, delta_run_fits, delta_run_kept, delta_run_values, delta_runs_fit,
-    delta_runs_kept, delta_runs_values, dvs, in_dom, lemma_kept, vals, VDelta,
+    delta_runs_kept, delta_runs_values, dvs, in_dom, lemma_kept, vals, Delta,
 };
 use crate::cursor::lemma_concat_append;
 use crate::delta::agg::psum;
@@ -50,7 +50,7 @@ verus! {
 /// values `vs` from: the last number before `i`, as an `i64`, with the
 /// nulls passed over; 0 if there is no number before `i`. It is the
 /// `prefix` of a run that begins at `i`.
-pub open spec fn delta_prefix<T: VDelta>(vs: Seq<T>, i: int) -> i64
+pub open spec fn delta_prefix<T: Delta>(vs: Seq<T>, i: int) -> i64
     decreases i,
 {
     if i <= 0 || i > vs.len() {
@@ -66,7 +66,7 @@ pub open spec fn delta_prefix<T: VDelta>(vs: Seq<T>, i: int) -> i64
 /// What a delta column keeps at index `i` of values `vs`: of a number
 /// its difference from the last number before it (`delta_prefix`),
 /// wrapping as an `i64` does; of a null, none.
-pub open spec fn delta_at<T: VDelta>(vs: Seq<T>, i: int) -> Option<i64> {
+pub open spec fn delta_at<T: Delta>(vs: Seq<T>, i: int) -> Option<i64> {
     match vs[i].dv() {
         Some(x) => Some(vstd::wrapping::i64_specs::signed_crop(x - delta_prefix(vs, i))),
         None => None,
@@ -75,7 +75,7 @@ pub open spec fn delta_at<T: VDelta>(vs: Seq<T>, i: int) -> Option<i64> {
 
 /// The differences a delta column keeps of values `vs`: `delta_at` at
 /// each index.
-pub open spec fn deltas<T: VDelta>(vs: Seq<T>) -> Seq<Option<i64>> {
+pub open spec fn deltas<T: Delta>(vs: Seq<T>) -> Seq<Option<i64>> {
     Seq::new(vs.len(), |i: int| delta_at(vs, i))
 }
 
@@ -83,7 +83,7 @@ pub open spec fn deltas<T: VDelta>(vs: Seq<T>) -> Seq<Option<i64>> {
 /// index `a` and each of the others where the one before it ends, as
 /// runs of a delta column: each with the number before it
 /// (`delta_prefix`).
-pub open spec fn delta_runs_at<T: VDelta>(vs: Seq<T>, a: int, rs: Seq<Run<Option<i64>>>) -> Seq<DeltaRun>
+pub open spec fn delta_runs_at<T: Delta>(vs: Seq<T>, a: int, rs: Seq<Run<Option<i64>>>) -> Seq<DeltaRun>
     decreases rs.len(),
 {
     if rs.len() == 0 {
@@ -102,7 +102,7 @@ pub open spec fn delta_runs_at<T: VDelta>(vs: Seq<T>, a: int, rs: Seq<Run<Option
 /// the differences of `vs` at the `n` indices from `a` on are all `d`,
 /// the [`DeltaRun`] of `d`, `n` times, after `delta_prefix(vs, a)` has
 /// the values of `vs` there, and fits.
-pub proof fn lemma_delta_run_at<T: VDelta>(vs: Seq<T>, a: int, n: usize, d: Option<i64>)
+pub proof fn lemma_delta_run_at<T: Delta>(vs: Seq<T>, a: int, n: usize, d: Option<i64>)
     requires
         all_fit(vs),
         0 <= a,
@@ -123,7 +123,7 @@ pub proof fn lemma_delta_run_at<T: VDelta>(vs: Seq<T>, a: int, n: usize, d: Opti
 /// taken each with the number before it (`delta_runs_at`), the runs of
 /// `deltas(vs)` from index `a` to `b` have the values of `vs` from `a`
 /// to `b`, and fit.
-pub proof fn lemma_delta_runs_at<T: VDelta>(vs: Seq<T>, a: int, b: int)
+pub proof fn lemma_delta_runs_at<T: Delta>(vs: Seq<T>, a: int, b: int)
     requires
         all_fit(vs),
         0 <= a,
@@ -140,7 +140,7 @@ pub proof fn lemma_delta_runs_at<T: VDelta>(vs: Seq<T>, a: int, b: int)
 
 /// Each value of `vs` as a delta run of one: the number before it and
 /// its difference.
-pub open spec fn delta_units<T: VDelta>(vs: Seq<T>) -> Seq<DeltaRun> {
+pub open spec fn delta_units<T: Delta>(vs: Seq<T>) -> Seq<DeltaRun> {
     Seq::new(vs.len(), |p: int| DeltaRun { prefix: delta_prefix(vs, p), delta: delta_at(vs, p), count: 1 })
 }
 

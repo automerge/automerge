@@ -4,8 +4,8 @@
 //! A prefix column ([`PrefixColumn`](super::PrefixColumn))
 //! adds its values up as integers, in one of this crate's integer
 //! types. An accumulator column adds them up in a type its client
-//! gives, an accumulator ([`VAccum`]): the client says what a value adds
-//! ([`VAdds`]), how two of the accumulators are added, and what no
+//! gives, an accumulator ([`Accum`]): the client says what a value adds
+//! ([`Adds`]), how two of the accumulators are added, and what no
 //! values add up to. A set of the marks that are open at a position is
 //! one, where a value opens a mark or closes it.
 //!
@@ -22,7 +22,7 @@
 //! panics for what the values add up to.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`acc/imp.rs`), which has
 //! its contract word for word and is proved there.
 
@@ -30,14 +30,14 @@
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
 use super::codec::Codec;
-use super::kind::{Kind, VIndex, VKeeps};
+use super::kind::{Index, Kind, VKeeps};
 use super::seal;
 use super::value::RleValue;
 #[cfg(verus_keep_ghost)]
 use super::Held;
 #[cfg(verus_keep_ghost)]
 use super::VGet;
-use super::{Column, ColumnValueRef, Get, VForm, VSpec};
+use super::{Column, ColumnValueRef, Form, Get, VSpec};
 #[cfg(verus_keep_ghost)]
 use crate::attrib::Accumulate;
 #[cfg(verus_keep_ghost)]
@@ -139,7 +139,7 @@ pub proof fn lemma_cancel<A: VGroup>(b: A, t: A, r: A)
 /// A type an accumulator column adds its values up in: an accumulator.
 /// Its laws are a [`VGroup`]'s, and these are the functions that
 /// compute what the laws are of.
-pub trait VAccum: VGroup + Debug {
+pub trait Accum: VGroup + Debug {
     /// What no values add up to.
     fn new_zero() -> (r: Self)
         ensures
@@ -200,10 +200,10 @@ pub trait VAccum: VGroup + Debug {
 /// accumulator they are added up in, and what a value adds.
 ///
 /// It is for a client to give of a type of its own
-/// ([`VNewtype`](super::VNewtype)).
-pub trait VAdds: RleValue {
+/// ([`Newtype`](super::Newtype)).
+pub trait Adds: RleValue {
     /// The accumulator the values are added up in.
-    type Acc: VAccum;
+    type Acc: Accum;
 
     /// What the value `v` adds.
     spec fn adds_of(v: Self) -> Self::Acc;
@@ -216,11 +216,11 @@ pub trait VAdds: RleValue {
 }
 
 /// A value type an accumulator column can hold: a type that says what
-/// its values add ([`VAdds`]), or an `Option` of one, whose `None` adds
+/// its values add ([`Adds`]), or an `Option` of one, whose `None` adds
 /// nothing. No other type can implement this trait.
-pub trait VAccumulated: VSpec + for <'a>VForm<'a> + seal::AccSeal {
+pub trait Accumulated: VSpec + for <'a>Form<'a> + seal::AccSeal {
     /// The accumulator the values are added up in.
-    type Acc: VAccum;
+    type Acc: Accum;
 
     /// What the value `v` adds.
     spec fn adds(v: <Self as VSpec>::S) -> Self::Acc;
@@ -233,31 +233,31 @@ pub trait VAccumulated: VSpec + for <'a>VForm<'a> + seal::AccSeal {
     ;
 }
 
-impl<T: VAdds> VAccumulated for T {
-    type Acc = <T as VAdds>::Acc;
+impl<T: Adds> Accumulated for T {
+    type Acc = <T as Adds>::Acc;
 
-    open spec fn adds(v: T) -> <T as VAdds>::Acc {
+    open spec fn adds(v: T) -> <T as Adds>::Acc {
         T::adds_of(v)
     }
 
     #[inline(always)]
-    fn to_acc<'a>(v: T) -> <T as VAdds>::Acc {
+    fn to_acc<'a>(v: T) -> <T as Adds>::Acc {
         T::acc_of(v)
     }
 }
 
-impl<T: VAdds> VAccumulated for Option<T> {
-    type Acc = <T as VAdds>::Acc;
+impl<T: Adds> Accumulated for Option<T> {
+    type Acc = <T as Adds>::Acc;
 
-    open spec fn adds(v: Option<T>) -> <T as VAdds>::Acc {
+    open spec fn adds(v: Option<T>) -> <T as Adds>::Acc {
         match v {
             Some(x) => T::adds_of(x),
-            None => <<T as VAdds>::Acc as VGroup>::zero(),
+            None => <<T as Adds>::Acc as VGroup>::zero(),
         }
     }
 
     #[inline(always)]
-    fn to_acc<'a>(v: Option<T>) -> <T as VAdds>::Acc {
+    fn to_acc<'a>(v: Option<T>) -> <T as Adds>::Acc {
         imp::vaccumulated_to_acc_option_t::<T>(v)
     }
 }
@@ -265,7 +265,7 @@ impl<T: VAdds> VAccumulated for Option<T> {
 // ── What some values add up to ──────────────────────────────────────────────
 
 /// What the values `vs` add up to, in the order they are in.
-pub open spec fn accumulated<V: VAccumulated>(vs: Seq<<V as VSpec>::S>) -> V::Acc
+pub open spec fn accumulated<V: Accumulated>(vs: Seq<<V as VSpec>::S>) -> V::Acc
     decreases vs.len(),
 {
     if vs.len() == 0 {
@@ -277,7 +277,7 @@ pub open spec fn accumulated<V: VAccumulated>(vs: Seq<<V as VSpec>::S>) -> V::Ac
 
 /// What two sequences add up to, one after the other, is what each
 /// adds up to, added.
-pub proof fn lemma_acc_cat<V: VAccumulated>(a: Seq<<V as VSpec>::S>, b: Seq<<V as VSpec>::S>)
+pub proof fn lemma_acc_cat<V: Accumulated>(a: Seq<<V as VSpec>::S>, b: Seq<<V as VSpec>::S>)
     ensures
         accumulated::<V>(a + b) == <V::Acc as VGroup>::plus(accumulated::<V>(a), accumulated::<V>(b)),
     decreases b.len(),
@@ -286,7 +286,7 @@ pub proof fn lemma_acc_cat<V: VAccumulated>(a: Seq<<V as VSpec>::S>, b: Seq<<V a
 }
 
 /// `n` copies of a value add up to what it adds, `n` times over.
-pub proof fn lemma_acc_run<V: VAccumulated>(n: nat, x: <V as VSpec>::S)
+pub proof fn lemma_acc_run<V: Accumulated>(n: nat, x: <V as VSpec>::S)
     ensures
         accumulated::<V>(Seq::new(n, |_i: int| x)) == times::<V::Acc>(n, V::adds(x)),
     decreases n,
@@ -296,7 +296,7 @@ pub proof fn lemma_acc_run<V: VAccumulated>(n: nat, x: <V as VSpec>::S)
 
 /// What the values before position `j` add up to is what those before
 /// `i` do, and then those from `i` up to `j`.
-pub proof fn lemma_acc_range<V: VAccumulated>(vs: Seq<<V as VSpec>::S>, i: int, j: int)
+pub proof fn lemma_acc_range<V: Accumulated>(vs: Seq<<V as VSpec>::S>, i: int, j: int)
     requires
         0 <= i <= j <= vs.len(),
     ensures
@@ -314,14 +314,14 @@ pub proof fn lemma_acc_range<V: VAccumulated>(vs: Seq<<V as VSpec>::S>, i: int, 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AccIndex;
 
-impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> VKeeps<V, C> for AccIndex {
+impl<V: Accumulated + ColumnValueRef<C>, C: Codec> VKeeps<V, C> for AccIndex {
     /// Every column: nothing overflows.
     open spec fn keeps(vs: Seq<<V as VSpec>::S>) -> bool {
         true
     }
 }
 
-impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> VIndex<V, C> for AccIndex {
+impl<V: Accumulated + ColumnValueRef<C>, C: Codec> Index<V, C> for AccIndex {
 
 }
 
@@ -330,7 +330,7 @@ impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> VIndex<V, C> for AccIndex {
 pub type AccColumn<V, C = Leb128> = Column<V, C, AccIndex>;
 
 /// What an accumulator column answers from its index.
-impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
+impl<V: Accumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
     /// What the values before position `index` add up to; where `index`
     /// is past the end, what all the values do.
     ///

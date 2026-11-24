@@ -6,7 +6,7 @@
 //! that a column does not assume.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`encoder/imp.rs`), which has
 //! its contract word for word and is proved there.
 

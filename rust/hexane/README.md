@@ -276,12 +276,12 @@ disk.
 ## Custom value types
 
 A `Copy` type of your own is stored as one of the built-in numbers
-([`VNewtype`]): say which, and how to convert. A number that is no value
+([`Newtype`]): say which, and how to convert. A number that is no value
 of the type is refused on load, so each value keeps one encoding. Both
 `Column<T>` and `Column<Option<T>>` then work.
 
 ```rust
-use hexane::{Column, PackError, VNewtype};
+use hexane::{Column, PackError, Newtype};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Kind {
@@ -289,7 +289,7 @@ enum Kind {
     Str,
 }
 
-impl VNewtype for Kind {
+impl Newtype for Kind {
     type Base = u64;
 
     fn to_base(self) -> u64 {
@@ -317,7 +317,7 @@ assert!(Column::<Kind>::load(&[2, 2]).is_err()); // 2 is no kind
 
 A type with an encoding of its own implements [`RleValue`] instead, and a
 codec of your own [`Codec`]. A type whose values add up to something in a
-prefix column implements [`VAmount`] (a number) or [`VAdds`] (an
+prefix column implements [`Amount`] (a number) or [`Adds`] (an
 accumulator of your own, for an [`AccColumn<T>`]). Each of these traits
 states laws that a client checked by Verus proves; any other client has
 to keep them itself.
@@ -353,8 +353,8 @@ alone.
 The specification can be read apart from the code and the proofs: each
 file of `src/verified` (and `src/raw.rs`) is the specification of what it
 declares, every body there a call of a function proved in the file's
-module `imp`. The module docs of `hexane::verified` ("Reviewing the
-specification") say which files to read and how.
+module `imp`. The crate's documentation ("Reviewing the specification", on
+docs.rs) says which files to read and how.
 
 **Proved**, among the contracts:
 
@@ -390,7 +390,7 @@ library, is all in one file, `src/trusted.rs`:
 Of what a client hands it, the crate asks: of an iterator, the laws Verus
 asks of every iterator; and of a client's own value type, encoding,
 codec, sum, accumulator or repositionable iterator, the laws of its trait
-(`VNewtype`, `RleValue`, `Codec`, `VAmount`, `VAdds` and `VAccum`,
+(`Newtype`, `RleValue`, `Codec`, `Amount`, `Adds` and `Accum`,
 `Shiftable`). A client checked by Verus proves them; any other keeps
 them itself.
 
@@ -416,8 +416,8 @@ License: MIT.
 [`AccColumn<T>`]: https://docs.rs/hexane/latest/hexane/type.AccColumn.html
 [`DeltaColumn<T>`]: https://docs.rs/hexane/latest/hexane/struct.DeltaColumn.html
 [`RawColumn`]: https://docs.rs/hexane/latest/hexane/struct.RawColumn.html
-[`VNewtype`]: https://docs.rs/hexane/latest/hexane/trait.VNewtype.html
+[`Newtype`]: https://docs.rs/hexane/latest/hexane/trait.Newtype.html
 [`RleValue`]: https://docs.rs/hexane/latest/hexane/trait.RleValue.html
 [`Codec`]: https://docs.rs/hexane/latest/hexane/trait.Codec.html
-[`VAmount`]: https://docs.rs/hexane/latest/hexane/trait.VAmount.html
-[`VAdds`]: https://docs.rs/hexane/latest/hexane/trait.VAdds.html
+[`Amount`]: https://docs.rs/hexane/latest/hexane/trait.Amount.html
+[`Adds`]: https://docs.rs/hexane/latest/hexane/trait.Adds.html

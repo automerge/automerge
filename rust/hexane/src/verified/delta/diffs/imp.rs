@@ -65,7 +65,7 @@ pub(super) proof fn lemma_crop_diff(p: int, x: i64)
 /// Of the values that sums of differences `ds` are, the differences
 /// are `ds`: the number before index `i` is the sum of the differences
 /// before it, and the difference at `i` is `ds[i]`.
-pub(crate) proof fn lemma_deltas_kept<T: VDelta>(ds: Seq<Option<i64>>, i: int)
+pub(crate) proof fn lemma_deltas_kept<T: Delta>(ds: Seq<Option<i64>>, i: int)
     requires
         all_dom::<T>(rz(0, ds)),
         0 <= i <= ds.len(),
@@ -99,7 +99,7 @@ pub(crate) proof fn lemma_deltas_kept<T: VDelta>(ds: Seq<Option<i64>>, i: int)
 }
 
 /// What a delta column of `T` can keep are values that fit.
-pub(crate) proof fn lemma_vals_fit<T: VDelta>(ds: Seq<Option<i64>>)
+pub(crate) proof fn lemma_vals_fit<T: Delta>(ds: Seq<Option<i64>>)
     requires
         all_dom::<T>(ds),
     ensures
@@ -116,7 +116,7 @@ pub(crate) proof fn lemma_vals_fit<T: VDelta>(ds: Seq<Option<i64>>)
 /// Where the differences of `vs` at the `n` indices from `a` on are all
 /// `d`, the value `k` places after `a` is the number before `a` and
 /// `k + 1` times `d` more, as an `i64` holds it.
-pub(super) proof fn lemma_delta_run_kth<T: VDelta>(vs: Seq<T>, a: int, n: int, d: i64, k: int)
+pub(super) proof fn lemma_delta_run_kth<T: Delta>(vs: Seq<T>, a: int, n: int, d: i64, k: int)
     requires
         0 <= a,
         a + n <= vs.len(),
@@ -146,7 +146,7 @@ pub(super) proof fn lemma_delta_run_kth<T: VDelta>(vs: Seq<T>, a: int, n: int, d
     }
 }
 
-pub(super) proof fn lemma_delta_run_at_impl<T: VDelta>(vs: Seq<T>, a: int, n: usize, d: Option<i64>)
+pub(super) proof fn lemma_delta_run_at_impl<T: Delta>(vs: Seq<T>, a: int, n: usize, d: Option<i64>)
     requires
         all_fit(vs),
         0 <= a,
@@ -182,7 +182,7 @@ pub(super) proof fn lemma_delta_run_at_impl<T: VDelta>(vs: Seq<T>, a: int, n: us
 
 /// A run before runs: its values come before theirs, and where it and
 /// they fit so do all together.
-pub(super) proof fn lemma_delta_runs_front<T: VDelta>(r: DeltaRun, rs: Seq<DeltaRun>)
+pub(super) proof fn lemma_delta_runs_front<T: Delta>(r: DeltaRun, rs: Seq<DeltaRun>)
     ensures
         delta_runs_kept(seq![r] + rs) == delta_run_kept(r) + delta_runs_kept(rs),
         delta_runs_values::<T>(seq![r] + rs) == delta_run_values::<T>(r) + delta_runs_values::<T>(rs),
@@ -252,7 +252,7 @@ pub(super) proof fn lemma_first_len<S>(o: Seq<S>)
     }
 }
 
-pub(super) proof fn lemma_delta_runs_at_impl<T: VDelta>(vs: Seq<T>, a: int, b: int)
+pub(super) proof fn lemma_delta_runs_at_impl<T: Delta>(vs: Seq<T>, a: int, b: int)
     requires
         all_fit(vs),
         0 <= a,
@@ -295,7 +295,7 @@ pub(super) proof fn lemma_delta_runs_at_impl<T: VDelta>(vs: Seq<T>, a: int, b: i
 
 /// The number before index `a + k`, in a run of equal differences `d`
 /// that starts at `a`: the one before the run, moved on `k` times.
-pub(super) proof fn lemma_delta_prefix_in_run<T: VDelta>(vs: Seq<T>, a: int, n: int, d: Option<i64>, k: int)
+pub(super) proof fn lemma_delta_prefix_in_run<T: Delta>(vs: Seq<T>, a: int, n: int, d: Option<i64>, k: int)
     requires
         0 <= a,
         a + n <= vs.len(),
@@ -323,7 +323,7 @@ pub(super) proof fn lemma_delta_prefix_in_run<T: VDelta>(vs: Seq<T>, a: int, n: 
 
 /// A run of equal differences `d` at `a`, with the number before it,
 /// stands for the values there.
-pub(crate) proof fn lemma_delta_head<T: VDelta>(vs: Seq<T>, a: int, n: usize, d: Option<i64>)
+pub(crate) proof fn lemma_delta_head<T: Delta>(vs: Seq<T>, a: int, n: usize, d: Option<i64>)
     requires
         0 <= a,
         a + n <= vs.len(),
@@ -342,7 +342,7 @@ pub(crate) proof fn lemma_delta_head<T: VDelta>(vs: Seq<T>, a: int, n: usize, d:
 
 /// Runs `rs` of the differences of `vs` from `a` up to `b`, as runs of a
 /// delta column, stand for the values there, each as a delta run of one.
-pub(crate) proof fn lemma_delta_runs_units<T: VDelta>(vs: Seq<T>, a: int, b: int, rs: Seq<Run<Option<i64>>>)
+pub(crate) proof fn lemma_delta_runs_units<T: Delta>(vs: Seq<T>, a: int, b: int, rs: Seq<Run<Option<i64>>>)
     requires
         0 <= a <= b <= vs.len(),
         concat(units_of_runs(rs)) == unit_runs(deltas(vs).subrange(a, b)),
@@ -386,7 +386,7 @@ pub(crate) proof fn lemma_delta_runs_units<T: VDelta>(vs: Seq<T>, a: int, b: int
 /// number before it: the first of their delta runs, which stands for the
 /// first of the values there as delta runs of one; and what is left
 /// after it.
-pub(crate) proof fn lemma_delta_take<T: VDelta>(vs: Seq<T>, a: int, l: int, x: DeltaRun)
+pub(crate) proof fn lemma_delta_take<T: Delta>(vs: Seq<T>, a: int, l: int, x: DeltaRun)
     requires
         0 <= a,
         0 <= l <= usize::MAX,

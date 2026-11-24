@@ -35,7 +35,7 @@ verus! {
 pub(super) type ECur<T, C> = DeltaEditCore<<T as DKind<C>>::L, <T as DKind<C>>::O, <T as DKind<C>>::W>;
 
 /// The values of what is kept, of one sequence after another.
-pub(super) proof fn lemma_vals_add<T: VDelta>(a: Seq<Option<i64>>, b: Seq<Option<i64>>)
+pub(super) proof fn lemma_vals_add<T: Delta>(a: Seq<Option<i64>>, b: Seq<Option<i64>>)
     ensures
         vals::<T>(a + b) == vals::<T>(a) + vals::<T>(b),
         all_dom::<T>(a) && all_dom::<T>(b) ==> all_dom::<T>(a + b),
@@ -53,7 +53,7 @@ pub(super) proof fn lemma_vals_add<T: VDelta>(a: Seq<Option<i64>>, b: Seq<Option
 }
 
 /// The values of what is kept, of a part of a sequence.
-pub(super) proof fn lemma_vals_sub<T: VDelta>(a: Seq<Option<i64>>, i: int, j: int)
+pub(super) proof fn lemma_vals_sub<T: Delta>(a: Seq<Option<i64>>, i: int, j: int)
     requires
         0 <= i <= j <= a.len(),
     ensures

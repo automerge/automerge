@@ -51,7 +51,7 @@ pub(super) proof fn lemma_applied_none<T>(d: Seq<T>, s: Seq<T>, sps: Seq<Splice>
     assert(applied(d, s, sps) =~= d);
 }
 
-impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
     pub(super) fn copy_ranges_impl(&mut self, src: Self, splices: &[Splice])
         requires
             in_order(splices@, old(self)@.len() as int),

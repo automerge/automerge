@@ -1,4 +1,4 @@
-//! The verified public API (`hexane::verified`), against models and
+//! The verified public API, against models and
 //! against what the old API did. While the old API existed, these tests
 //! ran its `Column` and the rest beside the verified API and checked that
 //! the two were doors to one format: for the same values they saved the
@@ -20,12 +20,12 @@
 
 mod golden;
 
-use hexane::verified::{
-    refused, AccColumn, AccIndex, AccIter, AccIterState, AccSeek, AccValue, Codec, Column,
-    ColumnValueRef, Decoder, DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaEncoderState,
-    DeltaValue, Encoder, EncoderState, Get, Iter, IterState, LenBitIndex, LenIndex, PrefixColumn,
-    PrefixIter, PrefixIterState, PrefixSeek, PrefixValue, PrefixedValue, RawColumn, RleValue, Runs,
-    SumIndex, VAccum, VAccumulated, VAdds, VAmount, VGroup, VNewtype,
+use hexane::{
+    refused, AccColumn, AccIndex, AccIter, AccIterState, AccSeek, AccValue, Accum, Accumulated,
+    Adds, Amount, Codec, Column, ColumnValueRef, Decoder, DeltaColumn, DeltaDecoder, DeltaEncoder,
+    DeltaEncoderState, DeltaValue, Encoder, EncoderState, Get, Iter, IterState, LenBitIndex,
+    LenIndex, Newtype, PrefixColumn, PrefixIter, PrefixIterState, PrefixSeek, PrefixValue,
+    PrefixedValue, RawColumn, RleValue, Runs, SumIndex, VGroup,
 };
 use hexane::{Leb128, LoadOpts, MaybeFill, NoFill, PackError, Run};
 use std::cell::{Cell, RefCell};
@@ -337,7 +337,7 @@ enum Action {
     Increment,
 }
 
-impl VNewtype for Action {
+impl Newtype for Action {
     type Base = u64;
 
     fn to_base(self) -> u64 {
@@ -1552,7 +1552,7 @@ fn a_search_is_in_the_order_of_the_stored_numbers() {
         Low,
     }
 
-    impl VNewtype for Rank {
+    impl Newtype for Rank {
         type Base = u32;
 
         fn to_base(self) -> u32 {
@@ -7125,41 +7125,41 @@ impl Wide for i128 {
 
 /// What a value adds to the sums of a prefix column: the model of its
 /// sums.
-trait Adds {
+trait ModelAdds {
     fn adds(&self) -> i128;
 }
 
-impl Adds for u64 {
+impl ModelAdds for u64 {
     fn adds(&self) -> i128 {
         i128::from(*self)
     }
 }
 
-impl Adds for i64 {
+impl ModelAdds for i64 {
     fn adds(&self) -> i128 {
         i128::from(*self)
     }
 }
 
-impl Adds for u32 {
+impl ModelAdds for u32 {
     fn adds(&self) -> i128 {
         i128::from(*self)
     }
 }
 
-impl Adds for NonZeroU32 {
+impl ModelAdds for NonZeroU32 {
     fn adds(&self) -> i128 {
         i128::from(self.get())
     }
 }
 
-impl Adds for bool {
+impl ModelAdds for bool {
     fn adds(&self) -> i128 {
         i128::from(*self)
     }
 }
 
-impl<T: Adds> Adds for Option<T> {
+impl<T: ModelAdds> ModelAdds for Option<T> {
     fn adds(&self) -> i128 {
         self.as_ref().map_or(0, T::adds)
     }
@@ -7167,11 +7167,11 @@ impl<T: Adds> Adds for Option<T> {
 
 /// A value type a prefix column holds whose sums these tests read as
 /// integers.
-trait Totalled: Summed + Adds {
+trait Totalled: Summed + ModelAdds {
     fn new_sum(s: <Self as PrefixValue>::Sum) -> i128;
 }
 
-impl<T: Summed + Adds> Totalled for T
+impl<T: Summed + ModelAdds> Totalled for T
 where
     <T as PrefixValue>::Sum: Wide,
 {
@@ -7181,7 +7181,7 @@ where
 }
 
 /// The sums before each position of `model`, and before its end.
-fn sums_before<T: Adds>(model: &[T]) -> Vec<i128> {
+fn sums_before<T: ModelAdds>(model: &[T]) -> Vec<i128> {
     let mut before = vec![0];
     for m in model {
         before.push(before[before.len() - 1] + m.adds());
@@ -8389,7 +8389,7 @@ impl Meta {
     }
 }
 
-impl VNewtype for Meta {
+impl Newtype for Meta {
     type Base = u64;
 
     fn to_base(self) -> u64 {
@@ -8401,7 +8401,7 @@ impl VNewtype for Meta {
     }
 }
 
-impl VAmount for Meta {
+impl Amount for Meta {
     type Sum = u64;
 
     fn room_len() -> usize {
@@ -8419,7 +8419,7 @@ plain_kind!(Meta, |rng| {
     Meta::of(rng.below(16) as u64, rng.below(40) as u64)
 });
 
-impl Adds for Meta {
+impl ModelAdds for Meta {
     fn adds(&self) -> i128 {
         i128::from(self.length())
     }
@@ -8658,7 +8658,7 @@ struct Flags(u64);
 // to keep by itself
 impl VGroup for Flags {}
 
-impl VAccum for Flags {
+impl Accum for Flags {
     fn new_zero() -> Flags {
         Flags(0)
     }
@@ -8695,7 +8695,7 @@ impl Mark {
     }
 }
 
-impl VNewtype for Mark {
+impl Newtype for Mark {
     type Base = u64;
 
     fn to_base(self) -> u64 {
@@ -8707,7 +8707,7 @@ impl VNewtype for Mark {
     }
 }
 
-impl VAdds for Mark {
+impl Adds for Mark {
     type Acc = Flags;
 
     fn acc_of(v: Mark) -> Flags {
@@ -8741,7 +8741,7 @@ fn across(turned: bool, x: u64) -> u64 {
 impl VGroup for Board {}
 
 // `add_times` is left as the trait gives it
-impl VAccum for Board {
+impl Accum for Board {
     fn new_zero() -> Board {
         Board {
             lit: 0,
@@ -8771,7 +8771,7 @@ impl VAccum for Board {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct Step(u64);
 
-impl VNewtype for Step {
+impl Newtype for Step {
     type Base = u64;
 
     fn to_base(self) -> u64 {
@@ -8783,7 +8783,7 @@ impl VNewtype for Step {
     }
 }
 
-impl VAdds for Step {
+impl Adds for Step {
     type Acc = Board;
 
     fn acc_of(v: Step) -> Board {
@@ -8801,11 +8801,11 @@ plain_kind!(Step, |rng| {
 });
 
 /// What an accumulator column of `T` adds its values up in.
-type Added<T> = <T as VAccumulated>::Acc;
+type Added<T> = <T as Accumulated>::Acc;
 
 /// A value type an accumulator column holds. The tests reckon by
 /// themselves what values of it add up to, one value after another.
-trait Accd: Kind + VAccumulated<Acc: PartialEq> {
+trait Accd: Kind + Accumulated<Acc: PartialEq> {
     /// What the values add up to, in the order they are in.
     fn added(vs: &[Self]) -> Added<Self>;
 
@@ -10307,7 +10307,7 @@ fn an_accumulator_that_panics_under_an_iterator() {
 
     impl VGroup for Fused {}
 
-    impl VAccum for Fused {
+    impl Accum for Fused {
         fn new_zero() -> Fused {
             Fused(0)
         }
@@ -10336,7 +10336,7 @@ fn an_accumulator_that_panics_under_an_iterator() {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     struct Tick(u64);
 
-    impl VNewtype for Tick {
+    impl Newtype for Tick {
         type Base = u64;
 
         fn to_base(self) -> u64 {
@@ -10348,7 +10348,7 @@ fn an_accumulator_that_panics_under_an_iterator() {
         }
     }
 
-    impl VAdds for Tick {
+    impl Adds for Tick {
         type Acc = Fused;
 
         fn acc_of(v: Tick) -> Fused {
@@ -11525,10 +11525,7 @@ impl<T: Deltad> DeltaWalk<'_, T> {
 }
 
 /// The move made of a verified delta column's iterator.
-fn new_delta_does<T: Deltad>(
-    x: &mut hexane::verified::DeltaIter<'_, T>,
-    mv: &DeltaMove,
-) -> Option<T> {
+fn new_delta_does<T: Deltad>(x: &mut hexane::DeltaIter<'_, T>, mv: &DeltaMove) -> Option<T> {
     match mv.clone() {
         DeltaMove::Next => return x.next(),
         DeltaMove::Nth(n) => return x.nth(n),
@@ -11575,7 +11572,7 @@ fn a_delta_move<T: Deltad>(rng: &mut Rng, m: &DeltaWalk<'_, T>) -> DeltaMove {
 
 /// Where a verified delta column's iterator stands, where its window
 /// ends and how many values it has left: asked each way there is.
-fn delta_place<T: Deltad>(x: &hexane::verified::DeltaIter<'_, T>) -> (usize, usize, usize) {
+fn delta_place<T: Deltad>(x: &hexane::DeltaIter<'_, T>) -> (usize, usize, usize) {
     assert_eq!(x.size_hint(), (x.len(), Some(x.len())));
     (x.pos(), x.end_pos(), x.len())
 }
@@ -11687,7 +11684,7 @@ fn delta_iters_agree() {
 #[test]
 fn delta_iter_ends() {
     let _golden = golden::test(concat!(module_path!(), "::delta_iter_ends"));
-    let mut x = hexane::verified::DeltaIter::<Option<i64>>::default();
+    let mut x = hexane::DeltaIter::<Option<i64>>::default();
     // (a range that ends before it starts, which is no slip here)
     let (from, to) = (5, 1);
     let moves = [
@@ -11983,7 +11980,7 @@ fn delta_runs_agree() {
 /// column has edits of its own (not `noted`) the two need not take the
 /// same states, and nothing is noted.
 fn delta_resumed<T: DeltaStepped>(
-    s: &hexane::verified::DeltaIterState,
+    s: &hexane::DeltaIterState,
     new: &DeltaColumn<T>,
     model: &[T],
     noted: bool,
@@ -12057,7 +12054,7 @@ fn delta_suspends<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
         assert!(delta_resumed(&s, &new_copy, &model, true));
         // on another column, and the state of an iterator of no column
         delta_resumed(&s, &other_new, &other_model, false);
-        let s0 = hexane::verified::DeltaIter::<T>::default().suspend();
+        let s0 = hexane::DeltaIter::<T>::default().suspend();
         delta_resumed(&s0, &new, &model, true);
         // an edit, and the column refuses the state; the copy still
         // takes it
@@ -12198,7 +12195,7 @@ fn delta_runs_and_states_told() {
     // the state of an iterator of no column is a place in a new column,
     // which has no slab and has counted no edit; and in no column that has
     // counted one
-    let s0 = hexane::verified::DeltaIter::<u32>::default().suspend();
+    let s0 = hexane::DeltaIter::<u32>::default().suspend();
     let mut none = DeltaColumn::<u32>::new();
     {
         let x = s0.try_resume(&none).unwrap();
@@ -12739,7 +12736,7 @@ fn delta_searches_told() {
     }
 
     // an iterator of no column finds nothing
-    let mut x = hexane::verified::DeltaIter::<Option<i64>>::default();
+    let mut x = hexane::DeltaIter::<Option<i64>>::default();
     assert_eq!(x.scan_to_value(Some(1)), None);
     assert_eq!(x.scan_to_value(None), None);
     assert_eq!(x.scan_to_range(..), None);
@@ -12829,7 +12826,7 @@ fn delta_finds_agree() {
 fn delta_finds_told() {
     let _golden = golden::test(concat!(module_path!(), "::delta_finds_told"));
     // a finder of no column
-    let mut none = hexane::verified::FindByRange::<u64>::default();
+    let mut none = hexane::FindByRange::<u64>::default();
     assert_eq!((none.next(), none.next()), (None, None));
 
     // numbers up to the greatest a column holds, and bounds above it
@@ -13540,20 +13537,6 @@ fn delta_decoders_told() {
 
 // ── Raw columns ──────────────────────────────────────────────
 
-/// `hexane::verified` gives the raw column of the crate root: both paths
-/// name the one type, and its iterator.
-#[test]
-fn raw_one_type() {
-    let _golden = golden::test(concat!(module_path!(), "::raw_one_type"));
-    let mut col: hexane::verified::RawColumn = hexane::RawColumn::new();
-    col.splice_slice(0, 0, b"abc");
-    let it: hexane::verified::RawColumnIter<'_> = hexane::RawColumn::iter(&col);
-    let mut it: hexane::RawColumnIter<'_> = it;
-    assert_eq!(it.take(3), b"abc");
-    let none: hexane::RawColumnIter<'_> = hexane::verified::RawColumnIter::default();
-    assert_eq!(none.pos(), 0);
-}
-
 /// Where the slabs of a raw column meet: the places it gives no range
 /// across.
 fn raw_cuts(col: &RawColumn) -> Vec<usize> {
@@ -13882,11 +13865,11 @@ fn raw_cuts_follow_splices() {
 // ── The second codec, bijou64 ────────────────────────────────
 
 /// The modules that name the codec at the import give the types of
-/// `hexane::verified` themselves, with LEB128 as their codec.
+/// the crate root themselves, with LEB128 as their codec.
 #[test]
 fn codec_named_at_the_import() {
     let _golden = golden::test(concat!(module_path!(), "::codec_named_at_the_import"));
-    use hexane::verified::leb128 as l;
+    use hexane::leb128 as l;
     let col: l::Column<u64> = Column::<u64>::from_values(&[1, 2]);
     let bytes = col.save();
     let _: l::PrefixColumn<u64> = PrefixColumn::<u64>::new();
@@ -13911,7 +13894,7 @@ fn codec_named_at_the_import() {
 /// the same: the number and its length, or that there is none. What each
 /// says goes to the digest, which checks it is what the old codec said,
 /// in the same words where the bytes are refused.
-fn codec_reads<C: hexane::verified::Codec>(data: &[u8]) {
+fn codec_reads<C: hexane::Codec>(data: &[u8]) {
     let new = C::read_u(data);
     golden::note(&new.as_ref().map_err(|e| e.to_string()));
     assert_eq!(C::read_u_opt(data), new.as_ref().ok().copied(), "{data:?}");
@@ -13934,7 +13917,7 @@ fn codec_reads<C: hexane::verified::Codec>(data: &[u8]) {
 /// A codec of the verified API writes each number after what the buffer
 /// holds, and reads it back; the digest checks it writes the bytes the
 /// old codec wrote.
-fn codec_numbers<C: hexane::verified::Codec>() {
+fn codec_numbers<C: hexane::Codec>() {
     let mut rng = Rng(0xc0_dec5);
     for round in 0..4000 {
         let n = rng.number();
@@ -13985,7 +13968,7 @@ fn codec_numbers<C: hexane::verified::Codec>() {
 /// The count that heads a run of unlike values, rewritten in place by the
 /// verified API's codec: the bytes before it and after it stay, and the
 /// buffer grows or shrinks by what is returned.
-fn codec_headers<C: hexane::verified::Codec>() {
+fn codec_headers<C: hexane::Codec>() {
     let mut rng = Rng(0x04ea_de25);
     for _ in 0..1500 {
         let before: Vec<u8> = (0..rng.below(5)).map(|_| rng.next() as u8).collect();
@@ -14015,14 +13998,14 @@ fn codecs_agree_leb128() {
     codec_headers::<Leb128>();
 }
 
-/// The verified API with bijou64 as its codec (`hexane::verified::bijou`).
+/// The verified API with bijou64 as its codec (`hexane::bijou`).
 /// The digests check that it still does what the old API did with the
 /// same codec.
 #[cfg(feature = "bijou64")]
 mod bijou {
     use super::*;
-    use hexane::verified::{bijou as vb, Codec};
     use hexane::Bijou64;
+    use hexane::{bijou as vb, Codec};
 
     /// A value type of the verified API's columns, whichever the codec.
     trait BKind: Kind + ColumnValueRef<Bijou64> {}
@@ -14305,12 +14288,12 @@ mod bijou {
         for_each_kind!(across);
     }
 
-    /// The types of `hexane::verified::bijou` are those of
-    /// `hexane::verified` with the codec named.
+    /// The types of `hexane::bijou` are those of the crate root with the
+    /// codec named.
     #[test]
     fn named_at_the_import() {
         let _golden = golden::test(concat!(module_path!(), "::named_at_the_import"));
-        use hexane::verified as v;
+        use hexane as v;
         let bytes = [];
         let _: vb::Column<u64> = v::Column::<u64, Bijou64>::new();
         let _: vb::PrefixColumn<u64> = v::PrefixColumn::<u64, Bijou64>::new();
@@ -14981,7 +14964,7 @@ fn a_cursor_goes_forward_only() {
 #[cfg(feature = "bijou64")]
 mod bijou_cursors {
     use super::*;
-    use hexane::verified::bijou as vb;
+    use hexane::bijou as vb;
     use hexane::Bijou64;
 
     fn cursors<T: Kind + ColumnValueRef<Bijou64>>() {
@@ -15454,7 +15437,7 @@ fn a_delta_cursor_panics_as_the_old_one_does() {
 #[cfg(feature = "bijou64")]
 mod bijou_delta_cursors {
     use super::*;
-    use hexane::verified::bijou as vb;
+    use hexane::bijou as vb;
     use hexane::Bijou64;
 
     fn cursors<T: DeltaStepped + DeltaValue<Bijou64>>(seed: u64) {
@@ -15849,7 +15832,7 @@ fn delta_copies_panic_as_the_old_ones_do() {
 
 // ── Repositioning an iterator: Shiftable, Unshift, Ranges ──────────────────
 
-use hexane::verified::Shiftable;
+use hexane::Shiftable;
 
 /// Ranges for `ranges` of a column of `len` values, from `from` on:
 /// ascending and not overlapping, some touching, some empty, some past
@@ -16547,8 +16530,7 @@ fn a_clients_own_encoding() {
     assert_eq!(v.save(), [0x7f, 0xff, 0x00, 0x02]);
     #[cfg(feature = "bijou64")]
     {
-        let w =
-            hexane::verified::bijou::Column::<Tag>::from_values(&[Tag::Int, Tag::Str, Tag::Str]);
+        let w = hexane::bijou::Column::<Tag>::from_values(&[Tag::Int, Tag::Str, Tag::Str]);
         assert_eq!(w.save(), [0x01, 0x00, 0x04, 0xff]);
     }
 
@@ -16751,15 +16733,15 @@ fn leb_sizes_agree() {
     }
     for n in us {
         let mut buf = vec![];
-        <Leb128 as hexane::verified::Codec>::put_u(n, &mut buf);
-        assert_eq!(hexane::verified::ulebsize(n), buf.len() as u64, "{n}");
-        golden::note(&hexane::verified::ulebsize(n));
+        <Leb128 as hexane::Codec>::put_u(n, &mut buf);
+        assert_eq!(hexane::ulebsize(n), buf.len() as u64, "{n}");
+        golden::note(&hexane::ulebsize(n));
     }
     for i in is {
         let mut buf = vec![];
-        <Leb128 as hexane::verified::Codec>::put_i(i, &mut buf);
-        assert_eq!(hexane::verified::lebsize(i), buf.len() as u64, "{i}");
-        golden::note(&hexane::verified::lebsize(i));
+        <Leb128 as hexane::Codec>::put_i(i, &mut buf);
+        assert_eq!(hexane::lebsize(i), buf.len() as u64, "{i}");
+        golden::note(&hexane::lebsize(i));
     }
 }
 
@@ -16833,7 +16815,7 @@ fn ranges_are_taken_as_the_old_api_took_them() {
     assert_eq!(pit.next().map(|pv| pv.total()), Some(6));
     // the free decoders of the old API's names
     let bytes = col.save();
-    let read: Vec<u64> = hexane::verified::decoder::<u64>(&bytes).collect();
+    let read: Vec<u64> = hexane::decoder::<u64>(&bytes).collect();
     assert_eq!(read, [1, 2, 2, 3, 5, 8]);
-    assert!(hexane::verified::try_decoder::<u64>(&[0x02]).is_err());
+    assert!(hexane::try_decoder::<u64>(&[0x02]).is_err());
 }

@@ -75,19 +75,19 @@ pub(super) proof fn lemma_cancel_impl<A: VGroup>(b: A, t: A, r: A)
 /// it has, and what they add up to.
 #[doc(hidden)]
 #[derive(Debug)]
-pub struct AccWeight<A: VAccum> {
+pub struct AccWeight<A: Accum> {
     pub len: usize,
     pub acc: A,
 }
 
-impl<A: VAccum> Default for AccWeight<A> {
+impl<A: Accum> Default for AccWeight<A> {
     #[inline(always)]
     fn default() -> Self {
         AccWeight { len: 0, acc: A::new_zero() }
     }
 }
 
-impl<A: VAccum> Clone for AccWeight<A> {
+impl<A: Accum> Clone for AccWeight<A> {
     #[inline(always)]
     fn clone(&self) -> (r: Self)
         ensures
@@ -97,7 +97,7 @@ impl<A: VAccum> Clone for AccWeight<A> {
     }
 }
 
-impl<A: VAccum> SlabAggregate for AccWeight<A> {
+impl<A: Accum> SlabAggregate for AccWeight<A> {
     open spec fn spec_len(&self) -> nat {
         self.len as nat
     }
@@ -150,7 +150,7 @@ impl<A: VAccum> SlabAggregate for AccWeight<A> {
     }
 }
 
-impl<A: VAccum> PrefixAggregate for AccWeight<A> {
+impl<A: Accum> PrefixAggregate for AccWeight<A> {
     type Prefix = A;
 
     open spec fn spec_prefix(&self) -> A {
@@ -198,7 +198,7 @@ impl<A: VAccum> PrefixAggregate for AccWeight<A> {
 /// The laws the shared proofs of running sums rest on, which are the
 /// client's: what [`PrefixColumn`](crate::PrefixColumn) takes on trust
 /// of a prefix type is here what a [`VGroup`] proves.
-impl<A: VAccum> PrefixWeight for AccWeight<A> {
+impl<A: Accum> PrefixWeight for AccWeight<A> {
     open spec fn prefix_minus(a: A, b: A) -> A {
         A::minus(a, b)
     }
@@ -216,7 +216,7 @@ impl<A: VAccum> PrefixWeight for AccWeight<A> {
 }
 
 /// `n` copies of an accumulator, added, as the shared proofs say it.
-pub(super) proof fn lemma_reps<A: VAccum>(n: nat, c: A)
+pub(super) proof fn lemma_reps<A: Accum>(n: nat, c: A)
     ensures
         reps::<AccWeight<A>>(n, c) == times::<A>(n, c),
     decreases n,
@@ -226,15 +226,15 @@ pub(super) proof fn lemma_reps<A: VAccum>(n: nat, c: A)
     }
 }
 
-impl<T: VAdds> seal::AccSeal for T {
+impl<T: Adds> seal::AccSeal for T {
 
 }
 
-impl<T: VAdds> seal::AccSeal for Option<T> {
+impl<T: Adds> seal::AccSeal for Option<T> {
 
 }
 
-pub(super) proof fn lemma_acc_cat_impl<V: VAccumulated>(a: Seq<<V as VSpec>::S>, b: Seq<<V as VSpec>::S>)
+pub(super) proof fn lemma_acc_cat_impl<V: Accumulated>(a: Seq<<V as VSpec>::S>, b: Seq<<V as VSpec>::S>)
     ensures
         accumulated::<V>(a + b) == <V::Acc as VGroup>::plus(accumulated::<V>(a), accumulated::<V>(b)),
     decreases b.len(),
@@ -249,7 +249,7 @@ pub(super) proof fn lemma_acc_cat_impl<V: VAccumulated>(a: Seq<<V as VSpec>::S>,
     }
 }
 
-pub(super) proof fn lemma_acc_run_impl<V: VAccumulated>(n: nat, x: <V as VSpec>::S)
+pub(super) proof fn lemma_acc_run_impl<V: Accumulated>(n: nat, x: <V as VSpec>::S)
     ensures
         accumulated::<V>(Seq::new(n, |_i: int| x)) == times::<V::Acc>(n, V::adds(x)),
     decreases n,
@@ -261,7 +261,7 @@ pub(super) proof fn lemma_acc_run_impl<V: VAccumulated>(n: nat, x: <V as VSpec>:
     }
 }
 
-pub(super) proof fn lemma_acc_range_impl<V: VAccumulated>(vs: Seq<<V as VSpec>::S>, i: int, j: int)
+pub(super) proof fn lemma_acc_range_impl<V: Accumulated>(vs: Seq<<V as VSpec>::S>, i: int, j: int)
     requires
         0 <= i <= j <= vs.len(),
     ensures
@@ -282,7 +282,7 @@ pub(super) proof fn lemma_acc_range_impl<V: VAccumulated>(vs: Seq<<V as VSpec>::
 #[verifier::reject_recursive_types(V)]
 pub struct AccOf<V>(PhantomData<V>);
 
-impl<'a, V: VAccumulated> PrefixOps<Get<'a, V>> for AccOf<V> {
+impl<'a, V: Accumulated> PrefixOps<Get<'a, V>> for AccOf<V> {
     type P = V::Acc;
 
     type W = AccWeight<V::Acc>;
@@ -309,7 +309,7 @@ impl<'a, V: VAccumulated> PrefixOps<Get<'a, V>> for AccOf<V> {
 
     #[inline(always)]
     fn zero() -> V::Acc {
-        <V::Acc as VAccum>::new_zero()
+        <V::Acc as Accum>::new_zero()
     }
 
     #[inline(always)]
@@ -332,7 +332,7 @@ impl<'a, V: VAccumulated> PrefixOps<Get<'a, V>> for AccOf<V> {
 }
 
 /// The sum the shared proofs speak of is what the values add up to.
-pub(crate) proof fn lemma_vacc<'a, V: VAccumulated>(vs: Seq<Get<'a, V>>)
+pub(crate) proof fn lemma_vacc<'a, V: Accumulated>(vs: Seq<Get<'a, V>>)
     ensures
         vsum::<Get<'a, V>, AccOf<V>>(vs) == accumulated::<V>(<Get<'a, V> as VGet>::svs(vs)),
     decreases vs.len(),
@@ -358,7 +358,7 @@ pub struct AccModel<V, C>(PhantomData<(V, C)>);
 
 /// The values read of a slab add up to what those read of a copy of it
 /// do.
-pub(super) proof fn lemma_same_acc<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
+pub(super) proof fn lemma_same_acc<V: Accumulated + ColumnValueRef<C>, C: Codec>(
     a: Slab<<V::E as Slabs>::Tail>,
     b: Slab<<V::E as Slabs>::Tail>,
 )
@@ -383,7 +383,7 @@ pub(super) proof fn lemma_same_acc<V: VAccumulated + ColumnValueRef<C>, C: Codec
     lemma_vacc::<V>(xb);
 }
 
-impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Weigh<V::E, AccWeight<V::Acc>> for AccModel<V, C> {
+impl<V: Accumulated + ColumnValueRef<C>, C: Codec> Weigh<V::E, AccWeight<V::Acc>> for AccModel<V, C> {
     open spec fn wrel(w: AccWeight<V::Acc>, s: Slab<<V::E as Slabs>::Tail>) -> bool {
         w.len == s.len && w.acc == vsum::<Get<'static, V>, AccOf<V>>(<V::X as Decoders<'static>>::vals(s))
     }
@@ -435,7 +435,7 @@ impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Weigh<V::E, AccWeight<V::Acc
 
 /// A clone of an accumulator column's slabs and index is an accumulator
 /// column of the same values.
-impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> CopyWeigh<V::E, AccWeight<V::Acc>> for AccModel<V, C> {
+impl<V: Accumulated + ColumnValueRef<C>, C: Codec> CopyWeigh<V::E, AccWeight<V::Acc>> for AccModel<V, C> {
     proof fn lemma_copy_weight() {
     }
 
@@ -451,14 +451,14 @@ impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> CopyWeigh<V::E, AccWeight<V:
     }
 }
 
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Accumulate<Get<'a, V>, AccWeight<V::Acc>> for AccModel<V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> Accumulate<Get<'a, V>, AccWeight<V::Acc>> for AccModel<V, C> {
     open spec fn wvals(w: AccWeight<V::Acc>, vs: Seq<Get<'a, V>>) -> bool {
         w.len == vs.len() && w.acc == vsum::<Get<'a, V>, AccOf<V>>(vs)
     }
 
     #[inline(always)]
     fn new_zero() -> AccWeight<V::Acc> {
-        AccWeight { len: 0, acc: <V::Acc as VAccum>::new_zero() }
+        AccWeight { len: 0, acc: <V::Acc as Accum>::new_zero() }
     }
 
     #[inline]
@@ -483,7 +483,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> Accumulate<Get<'a, V>, A
 
 /// A load computes each slab's weight, and refuses no column for what
 /// its values add up to.
-impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> LoadWeigh<'a, V::E, V::X, AccWeight<V::Acc>> for AccModel<V, C> {
+impl<'a, V: Accumulated + ColumnValueRef<C>, C: Codec> LoadWeigh<'a, V::E, V::X, AccWeight<V::Acc>> for AccModel<V, C> {
     open spec fn accumulates() -> bool {
         false
     }
@@ -520,7 +520,7 @@ impl<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec> LoadWeigh<'a, V::E, V::X
     }
 }
 
-impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Kind<V, C> for AccIndex {
+impl<V: Accumulated + ColumnValueRef<C>, C: Codec> Kind<V, C> for AccIndex {
     type W = AccWeight<V::Acc>;
 
     type I = SlabBTree<AccWeight<V::Acc>>;
@@ -534,7 +534,7 @@ impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Kind<V, C> for AccIndex {
     }
 }
 
-impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
+impl<V: Accumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
     /// The index as the readers of the sums take it, with what they ask
     /// of it; none for a column an edit's panic left without its parts,
     /// which is empty.
@@ -611,7 +611,7 @@ impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
                 proof {
                     assert(self@.take(k) =~= self@);
                 }
-                <V::Acc as VAccum>::new_zero()
+                <V::Acc as Accum>::new_zero()
             },
         }
     }
@@ -673,7 +673,7 @@ impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
                 proof {
                     assert(self@.subrange(0, 0).len() == 0);
                 }
-                return <V::Acc as VAccum>::new_zero();
+                return <V::Acc as Accum>::new_zero();
             },
         };
         if start >= end {
@@ -683,13 +683,13 @@ impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
                     assert(self@.subrange(start as int, n).len() == 0 || start < n);
                 }
             }
-            return <V::Acc as VAccum>::new_zero();
+            return <V::Acc as Accum>::new_zero();
         }
         let len = self.core.len();
         let slabs = self.core.slabs();
         let mut core = self.reader(0, len);
-        let mut total = <V::Acc as VAccum>::new_zero();
-        let mut base = <V::Acc as VAccum>::new_zero();
+        let mut total = <V::Acc as Accum>::new_zero();
+        let mut base = <V::Acc as Accum>::new_zero();
         proof {
             assert(before::<V::X>(self.core.slabs_spec(), 0) =~= Seq::<Get<'static, V>>::empty());
             <AccWeight<V::Acc> as PrefixWeight>::lemma_prefix_add(base, base, base);
@@ -719,13 +719,13 @@ impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
 }
 
 #[inline(always)]
-pub(super) fn vaccumulated_to_acc_option_t<T: VAdds>(v: Option<T>) -> (r: <T as VAdds>::Acc)
+pub(super) fn vaccumulated_to_acc_option_t<T: Adds>(v: Option<T>) -> (r: <T as Adds>::Acc)
     ensures
-        r == <Option<T> as VAccumulated>::adds(v.sv()),
+        r == <Option<T> as Accumulated>::adds(v.sv()),
 {
     match v {
         Some(x) => T::acc_of(x),
-        None => <<T as VAdds>::Acc as VAccum>::new_zero(),
+        None => <<T as Adds>::Acc as Accum>::new_zero(),
     }
 }
 

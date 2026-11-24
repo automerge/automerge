@@ -2,7 +2,7 @@
 //! [`Column::edit`] and [`Column::edit_at`] open.
 //!
 //! This file is a specification, to be read as the guide to reviewing
-//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! says ([Reviewing the specification](crate#reviewing-the-specification)): each
 //! function's body is a call of one of `imp` (`edit/imp.rs`), which has
 //! its contract word for word and is proved there.
 
@@ -11,7 +11,7 @@ use super::model::Model;
 use super::seal;
 #[cfg(verus_keep_ghost)]
 use super::{after_call, gives, run_values, Held, VGet};
-use super::{Codec, Column, ColumnValueRef, Get, LenIndex, RunsFeed, VIndex};
+use super::{Codec, Column, ColumnValueRef, Get, Index, LenIndex, RunsFeed};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{Insertable, Slabs};
 #[cfg(verus_keep_ghost)]
@@ -45,7 +45,7 @@ verus! {
 /// another, and [`finish`](Self::finish) hands the edited column back:
 ///
 /// ```
-/// use hexane::verified::Column;
+/// use hexane::Column;
 ///
 /// let mut col = Column::<u64>::from_values(&[1, 2, 3, 4, 5]);
 /// let mut e = col.edit();
@@ -73,7 +73,7 @@ verus! {
 /// on. Every step says what it does to these three, and that the rest
 /// stays as it was (`kept`).
 #[must_use = "an edit gives the column back when `finish` is called"]
-pub struct Edit<'a, V: ColumnValueRef<C>, C: Codec = Leb128, K: VIndex<V, C> = LenIndex> {
+pub struct Edit<'a, V: ColumnValueRef<C>, C: Codec = Leb128, K: Index<V, C> = LenIndex> {
     col: &'a mut Column<V, C, K>,
     core: KEdit<V, C, K>,
     /// the column's count of edits when the cursor was opened
@@ -82,7 +82,7 @@ pub struct Edit<'a, V: ColumnValueRef<C>, C: Codec = Leb128, K: VIndex<V, C> = L
     changed: bool,
 }
 
-impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
+impl<V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Column<V, C, K> {
     /// A cursor to edit the column with, standing at its first value.
     /// See [`Edit`].
     #[inline(always)]
@@ -123,7 +123,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     }
 }
 
-impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Edit<'a, V, C, K> {
+impl<'a, V: ColumnValueRef<C>, C: Codec, K: Index<V, C>> Edit<'a, V, C, K> {
     /// The cursor is one a column gave, or one a step of such a cursor
     /// left: every step asks for this and keeps it.
     pub closed spec fn wf(&self) -> bool {

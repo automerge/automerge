@@ -765,7 +765,7 @@ impl AnySpan {
 
 /// A delta column's values as deltas (an `i64` is its own delta, an
 /// `Option<i64>` too, a null holding the running sum). Its implementation
-/// proves it (`VDeltas`).
+/// proves it (`Deltas`).
 pub(crate) trait DeltaOps<V: Copy> {
     spec fn dv(v: V) -> Option<i64>;
 

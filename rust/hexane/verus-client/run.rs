@@ -1,9 +1,9 @@
 //! Runs the clients Verus checked: each call meets its client's
 //! `requires`, and the client's own run-time work (loading, saving,
 //! unwrapping) must not panic.
-use hexane::verified::{
+use hexane::{
     AccColumn, AccIndex, AccIter, AccValue, Codec, Column, ColumnValueRef, Decoder, DeltaColumn,
-    DeltaValue, Encoder, EncoderState, Get, LenIndex, PrefixColumn, SumIndex, VIndex,
+    DeltaValue, Encoder, EncoderState, Get, LenIndex, PrefixColumn, SumIndex, Index,
 };
 use hexane::{DeltaRun, Leb128, Run};
 use verus_client::{Action, Board, Flags, Mark, Meta, Step};
@@ -2680,7 +2680,7 @@ fn delta_runs_and_fills() {
 
 #[test]
 fn delta_iterators() {
-    use hexane::verified::DeltaIter;
+    use hexane::DeltaIter;
     let values: [u64; 10] = [1, 2, 2, 5, 9, 9, 12, 20, 21, 30];
     let col: DeltaColumn<u64> = verus_client::delta_built(&values);
     assert_eq!(verus_client::delta_read_in_a_loop(&col), values);
@@ -2964,7 +2964,7 @@ fn delta_scans_and_searches() {
 
 #[test]
 fn delta_finds() {
-    use hexane::verified::FindByRange;
+    use hexane::FindByRange;
     let values: [u64; 7] = [5, 3, 9, 3, 12, 3, 7];
     let col: DeltaColumn<u64> = verus_client::delta_built(&values);
     assert_eq!(verus_client::delta_found_all(&col, 3), [1, 3, 5]);
@@ -3000,7 +3000,7 @@ fn delta_finds() {
 
 #[test]
 fn delta_encoders() {
-    use hexane::verified::{DeltaEncoder, DeltaEncoderState};
+    use hexane::{DeltaEncoder, DeltaEncoderState};
     let input: Vec<Option<i64>> = vec![Some(4), Some(4), None, Some(-9), Some(i64::MAX - 20)];
     let col: DeltaColumn<Option<i64>> = verus_client::delta_built(&input);
     let bytes = col.save();
@@ -3142,7 +3142,7 @@ fn delta_encoder_stops_at_a_span_too_wide() {
 
 #[test]
 fn delta_decoders() {
-    use hexane::verified::DeltaDecoder;
+    use hexane::DeltaDecoder;
     fn run(count: usize, value: Option<i64>) -> Option<Run<Option<i64>>> {
         Some(Run { count, value })
     }
@@ -3238,7 +3238,7 @@ fn delta_decoders() {
 
 #[test]
 fn raw_columns() {
-    use hexane::verified::{RawColumn, RawColumnIter};
+    use hexane::{RawColumn, RawColumnIter};
     let text = b"goodbye, world";
     let mut col: RawColumn = verus_client::raw_built(b"hello, ", b"world");
     assert_eq!(col.save(), b"hello, world");
@@ -3317,7 +3317,7 @@ fn raw_columns() {
 
 #[test]
 fn raw_cuts() {
-    use hexane::verified::RawColumn;
+    use hexane::RawColumn;
     let mut col = RawColumn::with_max_segments(2);
     assert_eq!(
         verus_client::raw_put_then_read(&mut col, 0, b"world"),
@@ -3419,7 +3419,7 @@ fn codecs() {
 #[cfg(feature = "bijou64")]
 #[test]
 fn bijou64() {
-    use hexane::verified::bijou;
+    use hexane::bijou;
     use hexane::Bijou64;
     for (n, i) in CODEC_NUMBERS {
         verus_client::codecs_bijou64(n, i, b"rest", &[0xf9, 0x00]);
@@ -3590,14 +3590,14 @@ impl<C: Codec> Lent<C> for Mark {
 }
 
 /// What a column holds.
-fn seen<V: Lent<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C, K>) -> Vec<V::Seen> {
+fn seen<V: Lent<C>, C: Codec, K: Index<V, C>>(col: &Column<V, C, K>) -> Vec<V::Seen> {
     col.to_vec().into_iter().map(V::seen).collect()
 }
 
 /// The cursor's clients for every kind of column, on a column of
 /// `model`, which has four values or more, with two values of the
 /// caller's.
-fn cursor_clients<V: Lent<C>, C: Codec, K: VIndex<V, C>>(model: &[V], x: &V, y: &V) {
+fn cursor_clients<V: Lent<C>, C: Codec, K: Index<V, C>>(model: &[V], x: &V, y: &V) {
     let n = model.len();
     assert!(n >= 4);
     let lent: Vec<Get<'_, V>> = model.iter().map(V::lend).collect();

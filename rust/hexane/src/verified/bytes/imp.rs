@@ -810,14 +810,14 @@ pub(super) fn cow_of(o: Vec<u8>) -> (r: BytesCow<'static>)
 /// Byte strings under codec `C`, none of them null: what they are on the
 /// wire.
 #[verifier::reject_recursive_types(C)]
-pub struct VBytesOps<C>(PhantomData<C>);
+pub struct BytesOps<C>(PhantomData<C>);
 
 /// Byte strings under codec `C`, none of them null: how they are
 /// written.
 #[verifier::reject_recursive_types(C)]
-pub struct VBytesWrite<C>(PhantomData<C>);
+pub struct BytesWrite<C>(PhantomData<C>);
 
-impl<'a, C: Codec> RleOps<'a> for VBytesOps<C> {
+impl<'a, C: Codec> RleOps<'a> for BytesOps<C> {
     type V = &'a [u8];
 
     open spec fn nullable() -> bool {
@@ -939,8 +939,8 @@ impl<'a, C: Codec> RleOps<'a> for VBytesOps<C> {
     }
 }
 
-impl<'a, C: Codec> WriteOps<'a> for VBytesWrite<C> {
-    type R = VBytesOps<C>;
+impl<'a, C: Codec> WriteOps<'a> for BytesWrite<C> {
+    type R = BytesOps<C>;
 
     type Cow = BytesCow<'a>;
 
@@ -987,8 +987,8 @@ impl<'a, C: Codec> WriteOps<'a> for VBytesWrite<C> {
     }
 }
 
-impl<'s, C: Codec> Lift<'s> for VBytesWrite<C> {
-    type W = VBytesWrite<C>;
+impl<'s, C: Codec> Lift<'s> for BytesWrite<C> {
+    type W = BytesWrite<C>;
 
     /// The same bytes: a slice is its bytes, whatever it borrows from.
     open spec fn lift(v: &'s [u8]) -> &'static [u8] {
@@ -1002,7 +1002,7 @@ impl<'s, C: Codec> Lift<'s> for VBytesWrite<C> {
     }
 
     proof fn axiom_unlift(w: &'static [u8]) {
-        assert(<VBytesWrite<C> as Lift<'s>>::lift(w) == w);
+        assert(<BytesWrite<C> as Lift<'s>>::lift(w) == w);
     }
 
     #[inline(always)]
@@ -1011,7 +1011,7 @@ impl<'s, C: Codec> Lift<'s> for VBytesWrite<C> {
     }
 }
 
-impl<C: Codec> Plain for VBytesWrite<C> {
+impl<C: Codec> Plain for BytesWrite<C> {
     proof fn lemma_plain(v: &'static [u8]) {
     }
 
@@ -1028,14 +1028,14 @@ impl<C: Codec> Plain for VBytesWrite<C> {
 /// `Option`s of byte strings under codec `C`, `None` the null: what they
 /// are on the wire.
 #[verifier::reject_recursive_types(C)]
-pub struct VOptBytesOps<C>(PhantomData<C>);
+pub struct OptBytesOps<C>(PhantomData<C>);
 
 /// `Option`s of byte strings under codec `C`, `None` the null: how they
 /// are written.
 #[verifier::reject_recursive_types(C)]
-pub struct VOptBytesWrite<C>(PhantomData<C>);
+pub struct OptBytesWrite<C>(PhantomData<C>);
 
-impl<'a, C: Codec> RleOps<'a> for VOptBytesOps<C> {
+impl<'a, C: Codec> RleOps<'a> for OptBytesOps<C> {
     type V = Option<&'a [u8]>;
 
     open spec fn nullable() -> bool {
@@ -1177,8 +1177,8 @@ impl<'a, C: Codec> RleOps<'a> for VOptBytesOps<C> {
     }
 }
 
-impl<'a, C: Codec> WriteOps<'a> for VOptBytesWrite<C> {
-    type R = VOptBytesOps<C>;
+impl<'a, C: Codec> WriteOps<'a> for OptBytesWrite<C> {
+    type R = OptBytesOps<C>;
 
     type Cow = Option<BytesCow<'a>>;
 
@@ -1243,8 +1243,8 @@ impl<'a, C: Codec> WriteOps<'a> for VOptBytesWrite<C> {
     }
 }
 
-impl<'s, C: Codec> Lift<'s> for VOptBytesWrite<C> {
-    type W = VOptBytesWrite<C>;
+impl<'s, C: Codec> Lift<'s> for OptBytesWrite<C> {
+    type W = OptBytesWrite<C>;
 
     /// The same bytes, or the null.
     open spec fn lift(v: Option<&'s [u8]>) -> Option<&'static [u8]> {
@@ -1258,7 +1258,7 @@ impl<'s, C: Codec> Lift<'s> for VOptBytesWrite<C> {
     }
 
     proof fn axiom_unlift(w: Option<&'static [u8]>) {
-        assert(<VOptBytesWrite<C> as Lift<'s>>::lift(w) == w);
+        assert(<OptBytesWrite<C> as Lift<'s>>::lift(w) == w);
     }
 
     #[inline(always)]
@@ -1271,7 +1271,7 @@ impl<'s, C: Codec> Lift<'s> for VOptBytesWrite<C> {
     }
 }
 
-impl<C: Codec> Plain for VOptBytesWrite<C> {
+impl<C: Codec> Plain for OptBytesWrite<C> {
     proof fn lemma_plain(v: Option<&'static [u8]>) {
     }
 
@@ -1306,14 +1306,14 @@ impl seal::SpecSeal for Option<Vec<u8>> {
 /// long.
 pub(crate) proof fn lemma_bytes_sizes<C: Codec>(vs: Seq<&'static [u8]>)
     ensures
-        heads_bound::<VBytesOps<C>>(10),
-        encs::<VBytesOps<C>>(vs).len() <= 10 * vs.len() + total_len(<&'static [u8] as VGet>::svs(vs)),
+        heads_bound::<BytesOps<C>>(10),
+        encs::<BytesOps<C>>(vs).len() <= 10 * vs.len() + total_len(<&'static [u8] as VGet>::svs(vs)),
     decreases vs.len(),
 {
-    assert forall|n: i64| (#[trigger] VBytesOps::<C>::enc_signed(n)).len() <= 10 by {
+    assert forall|n: i64| (#[trigger] BytesOps::<C>::enc_signed(n)).len() <= 10 by {
         C::lemma_i(n, n, Seq::empty(), Seq::empty());
     }
-    assert forall|n: u64| (#[trigger] VBytesOps::<C>::enc_unsigned(n)).len() <= 10 by {
+    assert forall|n: u64| (#[trigger] BytesOps::<C>::enc_unsigned(n)).len() <= 10 by {
         C::lemma_u(n, n, Seq::empty(), Seq::empty());
     }
     let x = <&'static [u8] as VGet>::svs(vs);
@@ -1330,16 +1330,16 @@ pub(crate) proof fn lemma_bytes_sizes<C: Codec>(vs: Seq<&'static [u8]>)
 /// as one byte here, though it is none in the column).
 pub(crate) proof fn lemma_opt_bytes_sizes<C: Codec>(vs: Seq<Option<&'static [u8]>>)
     ensures
-        heads_bound::<VOptBytesOps<C>>(10),
-        encs::<VOptBytesOps<C>>(vs).len() <= 10 * vs.len() + total_len_opt(
+        heads_bound::<OptBytesOps<C>>(10),
+        encs::<OptBytesOps<C>>(vs).len() <= 10 * vs.len() + total_len_opt(
             <Option<&'static [u8]> as VGet>::svs(vs),
         ),
     decreases vs.len(),
 {
-    assert forall|n: i64| (#[trigger] VOptBytesOps::<C>::enc_signed(n)).len() <= 10 by {
+    assert forall|n: i64| (#[trigger] OptBytesOps::<C>::enc_signed(n)).len() <= 10 by {
         C::lemma_i(n, n, Seq::empty(), Seq::empty());
     }
-    assert forall|n: u64| (#[trigger] VOptBytesOps::<C>::enc_unsigned(n)).len() <= 10 by {
+    assert forall|n: u64| (#[trigger] OptBytesOps::<C>::enc_unsigned(n)).len() <= 10 by {
         C::lemma_u(n, n, Seq::empty(), Seq::empty());
     }
     let x = <Option<&'static [u8]> as VGet>::svs(vs);
@@ -1357,13 +1357,13 @@ pub(crate) proof fn lemma_opt_bytes_sizes<C: Codec>(vs: Seq<Option<&'static [u8]
 // ── Columns of byte strings ─────────────────────────────────────────────────
 
 impl<C: Codec> seal::Sealed<C> for Vec<u8> {
-    type X = RleReads<VBytesOps<C>>;
+    type X = RleReads<BytesOps<C>>;
 
-    type E = RleModel<VBytesWrite<C>>;
+    type E = RleModel<BytesWrite<C>>;
 }
 
 impl<C: Codec> Owned<C> for Vec<u8> {
-    type N = REncoder<'static, VBytesWrite<C>>;
+    type N = REncoder<'static, BytesWrite<C>>;
 
     #[inline(always)]
     fn to_owned(g: &[u8]) -> (v: Vec<u8>) {
@@ -1382,13 +1382,13 @@ impl<C: Codec> Owned<C> for Vec<u8> {
 }
 
 impl<C: Codec> seal::Sealed<C> for Option<Vec<u8>> {
-    type X = RleReads<VOptBytesOps<C>>;
+    type X = RleReads<OptBytesOps<C>>;
 
-    type E = RleModel<VOptBytesWrite<C>>;
+    type E = RleModel<OptBytesWrite<C>>;
 }
 
 impl<C: Codec> Owned<C> for Option<Vec<u8>> {
-    type N = REncoder<'static, VOptBytesWrite<C>>;
+    type N = REncoder<'static, OptBytesWrite<C>>;
 
     #[inline(always)]
     #[allow(clippy::manual_map)]  // Verus has no closure to read here
@@ -1449,8 +1449,8 @@ pub(super) proof fn vvalue_lemma_size_vec_u8<C: Codec>(d: Seq<u8>)
     ensures
         d.len() <= <Vec<u8> as ColumnValueRef<C>>::size_bound(saved_values::<Vec<u8>, C>(d)),
 {
-    <RleModel<VBytesWrite<C>> as Model<RleReads<VBytesOps<C>>>>::lemma_size(d);
-    lemma_bytes_sizes::<C>(slab_values::<VBytesOps<C>>(d));
+    <RleModel<BytesWrite<C>> as Model<RleReads<BytesOps<C>>>>::lemma_size(d);
+    lemma_bytes_sizes::<C>(slab_values::<BytesOps<C>>(d));
 }
 
 #[inline(always)]
@@ -1485,8 +1485,8 @@ pub(super) proof fn vvalue_lemma_size_option_vec_u8<C: Codec>(d: Seq<u8>)
     ensures
         d.len() <= <Option<Vec<u8>> as ColumnValueRef<C>>::size_bound(saved_values::<Option<Vec<u8>>, C>(d)),
 {
-    <RleModel<VOptBytesWrite<C>> as Model<RleReads<VOptBytesOps<C>>>>::lemma_size(d);
-    lemma_opt_bytes_sizes::<C>(slab_values::<VOptBytesOps<C>>(d));
+    <RleModel<OptBytesWrite<C>> as Model<RleReads<OptBytesOps<C>>>>::lemma_size(d);
+    lemma_opt_bytes_sizes::<C>(slab_values::<OptBytesOps<C>>(d));
 }
 
 #[inline(always)]
