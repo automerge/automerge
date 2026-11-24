@@ -218,7 +218,7 @@ impl ValueTransition {
                         obj,
                         index,
                         winner.value.as_str(),
-                        marks.after.current().cloned(),
+                        marks.after.current_without_unmarks(),
                     );
                 } else {
                     log.insert_and_maybe_expose(
@@ -318,7 +318,7 @@ fn replace(
         expose,
         seq_type,
         encoding,
-        marks.after.current().cloned(),
+        marks.after.current_without_unmarks(),
     );
 }
 
