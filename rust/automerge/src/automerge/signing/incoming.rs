@@ -18,7 +18,7 @@
 //!    contents, then `PreparedAdmission::complete` merges proofs, publishes
 //!    history and removes completed or invalidated pending groups.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::admission::{select_fragments, AcceptedHistory};
 use crate::change_graph::ChangeGraph;
@@ -32,7 +32,11 @@ use crate::{ActorId, Author, AutomergeError, Change, ChangeHash, Fragment};
 
 use super::{has_signature, SigningDocument};
 
+mod author_checks;
 mod topology;
+mod walk;
+
+use walk::{walk, Visit};
 
 /// An intrinsically validated incoming group waiting for missing causal history.
 #[derive(Clone, Debug)]
@@ -329,15 +333,18 @@ impl Incoming<'_> {
         };
         let head = head_change.hash();
 
-        let mut reachable = HashSet::from([head]);
-        let mut queue = VecDeque::from([head]);
-        while let Some(curr) = queue.pop_front() {
-            for dep in in_group[&curr].deps() {
-                if in_group.contains_key(dep) && reachable.insert(*dep) {
-                    queue.push_back(*dep);
-                }
-            }
-        }
+        let reachable = walk(
+            vec![head],
+            |node| {
+                in_group[&node]
+                    .deps()
+                    .iter()
+                    .copied()
+                    .filter(|dep| in_group.contains_key(dep))
+                    .collect()
+            },
+            |_| Visit::KeepAndExpand,
+        );
         if reachable.len() != changes.len() {
             return Err(SigningError::from(InvalidFragment::NotSingleHeaded).into());
         }
@@ -606,25 +613,36 @@ impl Incoming<'_> {
         changes_by_hash: &HashMap<ChangeHash, &Change>,
         valid_authors: &HashMap<ChangeHash, Option<Author<'static>>>,
     ) -> Option<Option<Author<'static>>> {
-        let target_seq = change.seq() - 1;
-        for dep in change.deps() {
-            if let Some((actor_idx, seq)) = self.graph.actor_seq_for_hash(dep) {
-                if u64::from(seq) == target_seq && &self.ops.actors[actor_idx] == change.actor_id()
-                {
-                    return Some(
-                        self.authors
-                            .get_author_for_actor(actor_idx)
-                            .map(Author::into_owned),
-                    );
-                }
-            } else if let Some(author) = valid_authors.get(dep) {
-                let pred = changes_by_hash[dep];
-                if pred.actor_id() == change.actor_id() && pred.seq() == target_seq {
-                    return Some(author.clone());
-                }
-            }
+        enum Source<'a> {
+            Applied(usize),
+            Candidate(&'a Option<Author<'static>>),
         }
-        None
+
+        let predecessor = author_checks::find_predecessor(
+            change.deps(),
+            change.actor_id(),
+            change.seq() - 1,
+            |dep| {
+                if let Some((actor, seq)) = self.graph.actor_seq_for_hash(&dep) {
+                    Some((
+                        &self.ops.actors[actor],
+                        u64::from(seq),
+                        Source::Applied(actor),
+                    ))
+                } else {
+                    let author = valid_authors.get(&dep)?;
+                    let pred = changes_by_hash[&dep];
+                    Some((pred.actor_id(), pred.seq(), Source::Candidate(author)))
+                }
+            },
+        )?;
+        Some(match predecessor {
+            Source::Applied(actor) => self
+                .authors
+                .get_author_for_actor(actor)
+                .map(Author::into_owned),
+            Source::Candidate(author) => author.clone(),
+        })
     }
 
     // --- Stage 3: Canonical fragment & attached proof verification ---
@@ -732,15 +750,17 @@ impl Incoming<'_> {
 
         // Reuse Stage 1's preverified store whenever every frontier already
         // verified under the exact author established by causal ancestry.
-        let can_reuse_preverified = requirements.hashes().all(|frontier| {
-            let expected = resolve_author(frontier);
-            expected.is_some()
-                && group
+        let can_reuse_preverified = author_checks::cache_matches(
+            requirements.hashes().as_slice(),
+            |frontier| resolve_author(&frontier),
+            |frontier| {
+                group
                     .preverified
-                    .ed25519_entries(frontier)
+                    .ed25519_entries(&frontier)
                     .next()
-                    .is_some_and(|(verified_author, _)| Some(verified_author) == expected.as_ref())
-        });
+                    .map(|(author, _)| author)
+            },
+        );
         let proof = if can_reuse_preverified {
             group.preverified.clone()
         } else {
@@ -809,19 +829,17 @@ impl Incoming<'_> {
             };
         }
 
-        let mut boundary = Vec::new();
-        let mut seen_boundary = HashSet::new();
-        let mut stack = parents_of(&head);
-        while let Some(node) = stack.pop() {
-            if !seen_boundary.insert(node) {
-                continue;
-            }
-            if node.fragment_level() >= level {
-                boundary.push(node);
-            } else {
-                stack.extend(parents_of(&node));
-            }
-        }
+        let boundary = walk(
+            parents_of(&head),
+            |node| parents_of(&node),
+            |node| {
+                if node.fragment_level() >= level {
+                    Visit::Keep
+                } else {
+                    Visit::Expand
+                }
+            },
+        );
 
         let mut candidate_clock: HashMap<ActorId, u64> = HashMap::new();
         let mut graph_boundary_seeds: BTreeSet<ChangeHash> = BTreeSet::new();
@@ -851,18 +869,17 @@ impl Incoming<'_> {
             }
         };
 
-        let mut members = Vec::new();
-        let mut visited = HashSet::from([head]);
-        let mut queue = VecDeque::from([head]);
-        while let Some(curr) = queue.pop_front() {
-            members.push(curr);
-            for parent in parents_of(&curr) {
-                if !visited.contains(&parent) && !in_boundary_past(&parent) {
-                    visited.insert(parent);
-                    queue.push_back(parent);
+        let members = walk(
+            vec![head],
+            |node| parents_of(&node),
+            |node| {
+                if node == head || !in_boundary_past(&node) {
+                    Visit::KeepAndExpand
+                } else {
+                    Visit::Ignore
                 }
-            }
-        }
+            },
+        );
         let checkpoints = members
             .iter()
             .copied()

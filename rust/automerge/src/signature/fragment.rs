@@ -49,7 +49,7 @@ impl FragmentRequirements {
     }
 
     /// Exact hashes whose signatures must accompany an outgoing fragment.
-    pub(crate) fn hashes(&self) -> impl ExactSizeIterator<Item = &ChangeHash> {
+    pub(crate) fn hashes(&self) -> std::slice::Iter<'_, ChangeHash> {
         self.hashes.iter()
     }
 
