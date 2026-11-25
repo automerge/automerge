@@ -39,9 +39,13 @@ mod apply_order;
 mod author_checks;
 mod boundary_summary;
 mod group_membership;
+mod pending;
+mod publication;
 mod topology;
 mod walk;
 
+use pending::{Origin, Route};
+pub(super) use publication::run as run_admission;
 use walk::{walk, Visit};
 
 /// An intrinsically validated incoming group waiting for missing causal history.
@@ -85,28 +89,6 @@ impl PendingGroups {
     pub(super) fn queued_changes(&self) -> impl Iterator<Item = &Change> {
         self.groups.iter().flat_map(|group| group.changes.iter())
     }
-
-    fn push_dedup(&mut self, incoming: PendingGroup) {
-        if !self
-            .groups
-            .iter()
-            .any(|existing| existing.same_delivery(&incoming))
-        {
-            self.groups.push(incoming);
-        }
-    }
-}
-
-/// Whether a candidate came from an earlier call's pending queue or the current call.
-///
-/// A newly supplied group that fails validation aborts the current call with an
-/// error. A previously queued orphan whose missing author/ancestry arrives later
-/// and disproves it is silently dropped so forged orphans cannot block honest
-/// history delivered in subsequent calls.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Origin {
-    ExistingPending,
-    IncomingBatch,
 }
 
 struct CandidateGroup {
@@ -634,28 +616,26 @@ impl Incoming<'_> {
         let mut boundary_memo = BoundaryPastMemo::default();
 
         for (candidate_index, candidate) in candidates.iter().enumerate() {
-            match self.evaluate_single_group(&candidate.group, ancestry, &mut boundary_memo) {
-                Ok(GroupEvaluation::WaitingForAncestry) => {
+            let evaluation =
+                self.evaluate_single_group(&candidate.group, ancestry, &mut boundary_memo);
+            match pending::route(candidate.origin, evaluation)? {
+                Route::Evaluated(GroupEvaluation::WaitingForAncestry) => {
                     waiting_candidate_indices.push(candidate_index);
                 }
-                Ok(GroupEvaluation::Verified { fragment, proof }) => {
+                Route::Evaluated(GroupEvaluation::Verified { fragment, proof }) => {
                     verified.push(VerifiedGroup {
                         candidate_index,
                         fragment,
                         proof,
                     });
                 }
-                Err(error) => match candidate.origin {
-                    Origin::IncomingBatch => return Err(error),
-                    Origin::ExistingPending => {
-                        tracing::debug!(
-                            head = %candidate.group.head,
-                            reason = %error,
-                            "dropping disproved pending group"
-                        );
-                        continue;
-                    }
-                },
+                Route::Disproved(error) => {
+                    tracing::debug!(
+                        head = %candidate.group.head,
+                        reason = %error,
+                        "dropping disproved pending group"
+                    );
+                }
             }
         }
 
@@ -953,39 +933,40 @@ impl Incoming<'_> {
     }
 
     fn pending_group_remains_viable(&self, group: &PendingGroup) -> bool {
-        let signing = self.state;
-        let all_accepted = group.changes.iter().all(|change| {
-            self.graph
-                .actor_seq_for_hash(&change.hash())
-                .is_some_and(|(actor, seq)| signing.accepted.is_accepted_actor_seq(actor, seq))
-        });
-        if all_accepted {
-            return false;
-        }
-        for change in &group.changes {
-            let hash = change.hash();
-            if !self.graph.has_change(&hash) && self.has_actor_seq(change) {
-                return false;
-            }
-        }
+        pending::recheck(
+            &group.changes,
+            |change| {
+                self.graph
+                    .actor_seq_for_hash(&change.hash())
+                    .is_some_and(|(actor, seq)| {
+                        self.state.accepted.is_accepted_actor_seq(actor, seq)
+                    })
+            },
+            |change| self.graph.has_change(&change.hash()) || !self.has_actor_seq(change),
+            || self.pending_frontiers_viable(group),
+        )
+    }
+
+    fn pending_frontiers_viable(&self, group: &PendingGroup) -> bool {
         let in_group: HashMap<ChangeHash, &Change> =
             group.changes.iter().map(|c| (c.hash(), c)).collect();
         let requirements = FragmentRequirements::for_changes(&group.changes);
-        for frontier in requirements.hashes() {
-            let Some(actor_idx) = self.ops.lookup_actor(in_group[frontier].actor_id()) else {
-                continue;
-            };
-            if self.graph.seq_for_actor(actor_idx) == 0 {
-                continue;
-            }
-            let Some(author) = self.authors.get_author_for_actor(actor_idx) else {
-                return false;
-            };
-            if verify_frontier_entry(&group.signatures, frontier, author).is_err() {
-                return false;
-            }
-        }
-        true
+        pending::all(
+            requirements.hashes().as_slice(),
+            &|frontier: &ChangeHash| {
+                let Some(actor_idx) = self.ops.lookup_actor(in_group[frontier].actor_id()) else {
+                    return true;
+                };
+                if self.graph.seq_for_actor(actor_idx) == 0 {
+                    return true;
+                }
+                self.authors
+                    .get_author_for_actor(actor_idx)
+                    .is_some_and(|author| {
+                        verify_frontier_entry(&group.signatures, frontier, author).is_ok()
+                    })
+            },
+        )
     }
 }
 
@@ -1017,50 +998,67 @@ impl PreparedAdmission {
     }
 
     pub(super) fn complete(self, signing: &mut SigningDocument<'_>) {
-        for index in self.plan.selected_verified_indices {
-            let proof = &self.verified[index].proof;
-            let newly_verified: Vec<_> = proof
-                .verified_hashes()
-                .filter(|hash| {
-                    !has_signature(
-                        signing.graph,
-                        signing.authors,
-                        &signing.state.signatures,
-                        hash,
-                    )
-                })
-                .copied()
-                .collect();
-            signing
-                .state
-                .signatures
-                .merge_verified(proof)
-                .expect("admitted proof must match historical authors");
-            for hash in newly_verified {
-                signing.state.fragment_readiness.signature_added(&hash);
-            }
-        }
-        signing
-            .state
-            .accepted
-            .include_prepared(signing.graph, &self.plan.accepted_member_hashes);
-        signing.state.reclaim_covered(signing.graph);
-        signing.state.remove_published_drafts(signing.graph);
+        use publication::Publish;
+
+        let signing = publication::publish(
+            signing,
+            &self.plan.selected_verified_indices,
+            |signing, step| {
+                match step {
+                    Publish::MergeProof(index) => {
+                        Self::merge_selected_proof(signing, &self.verified[index].proof);
+                    }
+                    Publish::IncludeMembers => signing
+                        .state
+                        .accepted
+                        .include_prepared(signing.graph, &self.plan.accepted_member_hashes),
+                    Publish::Reclaim => signing.state.reclaim_covered(signing.graph),
+                    Publish::RemoveDrafts => signing.state.remove_published_drafts(signing.graph),
+                }
+                signing
+            },
+        );
         let incoming = Incoming {
             graph: signing.graph,
             ops: signing.ops,
             authors: signing.authors,
             state: signing.state,
         };
-        let mut pending = PendingGroups::default();
-        for (index, candidate) in self.candidates.into_iter().enumerate() {
-            if self.plan.remaining_candidate_indices.contains(&index)
-                && incoming.pending_group_remains_viable(&candidate.group)
-            {
-                pending.push_dedup(candidate.group);
-            }
+        let retained = pending::rebuild(
+            self.candidates,
+            |index| self.plan.remaining_candidate_indices.contains(&index),
+            |candidate| incoming.pending_group_remains_viable(&candidate.group),
+            |left, right| left.group.same_delivery(&right.group),
+        );
+        signing.state.pending = PendingGroups {
+            groups: retained
+                .into_iter()
+                .map(|candidate| candidate.group)
+                .collect(),
+        };
+    }
+
+    fn merge_selected_proof(signing: &mut SigningDocument<'_>, proof: &SignatureStore) {
+        let newly_verified: Vec<_> = proof
+            .verified_hashes()
+            .filter(|hash| {
+                !has_signature(
+                    signing.graph,
+                    signing.authors,
+                    &signing.state.signatures,
+                    hash,
+                )
+            })
+            .copied()
+            .collect();
+        signing
+            .state
+            .signatures
+            .merge_verified(proof)
+            .expect("admitted proof must match historical authors");
+        for hash in newly_verified {
+            signing.state.fragment_readiness.signature_added(&hash);
         }
-        signing.state.pending = pending;
     }
 }
 

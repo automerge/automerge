@@ -106,7 +106,7 @@ pub use batch::{
     PublicationError, SignatureBatchOutcome, SignatureInsertError, SignatureInsertOutcome,
     SignatureRejection,
 };
-use incoming::{Incoming, PendingGroups, PreparedAdmission};
+use incoming::{run_admission, Incoming, PendingGroups, PreparedAdmission};
 use persistence::PublishedGroup;
 use readiness::{FragmentReadiness, OutgoingSelection};
 use requests::LocalDrafts;
@@ -153,6 +153,7 @@ impl AcceptedClock {
         }
         self.clock = next;
     }
+
     fn include_prepared(&mut self, graph: &ChangeGraph, members: &[ChangeHash]) {
         let mut next = self.clock.clone();
         next.include_members(members, |hash| {
@@ -652,17 +653,31 @@ impl Automerge {
         groups: Vec<crate::LoadedGroup>,
         log: &mut PatchLog,
     ) -> Result<(), crate::AutomergeError> {
-        let prepared = self
-            .try_with_signing(|signing| signing.admit_with_pending(groups))
-            .expect("signed admission requires signing mode")?;
-        let changes = prepared.changes();
-        if !changes.is_empty() {
-            self.apply_prepared_changes(changes, log)?;
-        }
-        // Graph/actor mutation ended; use a fresh aligned view for publication.
-        self.try_with_signing(|mut signing| prepared.complete(&mut signing))
-            .expect("application preserves signing mode");
-        Ok(())
+        let (_, result) = run_admission(
+            (self, log),
+            |(doc, log)| {
+                let prepared = doc
+                    .try_with_signing(|signing| signing.admit_with_pending(groups))
+                    .expect("signed admission requires signing mode");
+                ((doc, log), prepared)
+            },
+            |(doc, log), prepared: &PreparedAdmission| {
+                let changes = prepared.changes();
+                let result = if changes.is_empty() {
+                    Ok(())
+                } else {
+                    doc.apply_prepared_changes(changes, log).map_err(Into::into)
+                };
+                ((doc, log), result)
+            },
+            |(doc, log), prepared| {
+                // The actor table may have changed; publish through a fresh view.
+                doc.try_with_signing(|mut signing| prepared.complete(&mut signing))
+                    .expect("application preserves signing mode");
+                (doc, log)
+            },
+        );
+        result
     }
 
     /// Verify and insert signatures for applied changes, then complete

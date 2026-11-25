@@ -14,20 +14,22 @@ separate and do not check executable code.
 | [Incoming groups](incoming_groups/README.md) | Delivered/canonical equality, per-actor frontiers, attachment search and proof assembly, and exact unapplied rank order |
 | [Fragment selection](fragment_selection/README.md) | The greatest subset of proved fragment occurrences closed under boundary requirements |
 | [Actor clocks](actor_clock/README.md) | Conditional theorems: representing a closed past by maxima, preservation of causal closure, and exact accepted-set extension |
+| [Incoming completion](incoming_completion/README.md) | Apply/error gating, selected-proof publication order, exact accepted-clock update, and the post-apply pending policy |
 
 This is **not** verification of all of [`incoming.rs`](../automerge/src/automerge/signing/incoming.rs).
 Remaining executable obligations include intrinsic head, level, and actor-chain
 validation; the full graph-to-canonical projection and per-group orchestration;
-actual store and graph updates at completion, and pending-group lifecycle. The
-verified rank projection assumes the selected member union is mapped correctly
-and its unapplied dependencies are selected. The selection proof is about
-already-verified descriptors and is independent of these obligations.
+and the plan-to-state adapters. In particular, the completion harness checks
+which effects run and in what order, not the implementations of document
+application, signature merge/reclamation, readiness, or draft pruning. The
+rank and clock proofs assume the selected member union is mapped correctly
+and its unapplied dependencies are selected.
 
 Run all checks with the [pinned Verus release and Rust toolchain](incoming_topology/README.md),
 from the repository root:
 
 ```sh
-for harness in incoming_topology incoming_walk incoming_authors boundary_past incoming_groups fragment_selection actor_clock; do
+for harness in incoming_topology incoming_walk incoming_authors boundary_past incoming_groups fragment_selection actor_clock incoming_completion; do
     verus --edition=2021 --crate-type=lib --cfg automerge_verus --no-cheating \
         "rust/verification/$harness/lib.rs" || exit
 done
