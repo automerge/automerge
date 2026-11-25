@@ -32,6 +32,8 @@ use crate::{ActorId, Author, AutomergeError, Change, ChangeHash, Fragment};
 
 use super::{has_signature, SigningDocument};
 
+mod topology;
+
 /// An intrinsically validated incoming group waiting for missing causal history.
 #[derive(Clone, Debug)]
 pub(super) struct PendingGroup {
@@ -517,40 +519,39 @@ impl Incoming<'_> {
         &self,
         changes_by_hash: &HashMap<ChangeHash, &Change>,
     ) -> (Vec<ChangeHash>, HashMap<ChangeHash, usize>) {
-        let mut waiting: HashMap<ChangeHash, usize> = HashMap::with_capacity(changes_by_hash.len());
-        let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
-        let mut ready = VecDeque::new();
-        for (&hash, &change) in changes_by_hash {
-            let mut missing_deps = 0usize;
+        // Give every unapplied candidate an index for the worklist. Each
+        // unapplied dependency occurrence contributes one to the count;
+        // exactly those with a candidate parent have a reverse edge to
+        // subtract later. Applied dependencies contribute neither.
+        let candidates: Vec<_> = changes_by_hash.iter().collect();
+        let index_by_hash: HashMap<_, _> = candidates
+            .iter()
+            .enumerate()
+            .map(|(index, (&hash, _))| (hash, index))
+            .collect();
+        let mut waiting = vec![0; candidates.len()];
+        let mut dependents = vec![Vec::new(); candidates.len()];
+        for (index, (_, change)) in candidates.iter().enumerate() {
             for dep in change.deps() {
                 if !self.graph.has_change(dep) {
-                    missing_deps += 1;
-                    if changes_by_hash.contains_key(dep) {
-                        dependents.entry(*dep).or_default().push(hash);
+                    waiting[index] += 1;
+                    if let Some(&parent) = index_by_hash.get(dep) {
+                        dependents[parent].push(index);
                     }
                 }
             }
-            waiting.insert(hash, missing_deps);
-            if missing_deps == 0 {
-                ready.push_back(hash);
-            }
         }
+        drop(index_by_hash);
 
-        let mut resolved_topo = Vec::with_capacity(changes_by_hash.len());
-        let mut topo_rank = HashMap::new();
-        while let Some(hash) = ready.pop_front() {
-            topo_rank.insert(hash, resolved_topo.len());
-            resolved_topo.push(hash);
-            if let Some(children) = dependents.remove(&hash) {
-                for child in children {
-                    let count = waiting.get_mut(&child).unwrap();
-                    *count -= 1;
-                    if *count == 0 {
-                        ready.push_back(child);
-                    }
-                }
-            }
-        }
+        let resolved_topo: Vec<_> = topology::resolve(&dependents, waiting)
+            .into_iter()
+            .map(|index| *candidates[index].0)
+            .collect();
+        let topo_rank = resolved_topo
+            .iter()
+            .enumerate()
+            .map(|(rank, &hash)| (hash, rank))
+            .collect();
         (resolved_topo, topo_rank)
     }
 
