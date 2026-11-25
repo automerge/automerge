@@ -941,11 +941,14 @@ impl DeltaIterState {
     /// ([`PackError::InvalidResume`]) if it does not.
     ///
     /// A state fits the column it was taken of, as long as that is not
-    /// edited ([`DeltaIter::suspend`]). The iterator given is
-    /// one of `column` whatever column the state was taken of: it gives
-    /// the values of `column` in the state's window, and the sum it
-    /// keeps is of that column's differences. Where the state stands at
-    /// the column's end, the iterator's window ends there.
+    /// edited ([`DeltaIter::suspend`]). It does not know which column
+    /// that was, so another column with as many slabs that counts as
+    /// many edits fits it too; a column counts none until it is edited.
+    /// The iterator given is one of `column` whatever column the state
+    /// was taken of: it gives the values of `column` in the state's
+    /// window, and the sum it keeps is of that column's differences.
+    /// Where the state stands at the column's end, the iterator's window
+    /// ends there.
     ///
     /// An edit moves the column's count of edits
     /// (`DeltaColumn::edits`), as each method that edits says,

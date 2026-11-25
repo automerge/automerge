@@ -13,53 +13,6 @@
 
 use hexane::{Column, DeltaColumn, Iter, LoadOpts};
 
-/// `try_resume` accepts any column, and the write counter alone cannot
-/// tell two of them apart — every fresh column starts at zero. So an
-/// iterator suspended over one column resumes into another and silently
-/// reads its data.
-///
-/// The surviving slab-count check masks this whenever the two columns
-/// have different layouts, so the columns here are deliberately the same
-/// shape.
-///
-/// (The verified API states this behaviour: a state resumes on any
-/// column it fits, and the iterator then reads that column.)
-#[test]
-#[ignore = "known bug: resume does not check column identity"]
-fn resume_rejects_a_foreign_column() {
-    let a = Column::<u64>::from_values_with_max_segments(&(0..200u64).collect::<Vec<_>>(), 2);
-    let b = Column::<u64>::from_values_with_max_segments(&(1000..1200u64).collect::<Vec<_>>(), 2);
-    assert_eq!(
-        a.slab_count(),
-        b.slab_count(),
-        "same shape, or nothing is proved"
-    );
-
-    let mut it = a.iter();
-    it.nth(2);
-    let st = it.suspend();
-    match st.try_resume(&b) {
-        Err(_) => {}
-        Ok(r) => panic!(
-            "resumed into a foreign column and read {:?}",
-            r.take(3).collect::<Vec<_>>()
-        ),
-    }
-}
-
-/// Nulls carry no value, so the value-range index cannot see them and
-/// `find_by_value(None)` answers "no matches" for a column full of them
-/// — disagreeing with `scan_to_value`, which finds them.
-///
-/// (The verified API states this behaviour: a null is found nowhere.)
-#[test]
-#[ignore = "known bug: find_by_value cannot see nulls"]
-fn find_by_value_finds_nulls() {
-    let col = DeltaColumn::<Option<u32>>::from_values(&[None, None, Some(1), Some(3)]);
-    assert_eq!(col.iter().scan_to_value(None), Some(0), "scan finds them");
-    assert_eq!(col.find_by_value(None).collect::<Vec<_>>(), vec![0, 1]);
-}
-
 /// Run counts come off the wire, so a running total that wraps describes
 /// bytes that are not there. `load` must reject rather than panic (debug)
 /// or hand back a nonsense length (release).

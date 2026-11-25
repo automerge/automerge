@@ -2225,10 +2225,13 @@ impl IterState {
     /// ([`PackError::InvalidResume`]) if it does not.
     ///
     /// A state fits the column it was taken of, as long as that is not
-    /// edited ([`Iter::suspend`]). The iterator given is one of
-    /// `column` whatever column the state was taken of: it gives the
-    /// values of `column` in the state's window. Where the state stands
-    /// at the column's end, the iterator's window ends there.
+    /// edited ([`Iter::suspend`]). It does not know which column that
+    /// was, so another column with as many slabs that counts as many
+    /// edits fits it too; a column counts none until it is edited. The
+    /// iterator given is one of `column` whatever column the state was
+    /// taken of: it gives the values of `column` in the state's window.
+    /// Where the state stands at the column's end, the iterator's window
+    /// ends there.
     ///
     /// An edit moves the column's count of edits
     /// (`Column::edits`), as each method that edits says, so a

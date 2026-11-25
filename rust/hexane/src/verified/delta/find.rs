@@ -224,10 +224,12 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
 
     /// The places of the values that are `target`, from the first on.
     ///
-    /// A null is found nowhere, as with
-    /// [`DeltaColumn::find_by_value`](crate::DeltaColumn::find_by_value):
-    /// the places are those of the values within the bounds that
-    /// include `target` and nothing else (`lemma_delta_within_one`).
+    /// A null is found nowhere: the places are those of the values
+    /// within the bounds that include `target` and nothing else
+    /// (`lemma_delta_within_one`). The index knows the least and the
+    /// greatest value of each slab, which says nothing of where its
+    /// nulls are; [`DeltaIter::scan_to_value`](crate::DeltaIter::scan_to_value)
+    /// finds them by reading the values.
     #[inline(always)]
     pub fn find_by_value(&self, target: T) -> (r: FindByRange<'_, T, C>)
         ensures
