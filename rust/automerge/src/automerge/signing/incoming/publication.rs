@@ -8,20 +8,24 @@ use crate::publication_spec::*;
 use vstd::prelude::*;
 
 #[cfg_attr(automerge_verus, verus_verify)]
-pub(crate) enum Publish {
-    MergeProof(usize),
+pub(crate) enum Publish<P> {
+    MergeProof(P),
     IncludeMembers,
     Reclaim,
     RemoveDrafts,
 }
 
-/// Visit exactly the selected proof indices before publishing any selected
+/// Visit exactly the selected proof payloads before publishing any selected
 /// members. Only then reclaim redundant evidence and prune published drafts.
 #[cfg_attr(automerge_verus, verus_spec(out =>
     requires can_publish(initial, selected@, step),
     ensures publication_trace(initial, selected@, step, out),
 ))]
-pub(super) fn publish<S>(initial: S, selected: &[usize], step: impl Fn(S, Publish) -> S) -> S {
+pub(super) fn publish<'a, S, P: 'a>(
+    initial: S,
+    selected: &'a [P],
+    step: impl Fn(S, Publish<&'a P>) -> S,
+) -> S {
     #[cfg(automerge_verus)]
     proof_decl! { let ghost mut states = seq![initial]; }
     let mut state = initial;
@@ -32,10 +36,10 @@ pub(super) fn publish<S>(initial: S, selected: &[usize], step: impl Fn(S, Publis
         decreases selected@.len() - i,
     ))]
     while i < selected.len() {
-        let index = selected[i];
+        let proof = &selected[i];
         #[cfg(automerge_verus)]
         proof! { assert(merge_ready(initial, selected@, step, states, i as int)); }
-        let next = step(state, Publish::MergeProof(index));
+        let next = step(state, Publish::MergeProof(proof));
         #[cfg(automerge_verus)]
         proof! {
             record_merge(initial, selected@, step, states, i as int, next);
@@ -103,8 +107,8 @@ mod tests {
     fn merges_only_selected_proofs_before_accepting_and_reclaiming() {
         let log = publish(Vec::new(), &[4, 1], |mut log, step| {
             log.push(match step {
-                Publish::MergeProof(4) => "proof 4",
-                Publish::MergeProof(1) => "proof 1",
+                Publish::MergeProof(&4) => "proof 4",
+                Publish::MergeProof(&1) => "proof 1",
                 Publish::MergeProof(_) => panic!("unselected proof"),
                 Publish::IncludeMembers => "accept",
                 Publish::Reclaim => "reclaim",

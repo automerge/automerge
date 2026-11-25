@@ -1,5 +1,8 @@
 #![feature(proc_macro_hygiene)]
 
+#[path = "../../automerge/src/automerge/signing/incoming/author_projection.rs"]
+mod author_projection;
+mod projection_spec;
 mod slot_spec;
 mod spec;
 

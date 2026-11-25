@@ -47,12 +47,18 @@ bytes or assume that an incoming group is valid.
   parent is another candidate. The only dependency classification supplied by
   the adapter is whether the parent is applied, at a candidate index, or
   missing. Repeated dependencies count separately.
+- [Snapshot index](snapshot_spec.rs): build the exact first/last-occurrence
+  maps over the projected delivery rows. Used for provisional authors,
+  unapplied changes by hash, and final apply change lookup; a present `None`
+  payload still occupies its key. The filter and metadata are supplied by the
+  caller.
 - [Plan contents](plan_spec.rs): build exactly the inverse rank map, collect
   exactly the selected occurrences' member list, and keep only the waiting
   candidate indices or the candidate indices of excluded verified occurrences
-  in the pending candidate set. Materialize the final apply list in its
-  original planned order. The caller must link the verified occurrence,
-  candidate, and change identities to their corresponding Rust values.
+  in the pending candidate set. Move precisely the selected proof payloads
+  into the prepared plan and materialize the final apply list in its original
+  planned order. The caller must link the verified occurrence, candidate,
+  and change identities to their corresponding Rust values.
 
 Run with the [pinned Verus toolchain](../incoming_topology/README.md):
 

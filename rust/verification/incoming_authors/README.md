@@ -17,8 +17,11 @@ The pass returns origin IDs rather than copying keys through the proof. An
 origin can legitimately have no author; that is different from a broken chain.
 The [adapter](../../automerge/src/automerge/signing/incoming.rs) translates
 resolved candidates and their dependencies to topological ranks or applied
-actor slots, and reads the author or error hash back from those origins. It
-trusts the applied graph and author lookup and the input's positive sequences.
+actor slots. [The checked materializer](projection_spec.rs) writes the
+origin’s author or the exact cause hash under the corresponding resolved
+hash. An authorless chain has a present `None` entry, not a missing entry.
+It trusts the graph/actor metadata and the read-only lookup of the actual
+author for each Initial root or Applied slot supplied by the adapter.
 
 ## Equivocation
 

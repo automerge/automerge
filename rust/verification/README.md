@@ -11,7 +11,7 @@ separate and do not check executable code.
 | [Incoming ancestry worklist](incoming_topology/README.md) | A duplicate-free dependency order containing every resolvable candidate |
 | [Dependency walks](incoming_walk/README.md) | Exact in-group reachability, boundary discovery, and member walks through a supplied causal cut |
 | [Authors and actor slots](incoming_authors/README.md) | Whole-pass propagation from exact predecessors, original causes of broken chains, actor-slot conflicts, and group-local cache reuse |
-| [Boundary past](boundary_past/README.md) | Exact candidate maxima and applied seed ancestry, including substitution of previously summarized memo entries |
+| [Boundary past](boundary_past/README.md) | Exact memo lookup, fill and union on one snapshot, and exact cutoff given the applied-clock contract |
 | [Incoming groups](incoming_groups/README.md) | Delivered/canonical equality, per-actor frontiers, attachment search and proof assembly, and exact unapplied rank order |
 | [Fragment selection](fragment_selection/README.md) | The greatest subset of proved fragment occurrences closed under boundary requirements |
 | [Actor clocks](actor_clock/README.md) | Conditional theorems: representing a closed past by maxima, preservation of causal closure, and exact accepted-set extension |
@@ -25,18 +25,22 @@ stages, but **not a full source-level proof of**
 contracts are linked by Rust adapters; Verus does not yet check that every
 adapter establishes the next kernel's preconditions. In particular:
 
-- The adapters form the provisional actor-author catalog, tag and concatenate
-  old/new candidates, and project decoded changes and graph lookups into the
-  member, dependency, rank, and author views. They resolve returned origins
-  and plan indices back to those same values.
-- The canonical caller must interpret boundary summaries against the exact
-  same graph snapshot, keep memo entries keyed by the root that they summarize,
-  combine each boundary summary, and supply the applied-clock cutoff. The
-  summary, traversal and clock contracts do not check this complete caller.
+- The adapters still have to supply faithful row observations: which changes
+  are applied, which provisional authors qualify, which graph/actor-table slots
+  identify applied sources, and which changes/tables correspond to each rank.
+  The production index and origin decoders now check the corresponding map
+  construction, not the accuracy of those graph/author lookups.
+- The memo now borrows a single immutable graph/candidate view and has a
+  checked lookup, fill, and union. The cutoff theorem still needs a proof at
+  the concrete group call site that the ancestry is resolved, has valid
+  chains and no equivocation, and is queried through the applied-clock
+  contract on that same snapshot.
 - The per-frontier adapters must use the correct attachment and established
-  author; pending deduplication assumes the stable delivery equality documented
-  in the completion harness. Plan and completion proofs rely on faithful
-  selection and graph projections between stages.
+  author. Pending deduplication has a checked member-set comparison, but
+  still depends on exact head and attachment equality and validated candidates.
+  Prepared admission carries only the selected proof payloads across apply;
+  the full relation between those proofs, members and graph effects is not
+  yet checked at the original entry point.
 
 Document application, Ed25519, graph/actor queries, and signature
 merge/reclamation, readiness, and draft pruning are external operations; the

@@ -142,6 +142,46 @@ pub(super) fn positions<K: Copy + Eq + Hash>(hashes: &[K]) -> HashMap<K, usize> 
     out
 }
 
+/// Move exactly the selected payloads out of the verified occurrence list.
+/// The verified-list indices do not have to survive document apply.
+#[cfg_attr(automerge_verus, verus_spec(out =>
+    requires ordered_selection(selected@,items@.len()),
+        forall|j:int| 0<=j<items@.len() ==> #[trigger] modeled(payload,items@[j]),
+    ensures out@.len()==selected@.len(),
+        forall|i:int| 0<=i<selected@.len() ==> #[trigger] out@[i]==model(payload,items@[selected@[i] as int]),
+))]
+pub(super) fn take_selected<T, V>(
+    items: Vec<T>,
+    selected: &[usize],
+    payload: impl Fn(T) -> V,
+) -> Vec<V> {
+    #[cfg(automerge_verus)]
+    proof_decl! { let ghost input=items@; }
+    let mut out = Vec::with_capacity(selected.len());
+    let mut next = 0;
+    #[cfg_attr(automerge_verus, verus_spec(iter =>
+        invariant iter.seq().len()==input.len(), ordered_selection(selected@,input.len()),
+            forall|j:int| 0<=j<input.len() ==> #[trigger] iter.seq()[j]==(j as usize,input[j]),
+            forall|j:int| 0<=j<input.len() ==> modeled(payload,#[trigger] input[j]),
+            emitted(input,selected@,payload,iter.index(),next,out@),
+        ensures emitted(input,selected@,payload,input.len() as int,next,out@),
+    ))]
+    for (i, item) in items.into_iter().enumerate() {
+        if next < selected.len() && selected[next] == i {
+            #[cfg(automerge_verus)]
+            proof! { assert(modeled(payload,item)); }
+            let value = payload(item);
+            #[cfg(automerge_verus)]
+            proof! { assert(value==model(payload,item)); }
+            out.push(value);
+            next += 1;
+        }
+    }
+    #[cfg(automerge_verus)]
+    proof! { finish_selection(input,selected@,payload,next,out@); }
+    out
+}
+
 /// Materialize the plan in the same order without another sort or filter.
 #[cfg_attr(automerge_verus, verus_spec(out =>
     requires forall|i:int| 0<=i<order@.len() ==> modeled(resolve,#[trigger] order@[i]),

@@ -37,10 +37,13 @@ mod actor_chains;
 mod actor_slots;
 mod apply_order;
 mod author_checks;
+mod author_projection;
 mod boundary_cutoff;
 mod boundary_memo;
 mod boundary_summary;
+mod candidate_origin;
 mod canonical_shape;
+mod delivery;
 mod evaluation;
 mod evaluation_batch;
 mod group_membership;
@@ -50,11 +53,12 @@ mod intrinsic_shape;
 mod pending;
 mod plan_contents;
 mod publication;
+mod snapshot_index;
 mod topology;
 mod topology_input;
 mod walk;
 
-use pending::{Origin, Route};
+use pending::Route;
 pub(super) use publication::run as run_admission;
 use walk::{walk, Visit};
 
@@ -76,12 +80,7 @@ impl PendingGroup {
         {
             return false;
         }
-        let left: HashSet<_> = self.changes.iter().map(Change::hash).collect();
-        self.changes.len() == left.len()
-            && other
-                .changes
-                .iter()
-                .all(|change| left.contains(&change.hash()))
+        delivery::same_members(&self.changes, &other.changes, Change::hash)
     }
 }
 
@@ -101,10 +100,7 @@ impl PendingGroups {
     }
 }
 
-struct CandidateGroup {
-    origin: Origin,
-    group: PendingGroup,
-}
+type CandidateGroup = candidate_origin::Candidate<PendingGroup>;
 
 /// Unapplied candidate changes reachable from `ChangeGraph` without missing
 /// dependencies, annotated with topological order and inherited actor authors.
@@ -226,15 +222,25 @@ impl Incoming<'_> {
         groups: Vec<LoadedGroup>,
     ) -> Result<PreparedAdmission, AutomergeError> {
         let incoming = self.validate_incoming_batch(groups)?;
-        let candidates =
-            Self::collect_candidate_groups(self.state.pending.groups.clone(), incoming);
+        let candidates = candidate_origin::candidates(self.state.pending.groups.clone(), incoming);
         let ancestry = self.resolve_unapplied_ancestry(&candidates);
         let evaluated = self.verify_resolved_groups(&candidates, &ancestry)?;
-        let plan = self.plan_group_admission(&candidates, &ancestry, &evaluated)?;
+        let AdmissionPlan {
+            selected_verified_indices,
+            ordered_unapplied_hashes,
+            accepted_member_hashes,
+            remaining_candidate_indices,
+        } = self.plan_group_admission(&candidates, &ancestry, &evaluated)?;
+        let selected_proofs =
+            plan_contents::take_selected(evaluated.verified, &selected_verified_indices, |group| {
+                group.proof
+            });
         Ok(PreparedAdmission {
             candidates,
-            verified: evaluated.verified,
-            plan,
+            selected_proofs,
+            ordered_unapplied_hashes,
+            accepted_member_hashes,
+            remaining_candidate_indices,
         })
     }
 
@@ -244,19 +250,19 @@ impl Incoming<'_> {
         &self,
         groups: Vec<LoadedGroup>,
     ) -> Result<Vec<PendingGroup>, AutomergeError> {
-        let mut incoming_actor_authors: HashMap<ActorId, Option<Author<'static>>> = HashMap::new();
-
-        for group in &groups {
-            if let LoadedGroupBody::Changes(changes) = &group.body {
-                for change in changes {
-                    if change.seq() == 1 && !self.graph.has_change(&change.hash()) {
-                        incoming_actor_authors
-                            .entry(change.actor_id().clone())
-                            .or_insert_with(|| change.author().map(Author::into_owned));
-                    }
-                }
-            }
-        }
+        let incoming_actor_authors = snapshot_index::build(
+            &groups,
+            LoadedGroup::changes,
+            |change| {
+                (change.seq() == 1 && !self.graph.has_change(&change.hash())).then(|| {
+                    (
+                        change.actor_id().clone(),
+                        change.author().map(Author::into_owned),
+                    )
+                })
+            },
+            snapshot_index::Keep::First,
+        );
 
         evaluation_batch::validate_batch(
             groups,
@@ -476,35 +482,16 @@ impl Incoming<'_> {
 
     // --- Stage 2: Causal ancestry & actor-author resolution ---
 
-    fn collect_candidate_groups(
-        existing_pending: Vec<PendingGroup>,
-        incoming: Vec<PendingGroup>,
-    ) -> Vec<CandidateGroup> {
-        let mut candidates = Vec::with_capacity(existing_pending.len() + incoming.len());
-        candidates.extend(existing_pending.into_iter().map(|group| CandidateGroup {
-            origin: Origin::ExistingPending,
-            group,
-        }));
-        candidates.extend(incoming.into_iter().map(|group| CandidateGroup {
-            origin: Origin::IncomingBatch,
-            group,
-        }));
-        candidates
-    }
-
     fn resolve_unapplied_ancestry<'a>(
         &self,
         candidates: &'a [CandidateGroup],
     ) -> ResolvedAncestry<'a> {
-        let mut changes_by_hash: HashMap<ChangeHash, &'a Change> = HashMap::new();
-        for candidate in candidates {
-            for change in &candidate.group.changes {
-                let hash = change.hash();
-                if !self.graph.has_change(&hash) {
-                    changes_by_hash.entry(hash).or_insert(change);
-                }
-            }
-        }
+        let changes_by_hash = snapshot_index::build(
+            candidates,
+            |candidate| candidate.group.changes.as_slice(),
+            |change| (!self.graph.has_change(&change.hash())).then_some((change.hash(), change)),
+            snapshot_index::Keep::First,
+        );
 
         let hashes: Vec<_> = changes_by_hash.keys().copied().collect();
         let has_any_equivocation =
@@ -566,7 +553,7 @@ impl Incoming<'_> {
         HashMap<ChangeHash, Option<Author<'static>>>,
         HashMap<ChangeHash, ChangeHash>,
     ) {
-        use actor_chains::{AuthorSource, Candidate, Dependency, Resolution};
+        use actor_chains::{Candidate, Dependency};
 
         let rows: Vec<_> = resolved_topo
             .iter()
@@ -595,25 +582,21 @@ impl Incoming<'_> {
             })
             .collect();
 
-        let mut valid_authors = HashMap::new();
-        let mut broken_chain_cause = HashMap::new();
-        for (&hash, resolution) in resolved_topo.iter().zip(actor_chains::propagate(&rows)) {
-            match resolution {
-                Resolution::Linked(source) => {
-                    let author = match source {
-                        AuthorSource::Initial(index) => {
-                            changes_by_hash[&resolved_topo[index]].author()
-                        }
-                        AuthorSource::Applied(slot) => self.authors.get_author_for_actor(slot),
-                    };
-                    valid_authors.insert(hash, author.map(Author::into_owned));
-                }
-                Resolution::Broken(index) => {
-                    broken_chain_cause.insert(hash, resolved_topo[index]);
-                }
-            }
-        }
-        (valid_authors, broken_chain_cause)
+        let outcomes = actor_chains::propagate(&rows);
+        author_projection::materialize(
+            resolved_topo,
+            &outcomes,
+            |index| {
+                changes_by_hash[&resolved_topo[index]]
+                    .author()
+                    .map(Author::into_owned)
+            },
+            |slot| {
+                self.authors
+                    .get_author_for_actor(slot)
+                    .map(Author::into_owned)
+            },
+        )
     }
 
     // --- Stage 3: Canonical fragment & attached proof verification ---
@@ -943,47 +926,40 @@ impl Incoming<'_> {
 /// Owned input and plan survive releasing the immutable signing view before apply.
 pub(super) struct PreparedAdmission {
     candidates: Vec<CandidateGroup>,
-    verified: Vec<VerifiedGroup>,
-    plan: AdmissionPlan,
+    selected_proofs: Vec<SignatureStore>,
+    ordered_unapplied_hashes: Vec<ChangeHash>,
+    accepted_member_hashes: Vec<ChangeHash>,
+    remaining_candidate_indices: HashSet<usize>,
 }
 
 impl PreparedAdmission {
     pub(super) fn changes(&self) -> Vec<&Change> {
-        let by_hash: HashMap<ChangeHash, &Change> = self
-            .candidates
-            .iter()
-            .flat_map(|candidate| {
-                candidate
-                    .group
-                    .changes
-                    .iter()
-                    .map(|change| (change.hash(), change))
-            })
-            .collect();
-        plan_contents::ordered_refs(&self.plan.ordered_unapplied_hashes, |hash| by_hash[&hash])
+        let by_hash = snapshot_index::build(
+            &self.candidates,
+            |candidate| candidate.group.changes.as_slice(),
+            |change| Some((change.hash(), change)),
+            snapshot_index::Keep::Last,
+        );
+        plan_contents::ordered_refs(&self.ordered_unapplied_hashes, |hash| by_hash[&hash])
     }
 
     pub(super) fn complete(self, signing: &mut SigningDocument<'_>) {
         use publication::Publish;
 
-        let signing = publication::publish(
-            signing,
-            &self.plan.selected_verified_indices,
-            |signing, step| {
-                match step {
-                    Publish::MergeProof(index) => {
-                        Self::merge_selected_proof(signing, &self.verified[index].proof);
-                    }
-                    Publish::IncludeMembers => signing
-                        .state
-                        .accepted
-                        .include_prepared(signing.graph, &self.plan.accepted_member_hashes),
-                    Publish::Reclaim => signing.state.reclaim_covered(signing.graph),
-                    Publish::RemoveDrafts => signing.state.remove_published_drafts(signing.graph),
+        let signing = publication::publish(signing, &self.selected_proofs, |signing, step| {
+            match step {
+                Publish::MergeProof(proof) => {
+                    Self::merge_selected_proof(signing, proof);
                 }
-                signing
-            },
-        );
+                Publish::IncludeMembers => signing
+                    .state
+                    .accepted
+                    .include_prepared(signing.graph, &self.accepted_member_hashes),
+                Publish::Reclaim => signing.state.reclaim_covered(signing.graph),
+                Publish::RemoveDrafts => signing.state.remove_published_drafts(signing.graph),
+            }
+            signing
+        });
         let incoming = Incoming {
             graph: signing.graph,
             ops: signing.ops,
@@ -992,7 +968,7 @@ impl PreparedAdmission {
         };
         let retained = pending::rebuild(
             self.candidates,
-            |index| self.plan.remaining_candidate_indices.contains(&index),
+            |index| self.remaining_candidate_indices.contains(&index),
             |candidate| incoming.pending_group_remains_viable(&candidate.group),
             |left, right| left.group.same_delivery(&right.group),
         );

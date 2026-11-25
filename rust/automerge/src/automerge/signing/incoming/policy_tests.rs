@@ -88,3 +88,70 @@ fn topology_counts_missing_and_repeated_parents_without_reversing_applied_or_mis
     assert_eq!(waiting, [0, 3]);
     assert_eq!(reverse, [vec![1, 1], vec![]]);
 }
+
+#[test]
+fn indexes_keep_the_requested_occurrence_even_when_the_first_payload_is_none() {
+    use super::snapshot_index::{build, Keep};
+    let groups = [
+        vec![(1, None), (2, Some(20))],
+        vec![(1, Some(10)), (3, Some(30))],
+    ];
+    let first = build(&groups, Vec::as_slice, |row| Some(*row), Keep::First);
+    let last = build(&groups, Vec::as_slice, |row| Some(*row), Keep::Last);
+    assert_eq!(
+        first,
+        HashMap::from([(1, None), (2, Some(20)), (3, Some(30))])
+    );
+    assert_eq!(
+        last,
+        HashMap::from([(1, Some(10)), (2, Some(20)), (3, Some(30))])
+    );
+}
+
+#[test]
+fn a_resolved_authorless_change_is_neither_missing_nor_broken() {
+    use super::actor_chains::{AuthorSource, Resolution};
+    use super::author_projection;
+    let hashes = [10, 20, 30];
+    let (authors, broken) = author_projection::materialize(
+        &hashes,
+        &[
+            Resolution::Linked(AuthorSource::Initial(0)),
+            Resolution::Broken(1),
+            Resolution::Linked(AuthorSource::Applied(5)),
+        ],
+        |root| match root {
+            0 => None,
+            _ => unreachable!(),
+        },
+        |slot| match slot {
+            5 => Some(42),
+            _ => unreachable!(),
+        },
+    );
+    assert_eq!(authors, HashMap::from([(10, None), (30, Some(42))]));
+    assert_eq!(broken, HashMap::from([(20, 20)]));
+}
+
+#[test]
+fn prepared_payloads_are_selected_by_verified_occurrence_order() {
+    let selected = super::plan_contents::take_selected(
+        vec!["unselected", "first", "second", "discard"],
+        &[1, 2],
+        |value| value,
+    );
+    assert_eq!(selected, ["first", "second"]);
+}
+
+#[test]
+fn delivery_members_are_compared_as_sets_and_candidate_origin_is_preserved() {
+    use super::{candidate_origin, delivery, pending::Origin};
+    assert!(delivery::same_members(&[1, 2], &[2, 1], |x| *x));
+    assert!(!delivery::same_members(&[1, 1], &[1, 2], |x| *x));
+    assert!(!delivery::same_members(&[1, 2], &[1, 3], |x| *x));
+    let tagged = candidate_origin::candidates(vec!["old"], vec!["new"]);
+    assert!(matches!(tagged[0].origin, Origin::ExistingPending));
+    assert_eq!(tagged[0].group, "old");
+    assert!(matches!(tagged[1].origin, Origin::IncomingBatch));
+    assert_eq!(tagged[1].group, "new");
+}

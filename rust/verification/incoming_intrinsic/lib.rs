@@ -25,6 +25,9 @@ mod membership_proof;
 mod plan_contents;
 mod plan_spec;
 mod shape_spec;
+#[path = "../../automerge/src/automerge/signing/incoming/snapshot_index.rs"]
+mod snapshot_index;
+mod snapshot_spec;
 #[path = "../../automerge/src/automerge/signing/incoming/topology_input.rs"]
 mod topology_input;
 mod topology_input_spec;

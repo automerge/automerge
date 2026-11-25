@@ -61,4 +61,23 @@ pub(crate) proof fn position_added<K>(hashes:Seq<K>,i:int,prior:Map<K,usize>,out
     hashes.take(i).lemma_push_to_set_commute(hashes[i]);
 }
 
+pub(crate) open spec fn ordered_selection(indices:Seq<usize>,len:nat)->bool {
+    &&& len<=usize::MAX && indices.len()<=usize::MAX
+    &&& forall|i:int| 0<=i<indices.len() ==> #[trigger] indices[i]<len
+    &&& forall|i:int,j:int| 0<=i<j<indices.len() ==> #[trigger] indices[i]<#[trigger] indices[j]
+}
+
+pub(crate) open spec fn emitted<T,V,F:Fn(T)->V>(input:Seq<T>,selected:Seq<usize>,payload:F,processed:int,next:usize,out:Seq<V>)->bool {
+    &&& next<=selected.len() && out.len()==next
+    &&& forall|j:int| 0<=j<selected.len() ==> (j<next <==> (#[trigger] selected[j])<processed)
+    &&& forall|j:int| 0<=j<next ==> #[trigger] out[j]==model(payload,input[selected[j] as int])
+}
+
+pub(crate) proof fn finish_selection<T,V,F:Fn(T)->V>(input:Seq<T>,selected:Seq<usize>,payload:F,next:usize,out:Seq<V>)
+    requires ordered_selection(selected,input.len()),emitted(input,selected,payload,input.len() as int,next,out),
+    ensures out.len()==selected.len(),forall|i:int| 0<=i<selected.len() ==> #[trigger] out[i]==model(payload,input[selected[i] as int]),
+{
+    if next<selected.len() { assert(selected[next as int]<input.len()); }
+}
+
 } // verus!
