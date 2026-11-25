@@ -18,7 +18,7 @@
 //!    contents, then `PreparedAdmission::complete` merges proofs, publishes
 //!    history and removes completed or invalidated pending groups.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use crate::admission::{select_fragments, AcceptedHistory};
 use crate::change_graph::ChangeGraph;
@@ -39,6 +39,9 @@ mod apply_order;
 mod author_checks;
 mod boundary_summary;
 mod group_membership;
+mod intrinsic_chain;
+mod intrinsic_index;
+mod intrinsic_shape;
 mod pending;
 mod publication;
 mod topology;
@@ -279,53 +282,46 @@ impl Incoming<'_> {
         changes: &'a [Change],
         incoming_actor_seqs: &mut HashMap<(ActorId, u64), ChangeHash>,
     ) -> Result<HashMap<ChangeHash, &'a Change>, AutomergeError> {
-        let mut in_group = HashMap::with_capacity(changes.len());
-        for change in changes {
-            let seq = change.seq();
-            if seq == 0 || u32::try_from(seq).is_err() {
-                return Err(AutomergeError::InvalidSeq(seq));
-            }
-            if change.author().is_some() && seq != 1 {
-                return Err(AutomergeError::author_on_non_initial_seq(change));
-            }
-            let hash = change.hash();
-            if in_group.insert(hash, change).is_some() {
-                return Err(SigningError::from(InvalidFragment::DuplicateMember(hash)).into());
-            }
-            if !self.graph.has_change(&hash) && self.has_actor_seq(change) {
-                return Err(AutomergeError::duplicate_seq(change));
-            }
-            let key = (change.actor_id().clone(), seq);
-            if let Some(&existing_hash) = incoming_actor_seqs.get(&key) {
-                if existing_hash != hash {
-                    return Err(AutomergeError::duplicate_seq(change));
+        use intrinsic_index::{Fault, Member};
+
+        intrinsic_index::index(
+            changes,
+            |change| Member {
+                actor: change.actor_id().clone(),
+                seq: change.seq(),
+                hash: change.hash(),
+                has_author: change.author().is_some(),
+                conflicts_with_applied: !self.graph.has_change(&change.hash())
+                    && self.has_actor_seq(change),
+            },
+            incoming_actor_seqs,
+        )
+        .map_err(|(index, fault)| {
+            let change = &changes[index];
+            match fault {
+                Fault::Sequence => AutomergeError::InvalidSeq(change.seq()),
+                Fault::MisplacedAuthor => AutomergeError::author_on_non_initial_seq(change),
+                Fault::DuplicateHash => {
+                    SigningError::from(InvalidFragment::DuplicateMember(change.hash())).into()
                 }
-            } else {
-                incoming_actor_seqs.insert(key, hash);
+                Fault::ConflictingSlot => AutomergeError::duplicate_seq(change),
             }
-        }
-        Ok(in_group)
+        })
     }
 
     fn find_single_reachable_head(
         changes: &[Change],
         in_group: &HashMap<ChangeHash, &Change>,
     ) -> Result<ChangeHash, AutomergeError> {
-        let mut has_dependent = HashSet::new();
-        for change in changes {
-            for dep in change.deps() {
-                if in_group.contains_key(dep) {
-                    has_dependent.insert(*dep);
-                }
-            }
-        }
-        let mut heads = changes
-            .iter()
-            .filter(|change| !has_dependent.contains(&change.hash()));
-        let (Some(head_change), None) = (heads.next(), heads.next()) else {
-            return Err(SigningError::from(InvalidFragment::NotSingleHeaded).into());
-        };
-        let head = head_change.hash();
+        use intrinsic_shape::LevelFault;
+
+        let members: Vec<_> = changes.iter().map(Change::hash).collect();
+        let head = intrinsic_shape::unique_head(
+            &members,
+            |node| in_group[&node].deps(),
+            |dep| in_group.contains_key(&dep),
+        )
+        .ok_or_else(|| SigningError::from(InvalidFragment::NotSingleHeaded))?;
 
         let reachable = walk(
             vec![head],
@@ -339,53 +335,38 @@ impl Incoming<'_> {
             },
             |_| Visit::KeepAndExpand,
         );
-        if reachable.len() != changes.len() {
+        if !intrinsic_shape::spans(&members, &reachable) {
             return Err(SigningError::from(InvalidFragment::NotSingleHeaded).into());
         }
 
-        let level = head.fragment_level();
-        if level == 0 {
-            if changes.len() != 1 {
-                return Err(SigningError::from(InvalidFragment::NonSingletonLoose(head)).into());
-            }
-        } else {
-            for change in changes {
-                let member = change.hash();
-                if member != head && member.fragment_level() >= level {
-                    return Err(SigningError::from(InvalidFragment::InvalidMemberLevel {
-                        head,
-                        member,
-                    })
-                    .into());
-                }
-            }
-        }
+        intrinsic_shape::levels(&members, head, |hash| hash.fragment_level()).map_err(|fault| {
+            SigningError::from(match fault {
+                LevelFault::NonSingletonLoose => InvalidFragment::NonSingletonLoose(head),
+                LevelFault::Member(member) => InvalidFragment::InvalidMemberLevel { head, member },
+            })
+        })?;
         Ok(head)
     }
 
     fn check_intra_group_actor_chains(
         changes: &[Change],
     ) -> Result<HashMap<&ActorId, Option<Author<'_>>>, AutomergeError> {
-        let mut by_actor: BTreeMap<&ActorId, Vec<&Change>> = BTreeMap::new();
-        for change in changes {
-            by_actor.entry(change.actor_id()).or_default().push(change);
-        }
-        let mut group_seq1_authors = HashMap::new();
-        for (actor, actor_changes) in &mut by_actor {
-            actor_changes.sort_unstable_by_key(|change| change.seq());
-            if actor_changes[0].seq() == 1 {
-                group_seq1_authors.insert(*actor, actor_changes[0].author());
-            }
-            for pair in actor_changes.windows(2) {
-                if pair[1].seq() != pair[0].seq() + 1 || !pair[1].deps().contains(&pair[0].hash()) {
-                    return Err(SigningError::from(InvalidFragment::BrokenActorChain(
-                        pair[1].hash(),
-                    ))
-                    .into());
-                }
-            }
-        }
-        Ok(group_seq1_authors)
+        let mut rows: Vec<_> = changes
+            .iter()
+            .enumerate()
+            .map(|(index, change)| (change.actor_id(), change.seq(), index))
+            .collect();
+        intrinsic_chain::check(&mut rows, |predecessor, child| {
+            changes[child].deps().contains(&changes[predecessor].hash())
+        })
+        .map_err(|child| {
+            SigningError::from(InvalidFragment::BrokenActorChain(changes[child].hash()))
+        })?;
+        Ok(changes
+            .iter()
+            .filter(|change| change.seq() == 1)
+            .map(|change| (change.actor_id(), change.author()))
+            .collect())
     }
 
     fn verify_known_author_frontiers(
