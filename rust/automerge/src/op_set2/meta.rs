@@ -1,5 +1,6 @@
 use super::types::ScalarValue;
-use hexane::{lebsize, ulebsize, PackError};
+use hexane::PackError;
+use hexane::{lebsize, ulebsize};
 
 #[derive(Debug)]
 pub(crate) enum ValueType {
@@ -98,28 +99,33 @@ impl From<&[u8]> for ValueMeta {
     }
 }
 
-impl hexane::ColumnValue for ValueMeta {
-    type Encoding<C: hexane::Codec> = hexane::RleEncoding<ValueMeta, C>;
+// A value's metadata is stored in a column as the number it is.
+impl hexane::Newtype for ValueMeta {
+    type Base = u64;
+
+    fn to_base(self) -> u64 {
+        self.0
+    }
+
+    fn from_base(b: u64) -> Result<Self, PackError> {
+        Ok(ValueMeta(b))
+    }
 }
 
-impl hexane::RleValue for ValueMeta {
-    fn try_unpack<C: hexane::Codec>(data: &[u8]) -> Result<(usize, ValueMeta), PackError> {
-        let (n, v) = C::try_read_unsigned(data)?;
-        Ok((n, ValueMeta(v)))
-    }
-    fn pack<C: hexane::Codec>(value: ValueMeta, out: &mut Vec<u8>) -> bool {
-        out.extend(C::encode_unsigned(value.0));
-        true
-    }
-}
+// A prefix column of metadata sums the values' lengths, in a `u64`: the
+// sum before a value is where its bytes start in the value column.
+impl hexane::Amount for ValueMeta {
+    type Sum = u64;
 
-impl hexane::PrefixValue for ValueMeta {
-    type Prefix = u64;
-    fn accumulate(target: &mut u64, val: ValueMeta) {
-        *target += val.length() as u64;
+    // a length is less than 2^60 (the number's top 60 bits), so that any
+    // 16 of them add up to less than 2^64; of more, an edit checks that
+    // the sums still fit, from the column's sum and what it puts in
+    fn room_len() -> usize {
+        16
     }
-    fn accumulate_run(target: &mut u64, run: &hexane::Run<ValueMeta>) {
-        *target += run.value.length() as u64 * run.count as u64;
+
+    fn part_of(v: ValueMeta) -> u64 {
+        v.0 >> 4
     }
 }
 
@@ -140,11 +146,11 @@ mod tests {
             ValueMeta(3),             // length 0
             ValueMeta(4),             // length 0
         ];
-        let col = PrefixColumn::<ValueMeta>::from_values(data);
+        let col = PrefixColumn::<ValueMeta>::from_values(&data);
 
         // PrefixIter yields PrefixedValues; total() is the running sum of
         // length() up to and including the current item.
-        let mut iter = col.iter();
+        let mut iter = col.prefix_iter();
 
         let pv = iter.next().unwrap();
         assert_eq!(pv.value, ValueMeta(1));
@@ -163,12 +169,12 @@ mod tests {
         assert_eq!(pv.total(), 40);
 
         // nth(3) jumps to index 3 (the fourth item)
-        let pv = col.iter().nth(3).unwrap();
+        let pv = col.prefix_iter().nth(3).unwrap();
         assert_eq!(pv.value, ValueMeta(3));
         assert_eq!(pv.total(), 40);
 
         // iter_range(3..5) starts at index 3 with the cumulative prefix carried
-        let mut iter = col.iter_range(3..5);
+        let mut iter = col.prefix_iter_range(3..5);
         let pv = iter.next().unwrap();
         assert_eq!(pv.value, ValueMeta(3));
         assert_eq!(pv.total(), 40);

@@ -198,8 +198,6 @@ where
 
     mapper.remap_actors(ops, change_actor);
 
-    use hexane::EncoderApi;
-
     let mapping = &mapper.mapping;
     let remap_opt_actor = |actor: Option<ActorIdx>| actor.map(|a| mapping[usize::from(a)].unwrap());
     let remap_actor = |a: ActorIdx| mapping[usize::from(a)].unwrap();

@@ -179,6 +179,9 @@ impl<I: Iterator + Debug + Clone + Shiftable, S: Skipper + Shiftable> Shiftable 
 impl<I: Iterator + Debug + Clone, S: Skipper> Iterator for SkipIter<I, S> {
     type Item = I::Item;
 
+    // in line in the loop that drives it (`seq_length`'s `count`), so
+    // that the inner iterator's moves are too
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let skip = self.skip.next()?;
         if skip == 0 {
@@ -312,17 +315,23 @@ where
 /// represnting ranges of `false` values in a boolean column. This can then
 /// be used by other iterators to skip past elements for which the boolean
 /// column is false
+///
+/// The column is a plain one, or the values of a prefix column (`K` is the
+/// kind of index the column is kept with).
 #[derive(Clone, Default, Debug)]
-pub(crate) struct BoolColumnSkipper<'a> {
-    iter: hexane::Iter<'a, bool>,
+pub(crate) struct BoolColumnSkipper<'a, K: hexane::Index<bool> = hexane::LenIndex> {
+    iter: hexane::Iter<'a, bool, hexane::Leb128, K>,
     range: Range<usize>,
     cursor: usize,
     pending: usize,
     exhausted: bool,
 }
 
-impl<'a> BoolColumnSkipper<'a> {
-    pub(crate) fn new(iter: hexane::Iter<'a, bool>, range: Range<usize>) -> Self {
+impl<'a, K: hexane::Index<bool>> BoolColumnSkipper<'a, K> {
+    pub(crate) fn new(
+        iter: hexane::Iter<'a, bool, hexane::Leb128, K>,
+        range: Range<usize>,
+    ) -> Self {
         let cursor = range.start;
         Self {
             iter,
@@ -334,9 +343,9 @@ impl<'a> BoolColumnSkipper<'a> {
     }
 }
 
-impl Skipper for BoolColumnSkipper<'_> {}
+impl<K: hexane::Index<bool> + std::fmt::Debug> Skipper for BoolColumnSkipper<'_, K> {}
 
-impl Shiftable for BoolColumnSkipper<'_> {
+impl<K: hexane::Index<bool> + std::fmt::Debug> Shiftable for BoolColumnSkipper<'_, K> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         self.range = range.clone();
         self.cursor = range.start;
@@ -357,7 +366,7 @@ impl Shiftable for BoolColumnSkipper<'_> {
     }
 }
 
-impl Iterator for BoolColumnSkipper<'_> {
+impl<K: hexane::Index<bool>> Iterator for BoolColumnSkipper<'_, K> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {

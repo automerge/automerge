@@ -519,13 +519,13 @@ impl Columns {
         let mut key_str = self.key_str.iter();
         let mut key_a = self.key_actor.iter();
         let mut key_c = self.key_ctr.iter();
-        let mut meta = self.value_meta.values().iter();
+        let mut meta = self.value_meta.iter();
         let mut value = self.value.iter();
-        let mut succ = self.succ_count.values().iter();
-        let mut insert = self.insert.values().iter();
-        let mut text = self.index.text.values().iter();
+        let mut succ = self.succ_count.iter();
+        let mut insert = self.insert.iter();
+        let mut text = self.index.text.iter();
         let mut vis = self.index.visible.iter();
-        let mut top = self.index.top.values().iter();
+        let mut top = self.index.top.iter();
         let mut pos = 0;
         log!("::::: id       obj      key        elem     i v t tx act suc value");
         loop {
