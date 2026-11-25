@@ -1043,7 +1043,7 @@ impl PreparedAdmission {
         signing
             .state
             .accepted
-            .include_hashes(signing.graph, self.plan.accepted_member_hashes);
+            .include_prepared(signing.graph, &self.plan.accepted_member_hashes);
         signing.state.reclaim_covered(signing.graph);
         signing.state.remove_published_drafts(signing.graph);
         let incoming = Incoming {

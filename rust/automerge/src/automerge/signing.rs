@@ -153,6 +153,15 @@ impl AcceptedClock {
         }
         self.clock = next;
     }
+    fn include_prepared(&mut self, graph: &ChangeGraph, members: &[ChangeHash]) {
+        let mut next = self.clock.clone();
+        next.include_members(members, |hash| {
+            graph
+                .actor_seq_for_hash(&hash)
+                .expect("accepted change belongs to the applied graph")
+        });
+        self.clock = next;
+    }
 }
 
 /// The document's signing mode, together with the state required by that mode.

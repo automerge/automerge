@@ -3,6 +3,8 @@ use crate::types::OpId;
 
 use std::num::NonZeroU32;
 
+mod seq_slots;
+
 /// A [`Clock`] is a vector clock for a set of actors.
 ///
 /// Each slot holds the greatest op counter seen for that actor.
@@ -52,22 +54,15 @@ impl SeqClock {
     }
 
     pub(crate) fn include(&mut self, actor_idx: usize, data: Option<u32>) -> bool {
-        if let Some(data) = data {
-            let slots = self.0.as_mut_slice();
-            match slots[actor_idx] {
-                None => {
-                    slots[actor_idx] = NonZeroU32::try_from(data).ok();
-                    true
-                }
-                Some(old_data) if old_data.get() < data => {
-                    slots[actor_idx] = NonZeroU32::try_from(data).ok();
-                    true
-                }
-                _ => false,
-            }
-        } else {
-            false
-        }
+        seq_slots::include(self.0.as_mut_slice(), actor_idx, data)
+    }
+
+    pub(crate) fn include_members<K: Copy>(
+        &mut self,
+        members: &[K],
+        lookup: impl Fn(K) -> (usize, u32),
+    ) {
+        seq_slots::include_members(self.0.as_mut_slice(), members, lookup);
     }
 
     pub(crate) fn merge(a: &mut Self, b: &Self) {

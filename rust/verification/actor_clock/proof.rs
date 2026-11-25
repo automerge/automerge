@@ -5,7 +5,7 @@ verus! {
 
 // Each actor's exact predecessor is a graph edge. Follow those edges
 // until reaching the target sequence, then use uniqueness to identify x.
-proof fn chain_prefix<K, A>(history: History<K, A>, past: Set<K>, x: K, witness: K)
+pub(crate) proof fn chain_prefix<K, A>(history: History<K, A>, past: Set<K>, x: K, witness: K)
     requires actor_chains(history), causal_set(history, past), history.nodes.contains(x),
         past.contains(witness), (history.actor)(x) == (history.actor)(witness),
         (history.sequence)(x) <= (history.sequence)(witness),
