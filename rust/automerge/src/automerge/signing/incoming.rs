@@ -38,13 +38,18 @@ mod actor_slots;
 mod apply_order;
 mod author_checks;
 mod boundary_summary;
+mod canonical_shape;
+mod evaluation;
+mod evaluation_batch;
 mod group_membership;
 mod intrinsic_chain;
 mod intrinsic_index;
 mod intrinsic_shape;
 mod pending;
+mod plan_contents;
 mod publication;
 mod topology;
+mod topology_input;
 mod walk;
 
 use pending::{Origin, Route};
@@ -205,10 +210,7 @@ impl Incoming<'_> {
         &self,
         groups: Vec<LoadedGroup>,
     ) -> Result<Vec<PendingGroup>, AutomergeError> {
-        let mut incoming_actor_seqs: HashMap<(ActorId, u64), ChangeHash> = HashMap::new();
         let mut incoming_actor_authors: HashMap<ActorId, Option<Author<'static>>> = HashMap::new();
-        let mut prepared_keys: HashMap<Author<'static>, ed25519::VerifyingAuthor<'static>> =
-            HashMap::new();
 
         for group in &groups {
             if let LoadedGroupBody::Changes(changes) = &group.body {
@@ -222,17 +224,19 @@ impl Incoming<'_> {
             }
         }
 
-        groups
-            .into_iter()
-            .map(|group| {
-                self.validate_incoming_group(
+        evaluation_batch::validate_batch(
+            groups,
+            (HashMap::new(), HashMap::new()),
+            |(mut incoming_actor_seqs, mut prepared_keys), group| {
+                let validated = self.validate_incoming_group(
                     group,
                     &mut incoming_actor_seqs,
                     &incoming_actor_authors,
                     &mut prepared_keys,
-                )
-            })
-            .collect()
+                );
+                ((incoming_actor_seqs, prepared_keys), validated)
+            },
+        )
     }
 
     fn validate_incoming_group(
@@ -495,34 +499,27 @@ impl Incoming<'_> {
         // unapplied dependency occurrence contributes one to the count;
         // exactly those with a candidate parent have a reverse edge to
         // subtract later. Applied dependencies contribute neither.
-        let index_by_hash: HashMap<_, _> = hashes
-            .iter()
-            .enumerate()
-            .map(|(index, &hash)| (hash, index))
-            .collect();
-        let mut waiting = vec![0; hashes.len()];
-        let mut dependents = vec![Vec::new(); hashes.len()];
-        for (index, hash) in hashes.iter().enumerate() {
-            for dep in changes_by_hash[hash].deps() {
-                if !self.graph.has_change(dep) {
-                    waiting[index] += 1;
-                    if let Some(&parent) = index_by_hash.get(dep) {
-                        dependents[parent].push(index);
-                    }
+        let index_by_hash = plan_contents::positions(hashes);
+        let (waiting, dependents) = topology_input::build(
+            hashes,
+            |hash| changes_by_hash[&hash].deps(),
+            |dep| {
+                if self.graph.has_change(&dep) {
+                    topology_input::Parent::Applied
+                } else if let Some(&parent) = index_by_hash.get(&dep) {
+                    topology_input::Parent::Candidate(parent)
+                } else {
+                    topology_input::Parent::Missing
                 }
-            }
-        }
+            },
+        );
         drop(index_by_hash);
 
         let resolved_topo: Vec<_> = topology::resolve(&dependents, waiting)
             .into_iter()
             .map(|index| hashes[index])
             .collect();
-        let topo_rank = resolved_topo
-            .iter()
-            .enumerate()
-            .map(|(rank, &hash)| (hash, rank))
-            .collect();
+        let topo_rank = plan_contents::positions(&resolved_topo);
         (resolved_topo, topo_rank)
     }
 
@@ -592,36 +589,40 @@ impl Incoming<'_> {
         candidates: &[CandidateGroup],
         ancestry: &ResolvedAncestry<'_>,
     ) -> Result<EvaluatedGroups, AutomergeError> {
-        let mut verified = Vec::new();
-        let mut waiting_candidate_indices = Vec::new();
-        let mut boundary_memo = BoundaryPastMemo::default();
+        use evaluation_batch::Outcome;
 
-        for (candidate_index, candidate) in candidates.iter().enumerate() {
-            let evaluation =
-                self.evaluate_single_group(&candidate.group, ancestry, &mut boundary_memo);
-            match pending::route(candidate.origin, evaluation)? {
-                Route::Evaluated(GroupEvaluation::WaitingForAncestry) => {
-                    waiting_candidate_indices.push(candidate_index);
-                }
-                Route::Evaluated(GroupEvaluation::Verified { fragment, proof }) => {
-                    verified.push(VerifiedGroup {
-                        candidate_index,
-                        fragment,
-                        proof,
+        let (waiting_candidate_indices, verified) = evaluation_batch::assess(
+            candidates,
+            BoundaryPastMemo::default(),
+            |mut memo, candidate| {
+                let evaluation = self.evaluate_single_group(&candidate.group, ancestry, &mut memo);
+                let outcome =
+                    pending::route(candidate.origin, evaluation).map(|route| match route {
+                        Route::Evaluated(GroupEvaluation::WaitingForAncestry) => Outcome::Waiting,
+                        Route::Evaluated(GroupEvaluation::Verified { fragment, proof }) => {
+                            Outcome::Verified((fragment, proof))
+                        }
+                        Route::Disproved(error) => {
+                            tracing::debug!(
+                                head = %candidate.group.head,
+                                reason = %error,
+                                "dropping disproved pending group"
+                            );
+                            Outcome::Dropped
+                        }
                     });
-                }
-                Route::Disproved(error) => {
-                    tracing::debug!(
-                        head = %candidate.group.head,
-                        reason = %error,
-                        "dropping disproved pending group"
-                    );
-                }
-            }
-        }
-
+                (memo, outcome)
+            },
+        )?;
         Ok(EvaluatedGroups {
-            verified,
+            verified: verified
+                .into_iter()
+                .map(|(candidate_index, (fragment, proof))| VerifiedGroup {
+                    candidate_index,
+                    fragment,
+                    proof,
+                })
+                .collect(),
             waiting_candidate_indices,
         })
     }
@@ -632,39 +633,53 @@ impl Incoming<'_> {
         ancestry: &ResolvedAncestry<'_>,
         boundary_memo: &mut BoundaryPastMemo,
     ) -> Result<GroupEvaluation, AutomergeError> {
-        if let Some(&cause) = group
-            .changes
-            .iter()
-            .find_map(|c| ancestry.broken_chain_cause.get(&c.hash()))
-        {
-            return Err(SigningError::from(InvalidFragment::BrokenActorChain(cause)).into());
-        }
-
-        let all_resolved = group.changes.iter().all(|change| {
+        let status = evaluation::ancestry(&group.changes, |change| {
             let hash = change.hash();
-            self.graph.has_change(&hash) || ancestry.valid_authors.contains_key(&hash)
-        });
-        if !all_resolved {
-            return Ok(GroupEvaluation::WaitingForAncestry);
-        }
-
-        if ancestry.has_any_equivocation {
-            if let Some(conflict) =
-                self.find_ancestry_equivocation(&group.head, &ancestry.changes_by_hash)
-            {
-                return Err(AutomergeError::duplicate_seq(conflict));
+            if let Some(&cause) = ancestry.broken_chain_cause.get(&hash) {
+                Err(SigningError::from(InvalidFragment::BrokenActorChain(cause)).into())
+            } else {
+                Ok(self.graph.has_change(&hash) || ancestry.valid_authors.contains_key(&hash))
             }
-        }
+        });
+        let (_, result) = evaluation::decide(
+            status,
+            boundary_memo,
+            || {
+                ancestry
+                    .has_any_equivocation
+                    .then(|| {
+                        self.find_ancestry_equivocation(&group.head, &ancestry.changes_by_hash)
+                            .map(AutomergeError::duplicate_seq)
+                    })
+                    .flatten()
+            },
+            |memo| {
+                let canonical =
+                    self.derive_canonical_fragment(group.head, &ancestry.changes_by_hash, memo);
+                let group_hashes = group.changes.iter().map(Change::hash).collect();
+                let result = if group_membership::matches(&canonical.members, &group_hashes) {
+                    Ok(canonical)
+                } else {
+                    Err(
+                        SigningError::from(InvalidFragment::NonCanonicalMembership(group.head))
+                            .into(),
+                    )
+                };
+                (memo, result)
+            },
+            || self.verify_group_evidence(group, ancestry),
+        );
+        result.map(|resolution| match resolution {
+            Some((fragment, proof)) => GroupEvaluation::Verified { fragment, proof },
+            None => GroupEvaluation::WaitingForAncestry,
+        })
+    }
 
-        let canonical =
-            self.derive_canonical_fragment(group.head, &ancestry.changes_by_hash, boundary_memo);
-        let group_hashes: HashSet<ChangeHash> = group.changes.iter().map(Change::hash).collect();
-        if !group_membership::matches(&canonical.members, &group_hashes) {
-            return Err(
-                SigningError::from(InvalidFragment::NonCanonicalMembership(group.head)).into(),
-            );
-        }
-
+    fn verify_group_evidence(
+        &self,
+        group: &PendingGroup,
+        ancestry: &ResolvedAncestry<'_>,
+    ) -> Result<SignatureStore, AutomergeError> {
         let requirements = FragmentRequirements::for_changes(&group.changes);
         let resolve_author = |hash: &ChangeHash| -> Option<Author<'static>> {
             if let Some((actor_idx, _)) = self.graph.actor_seq_for_hash(hash) {
@@ -689,18 +704,13 @@ impl Incoming<'_> {
                     .map(|(author, _)| author)
             },
         );
-        let proof = if can_reuse_preverified {
-            group.preverified.clone()
+        if can_reuse_preverified {
+            Ok(group.preverified.clone())
         } else {
             requirements
                 .verify_entries(&group.signatures, resolve_author)
-                .map_err(SigningError::from)?
-        };
-
-        Ok(GroupEvaluation::Verified {
-            fragment: canonical,
-            proof,
-        })
+                .map_err(|error| SigningError::from(error).into())
+        }
     }
 
     fn find_ancestry_equivocation<'a>(
@@ -737,73 +747,64 @@ impl Incoming<'_> {
             }
         };
 
-        let level = head.fragment_level();
-        if level == 0 {
-            return Fragment {
-                head,
-                level: 0,
-                boundary: parents_of(&head),
-                checkpoints: Vec::new(),
-                members: vec![head],
-            };
-        }
-
-        let boundary = walk(
-            parents_of(&head),
-            |node| parents_of(&node),
-            |node| {
-                if node.fragment_level() >= level {
-                    Visit::Keep
-                } else {
-                    Visit::Expand
-                }
-            },
-        );
-
-        let mut boundary_past = BoundarySummary::new();
-        for &b in &boundary {
-            boundary_past.merge(&self.boundary_past_for(b, changes_by_hash, memo));
-        }
-        let seeds_vec: Vec<ChangeHash> = boundary_past.seeds.into_iter().collect();
-        let graph_boundary_clock = self.graph.seq_clock_for_heads(&seeds_vec);
-
-        let in_boundary_past = |hash: &ChangeHash| -> bool {
-            if let Some((actor_idx, seq)) = self.graph.actor_seq_for_hash(hash) {
-                graph_boundary_clock
-                    .get_for_actor(&actor_idx)
-                    .is_some_and(|covered| seq <= covered.get())
-            } else {
-                let change = changes_by_hash[hash];
-                boundary_past
-                    .maxima
-                    .get(change.actor_id())
-                    .is_some_and(|&max_seq| change.seq() <= max_seq)
-            }
-        };
-
-        let members = walk(
-            vec![head],
-            |node| parents_of(&node),
-            |node| {
-                if node == head || !in_boundary_past(&node) {
-                    Visit::KeepAndExpand
-                } else {
-                    Visit::Ignore
-                }
-            },
-        );
-        let checkpoints = members
-            .iter()
-            .copied()
-            .filter(|hash| *hash != head && hash.fragment_level() > 0)
-            .collect();
-
-        Fragment {
+        let shape = canonical_shape::assemble(
             head,
-            level,
-            boundary,
-            checkpoints,
-            members,
+            |hash| hash.fragment_level(),
+            |hash| parents_of(&hash),
+            |roots, level| {
+                walk(
+                    roots,
+                    |node| parents_of(&node),
+                    |node| {
+                        if node.fragment_level() >= level {
+                            Visit::Keep
+                        } else {
+                            Visit::Expand
+                        }
+                    },
+                )
+            },
+            |boundary| {
+                let mut boundary_past = BoundarySummary::new();
+                for &b in boundary {
+                    boundary_past.merge(&self.boundary_past_for(b, changes_by_hash, memo));
+                }
+                let seeds_vec: Vec<ChangeHash> = boundary_past.seeds.into_iter().collect();
+                let graph_boundary_clock = self.graph.seq_clock_for_heads(&seeds_vec);
+
+                let in_boundary_past = |hash: &ChangeHash| -> bool {
+                    if let Some((actor_idx, seq)) = self.graph.actor_seq_for_hash(hash) {
+                        graph_boundary_clock
+                            .get_for_actor(&actor_idx)
+                            .is_some_and(|covered| seq <= covered.get())
+                    } else {
+                        let change = changes_by_hash[hash];
+                        boundary_past
+                            .maxima
+                            .get(change.actor_id())
+                            .is_some_and(|&max_seq| change.seq() <= max_seq)
+                    }
+                };
+
+                walk(
+                    vec![head],
+                    |node| parents_of(&node),
+                    |node| {
+                        if node == head || !in_boundary_past(&node) {
+                            Visit::KeepAndExpand
+                        } else {
+                            Visit::Ignore
+                        }
+                    },
+                )
+            },
+        );
+        Fragment {
+            head: shape.head,
+            level: shape.level,
+            boundary: shape.boundary,
+            members: shape.members,
+            checkpoints: shape.checkpoints,
         }
     }
 
@@ -870,15 +871,16 @@ impl Incoming<'_> {
         let selection = select_fragments(&accepted_view, &fragments);
         let selected_verified_indices: Vec<usize> = selection.selected_indices().collect();
 
-        let accepted_member_hashes: Vec<_> = selected_verified_indices
-            .iter()
-            .flat_map(|&v_idx| {
-                &candidates[evaluated.verified[v_idx].candidate_index]
+        let accepted_member_hashes = plan_contents::selected_members(
+            &selected_verified_indices,
+            |verified_index| {
+                candidates[evaluated.verified[verified_index].candidate_index]
                     .group
                     .changes
-            })
-            .map(Change::hash)
-            .collect();
+                    .as_slice()
+            },
+            Change::hash,
+        );
 
         let mut ranks = apply_order::collect_ranks(&accepted_member_hashes, |hash| {
             (!self.graph.has_change(&hash)).then(|| ancestry.topo_rank[&hash])
@@ -896,14 +898,11 @@ impl Incoming<'_> {
             .map(|rank| ancestry.resolved_topo[rank])
             .collect();
 
-        let mut remaining_candidate_indices: HashSet<usize> = evaluated
-            .waiting_candidate_indices
-            .iter()
-            .copied()
-            .collect();
-        for v_idx in selection.pending_indices() {
-            remaining_candidate_indices.insert(evaluated.verified[v_idx].candidate_index);
-        }
+        let excluded: Vec<_> = selection.pending_indices().collect();
+        let remaining_candidate_indices =
+            plan_contents::blocked(&evaluated.waiting_candidate_indices, &excluded, |index| {
+                evaluated.verified[index].candidate_index
+            });
 
         Ok(AdmissionPlan {
             selected_verified_indices,
@@ -971,11 +970,7 @@ impl PreparedAdmission {
                     .map(|change| (change.hash(), change))
             })
             .collect();
-        self.plan
-            .ordered_unapplied_hashes
-            .iter()
-            .map(|hash| by_hash[hash])
-            .collect()
+        plan_contents::ordered_refs(&self.plan.ordered_unapplied_hashes, |hash| by_hash[&hash])
     }
 
     pub(super) fn complete(self, signing: &mut SigningDocument<'_>) {
@@ -1045,3 +1040,5 @@ impl PreparedAdmission {
 
 #[cfg(test)]
 mod boundary_tests;
+#[cfg(test)]
+mod policy_tests;
