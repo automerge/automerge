@@ -57,7 +57,7 @@ fn mixed_values() -> Vec<u64> {
 
 fn bench_u64(bencher: Bencher, values: Vec<u64>) {
     let items = values.len();
-    let col = Column::<u64>::from_values(values);
+    let col = Column::<u64>::from_values(&values);
     bencher
         .counter(ItemsCount::new(items))
         .with_inputs(|| col.clone())
@@ -107,7 +107,7 @@ fn opt_u64_actors_100k(bencher: Bencher) {
         };
         vals.extend(std::iter::repeat_n(v, run));
     }
-    let col = Column::<Option<u64>>::from_values(vals);
+    let col = Column::<Option<u64>>::from_values(&vals);
     bencher
         .counter(ItemsCount::new(100_000usize))
         .with_inputs(|| col.clone())

@@ -143,7 +143,7 @@ fn extract_id_ctr_values(
 }
 
 fn decode_delta_int(bytes: &[u8]) -> Result<Vec<i64>, ParseError> {
-    hexane::DeltaDecoder::<Option<i64>>::new(bytes)
+    hexane::DeltaDecoder::<Option<i64>>::try_new(bytes)?
         .map(|item| item.ok_or(ParseError::InverseDecode))
         .collect()
 }

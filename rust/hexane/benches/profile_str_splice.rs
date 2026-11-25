@@ -12,6 +12,13 @@ fn rand_strings(n: usize, len: usize) -> Vec<String> {
     (0..n).map(|_| rand_string(len)).collect()
 }
 
+/// A column of `n` random strings, whose slabs hold at most `ms` runs.
+fn rand_column(n: usize, len: usize, ms: usize) -> Column<String> {
+    let strings = rand_strings(n, len);
+    let strs: Vec<&str> = strings.iter().map(String::as_str).collect();
+    Column::<String>::from_values_with_max_segments(&strs, ms)
+}
+
 fn bench(name: &str, n: u64, mut f: impl FnMut()) {
     for _ in 0..100 {
         f();
@@ -30,19 +37,13 @@ fn main() {
     // First: measure just the BIT rebuild cost at different slab counts.
     println!("=== BIT rebuild cost ===");
     for &ms in &[8, 16, 32, 64] {
-        let col = Column::<String>::from_values_with_max_segments(
-            (0..100_000).map(|_| rand_string(slen)).collect(),
-            ms,
-        );
+        let col = rand_column(100_000, slen, ms);
         let slabs = col.slab_count();
         // We can't directly call rebuild_bit from here, but we can measure
         // from_values (which does one rebuild) vs the slab count.
         let start = Instant::now();
         for _ in 0..100 {
-            let _ = Column::<String>::from_values_with_max_segments(
-                (0..100_000).map(|_| rand_string(slen)).collect(),
-                ms,
-            );
+            let _ = rand_column(100_000, slen, ms);
         }
         let build_ns = start.elapsed().as_nanos() / 100;
         println!("  ms={ms:3} slabs={slabs:6} from_values: {build_ns:>10} ns");
@@ -51,17 +52,14 @@ fn main() {
     for &ms in &[8, 16, 32, 64] {
         println!("\n=== max_segments={ms}, string_len={slen} ===");
 
-        let col_100k = Column::<String>::from_values_with_max_segments(
-            (0..100_000).map(|_| rand_string(slen)).collect(),
-            ms,
-        );
+        let col_100k = rand_column(100_000, slen, ms);
         println!("  slabs={}", col_100k.slab_count());
 
         // replace_1
         let mut c = col_100k.clone();
         bench(&format!("  ms={ms} replace_1 "), 10_000, || {
             let pos = rng().next_u64() as usize % c.len();
-            c.splice(pos, 1, [rand_string(slen)]);
+            c.splice(pos, 1, [rand_string(slen).as_str()]);
         });
 
         // replace_10
@@ -72,7 +70,7 @@ fn main() {
                 return;
             }
             let pos = rng().next_u64() as usize % (len - 10);
-            c.splice(pos, 10, rand_strings(10, slen));
+            c.splice(pos, 10, rand_strings(10, slen).iter().map(String::as_str));
         });
 
         // Show slab count after 1000 replace_10 ops
@@ -82,7 +80,7 @@ fn main() {
         let mut c = col_100k.clone();
         bench(&format!("  ms={ms} insert_1 "), 10_000, || {
             let pos = rng().next_u64() as usize % c.len();
-            c.splice(pos, 0, [rand_string(slen)]);
+            c.splice(pos, 0, [rand_string(slen).as_str()]);
         });
 
         // delete_1
@@ -90,7 +88,7 @@ fn main() {
         bench(&format!("  ms={ms} delete_1 "), 10_000, || {
             if c.len() > 1 {
                 let pos = rng().next_u64() as usize % c.len();
-                c.splice(pos, 1, std::iter::empty::<String>());
+                c.splice(pos, 1, std::iter::empty::<&str>());
             }
         });
     }

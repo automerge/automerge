@@ -1,3 +1,8 @@
+> This guide is for the move from the 0.2-era `ColumnData<C>` to the
+> 1.0 columns. For the move to the verified columns, whose names are
+> those below but whose types differ in places, see `CHANGELOG.md`
+> ("Unreleased").
+
 > **Note (1.0.0-alpha.2):** the 0.2-era `ColumnData<C>` API described as
 > "v0" below has been **removed**, and the v1 API now lives at the crate
 > root (no `v1::` prefix).  This guide remains as a porting reference for

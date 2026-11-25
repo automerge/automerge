@@ -116,7 +116,7 @@ impl OpSet {
     }
 
     pub(crate) fn reset_top(&mut self, range: Range<usize>) {
-        let top = self.cols.index.top.values().iter_range(range.clone());
+        let top = self.cols.index.top.iter_range(range.clone());
         let vis = self.cols.index.visible.iter_range(range.clone());
 
         let mut conflicts = vec![];
@@ -192,7 +192,7 @@ impl OpSet {
         assert_eq!(_top.len(), _visible.len());
         assert_eq!(_top.len(), self.len());
 
-        let top_iter = _top.values().iter();
+        let top_iter = _top.iter();
         let vis_iter = _visible.iter();
         let op_iter = self.iter();
 
@@ -319,15 +319,15 @@ impl OpSet {
             } else if i.inc.is_none() {
                 delete = true;
                 let visible = self.cols.index.visible.get(i.pos);
-                let text = self.cols.index.text.values().get(i.pos);
-                let top = self.cols.index.top.values().get(i.pos);
+                let text = self.cols.index.text.get(i.pos);
+                let top = self.cols.index.top.get(i.pos);
                 undo.push(SuccUndo::new(*i, visible, text, top));
                 self.cols.index.visible.splice(i.pos, 1, [false]);
                 self.cols.index.text.splice(i.pos, 1, [None::<u32>]);
                 self.cols.index.top.splice(i.pos, 1, [false]);
             } else if delete && !expose {
                 expose = true;
-                let top = self.cols.index.top.values().get(i.pos);
+                let top = self.cols.index.top.get(i.pos);
                 undo.push(SuccUndo::new(*i, None, None, top));
                 self.cols.index.top.splice(i.pos, 1, [true]);
             } else {
@@ -464,7 +464,7 @@ impl OpSet {
             let insert = self
                 .cols
                 .insert
-                .iter_range(range.clone())
+                .prefix_iter_range(range.clone())
                 .map(|pv| pv.total());
             SkipIter::new(insert, vis).dedup().count()
         } else {
@@ -480,7 +480,7 @@ impl OpSet {
     ) -> Option<QueryNth> {
         let range = self.scope_to_obj(obj);
 
-        let mut text_iter = self.cols.index.text.iter_range(range.clone());
+        let mut text_iter = self.cols.index.text.prefix_iter_range(range.clone());
         let tx = text_iter.advance_prefix((index.get() - 1) as u64)?;
 
         let index = tx.delta as usize + tx.pv.value.unwrap_or(0) as usize;
@@ -563,7 +563,7 @@ impl OpSet {
     ) -> Option<QueryNth> {
         let range = self.scope_to_obj(obj);
 
-        let mut top_iter = self.cols.index.top.iter_range(range.clone());
+        let mut top_iter = self.cols.index.top.prefix_iter_range(range.clone());
         let tx = top_iter.advance_prefix(index.get() - 1)?;
 
         let iter = self.iter_range(&(tx.pos..range.end));
@@ -701,7 +701,7 @@ impl OpSet {
     }
 
     fn list_register_at_pos(&self, pos: usize, range: Range<usize>) -> Range<usize> {
-        let mut iter = self.cols.insert.iter_range(0..range.end);
+        let mut iter = self.cols.insert.prefix_iter_range(0..range.end);
         let at_pos = iter.nth(pos);
         let next_run = iter.next_run();
         match (at_pos, next_run) {
@@ -726,7 +726,7 @@ impl OpSet {
     ) -> OpsFound<'a> {
         let range = self.scope_to_obj(obj);
 
-        let mut top_iter = self.cols.index.top.iter_range(range.clone());
+        let mut top_iter = self.cols.index.top.prefix_iter_range(range.clone());
         if let Some(tx) = top_iter.advance_prefix(index) {
             let range = self.list_register_at_pos(tx.pos, range);
             let end_pos = range.end;
@@ -775,7 +775,7 @@ impl OpSet {
         read: &ReadAt<'_>,
     ) -> OpsFound<'a> {
         let mut range = self.scope_to_obj(obj);
-        let mut text_iter = self.cols.index.text.iter_range(range.clone());
+        let mut text_iter = self.cols.index.text.prefix_iter_range(range.clone());
         let seek = text_iter.advance_prefix(index as u64);
 
         let mut ops = vec![];
@@ -831,7 +831,7 @@ impl OpSet {
     /// op's own id for insert ops, or its key's elemid otherwise.
     fn elemid_at(&self, pos: usize, end: usize) -> Option<(ElemId, usize)> {
         let range = pos..end;
-        let mut insert = self.cols.insert.values().iter_range(range.clone());
+        let mut insert = self.cols.insert.iter_range(range.clone());
         let mut id_ctr = self.cols.id_ctr.iter_range(range.clone());
         let mut id_actor = self.cols.id_actor.iter_range(range.clone());
         let mut key_ctr = self.cols.key_ctr.iter_range(range.clone());
@@ -954,15 +954,18 @@ impl OpSet {
     }
 
     pub(crate) fn insert_acc_range(&self, range: &Range<usize>) -> InsertAcc<'_> {
-        self.cols.insert.iter_range(range.clone())
+        self.cols.insert.prefix_iter_range(range.clone())
     }
 
     pub(crate) fn insert_iter_range(&self, range: &Range<usize>) -> InsertIter<'_> {
-        InsertIter::new(self.cols.insert.values().iter_range(range.clone()))
+        InsertIter::new(self.cols.insert.iter_range(range.clone()))
     }
 
-    pub(crate) fn top_index_range(&self, range: &Range<usize>) -> hexane::Iter<'_, bool> {
-        self.cols.index.top.values().iter_range(range.clone())
+    pub(crate) fn top_index_range(
+        &self,
+        range: &Range<usize>,
+    ) -> hexane::Iter<'_, bool, hexane::Leb128, hexane::SumIndex> {
+        self.cols.index.top.iter_range(range.clone())
     }
 
     /// Checks whether every op in the given range is "top" (i.e. every op has
@@ -1026,7 +1029,7 @@ impl OpSet {
         // tracks text widths). Boundaries arrive in ascending position order,
         // so one forward width iterator serves them all in O(1) amortized per
         // boundary.
-        let mut widths = text.iter_range(range.clone());
+        let mut widths = text.prefix_iter_range(range.clone());
         let base = widths.total();
         let mut widths_at = range.start;
 
@@ -1082,7 +1085,7 @@ impl OpSet {
             return MarkSet::default();
         }
         let range = self.scope_to_obj(obj);
-        let mut widths = self.cols.index.text.iter_range(range);
+        let mut widths = self.cols.index.text.prefix_iter_range(range);
         let Some(seek) = widths.advance_prefix(index as u64) else {
             return MarkSet::default();
         };
@@ -1171,7 +1174,7 @@ impl OpSet {
 
     pub(crate) fn find_op_by_id_and_vis_fast(&self, id: &OpId) -> Option<(Op<'_>, bool)> {
         let pos = self.get_op_id_pos(*id)?;
-        let visible = self.cols.index.top.values().get(pos).unwrap_or(false);
+        let visible = self.cols.index.top.get(pos).unwrap_or(false);
         let op = self.get(pos)?;
         Some((op, visible))
     }
@@ -1202,7 +1205,7 @@ impl OpSet {
         pos: usize,
         clock: &ClockRange<'_>,
     ) -> (i64, i64) {
-        if let Some(sc) = self.cols.succ_count.get(pos) {
+        if let Some(sc) = self.cols.succ_count.get_prefixed(pos) {
             let start = sc.prefix() as usize;
             let len = sc.value as usize;
             let end = sc.total() as usize;
@@ -1349,7 +1352,7 @@ impl OpSet {
     }
 
     pub(crate) fn value_iter_range(&self, range: &Range<usize>) -> ValueIter<'_> {
-        let meta = self.cols.value_meta.iter_range(range.clone());
+        let meta = self.cols.value_meta.prefix_iter_range(range.clone());
         let value_advance = self.cols.value_meta.get_prefix(range.start) as usize;
         let value_raw = self.cols.value.iter_at(value_advance);
         ValueIter::new(meta, value_raw)
@@ -1390,7 +1393,7 @@ impl OpSet {
 
     pub(crate) fn succ_iter_range(&self, range: &Range<usize>) -> SuccIterIter<'_> {
         let succ_start = self.cols.succ_count.get_prefix(range.start) as usize;
-        let succ_count = self.cols.succ_count.iter_range(range.clone());
+        let succ_count = self.cols.succ_count.prefix_iter_range(range.clone());
         let succ_actor = self
             .cols
             .succ_actor
@@ -1424,7 +1427,7 @@ impl OpSet {
                 self.cols.key_ctr.iter_range(range.clone()),
             ),
             succ,
-            insert: InsertIter::new(self.cols.insert.values().iter_range(range.clone())),
+            insert: InsertIter::new(self.cols.insert.iter_range(range.clone())),
             action: ActionIter::new(self.cols.action.iter_range(range.clone())),
             value,
             marks: self.mark_info_iter_range(range),
@@ -1448,14 +1451,14 @@ impl OpSet {
                 self.cols.key_ctr.iter(),
             ),
             succ: SuccIterIter::new(
-                self.cols.succ_count.iter(),
+                self.cols.succ_count.prefix_iter(),
                 self.cols.succ_actor.iter(),
                 self.cols.succ_ctr.iter(),
                 self.cols.index.inc.iter(),
             ),
-            insert: InsertIter::new(self.cols.insert.values().iter()),
+            insert: InsertIter::new(self.cols.insert.iter()),
             action: ActionIter::new(self.cols.action.iter()),
-            value: ValueIter::new(self.cols.value_meta.iter(), self.cols.value.iter()),
+            value: ValueIter::new(self.cols.value_meta.prefix_iter(), self.cols.value.iter()),
             marks: MarkInfoIter::new(self.cols.mark_name.iter(), self.cols.expand.iter()),
             range: 0..self.len(),
             op_set: self,
@@ -1858,12 +1861,12 @@ pub(crate) mod tests {
             .iter()
             .flat_map(|o| o.succs.iter().map(|s| s.counter() as u32))
             .collect();
-        let group_col = hexane::PrefixColumn::<u32>::from_values(group_counts);
-        let actor_col = hexane::Column::<ActorIdx>::from_values(succ_actors);
-        let counter_col = hexane::DeltaColumn::<u32>::from_values(succ_counters);
+        let group_col = hexane::PrefixColumn::<u32>::from_values(&group_counts);
+        let actor_col = hexane::Column::<ActorIdx>::from_values(&succ_actors);
+        let counter_col = hexane::DeltaColumn::<u32>::from_values(&succ_counters);
         let inc_col = hexane::Column::<Option<i64>>::fill(actor_col.len(), None);
 
-        let mut group_iter = group_col.iter();
+        let mut group_iter = group_col.prefix_iter();
         let mut actor_iter = actor_col.iter();
         let mut counter_iter = counter_col.iter();
         let mut inc_values = inc_col.iter();

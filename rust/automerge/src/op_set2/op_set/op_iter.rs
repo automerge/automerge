@@ -286,7 +286,7 @@ impl OpIdIterState {
 }
 
 pub(crate) struct OpIdIterState {
-    actor_state: hexane::column::IterState,
+    actor_state: hexane::IterState,
     ctr_state: hexane::DeltaIterState,
 }
 
@@ -320,7 +320,7 @@ pub(crate) struct SuccWalker<'a> {
 impl<'a> SuccWalker<'a> {
     pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>) -> Self {
         let ctr = CtrWalker::new(&op_set.cols.succ_ctr, range).peekable();
-        let count = op_set.cols.succ_count.iter();
+        let count = op_set.cols.succ_count.prefix_iter();
         Self { acc: 0, count, ctr }
     }
 }
@@ -408,24 +408,24 @@ impl Iterator for OpIdIter<'_> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct InsertIter<'a> {
-    iter: hexane::Iter<'a, bool>,
+    iter: hexane::Iter<'a, bool, hexane::Leb128, hexane::SumIndex>,
 }
 
-pub(crate) struct InsertIterState(hexane::column::IterState);
+pub(crate) struct InsertIterState(hexane::IterState);
 
 impl InsertIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<InsertIter<'a>, AutomergeError> {
         Ok(InsertIter {
             iter: self
                 .0
-                .try_resume(op_set.cols.insert.values())
+                .try_resume(&op_set.cols.insert)
                 .map_err(AutomergeError::encoding)?,
         })
     }
 }
 
 impl<'a> InsertIter<'a> {
-    pub(crate) fn new(iter: hexane::Iter<'a, bool>) -> Self {
+    pub(crate) fn new(iter: hexane::Iter<'a, bool, hexane::Leb128, hexane::SumIndex>) -> Self {
         Self { iter }
     }
 
@@ -469,7 +469,7 @@ pub(crate) struct KeyIter<'a> {
 
 pub(crate) struct KeyIterState {
     key_str: hexane::IterState,
-    key_actor: hexane::column::IterState,
+    key_actor: hexane::IterState,
     key_ctr: hexane::DeltaIterState,
 }
 
@@ -574,8 +574,8 @@ pub(crate) struct ObjIdIter<'a> {
 }
 
 pub(crate) struct ObjIdIterState {
-    obj_actor: hexane::column::IterState,
-    obj_ctr: hexane::column::IterState,
+    obj_actor: hexane::IterState,
+    obj_ctr: hexane::IterState,
 }
 
 impl ObjIdIterState {
@@ -682,7 +682,7 @@ pub(crate) struct MarkInfoIter<'a> {
 
 pub(crate) struct MarkInfoIterState {
     name: hexane::IterState,
-    expand: hexane::column::IterState,
+    expand: hexane::IterState,
 }
 
 impl MarkInfoIterState {
@@ -810,7 +810,7 @@ pub(crate) struct ActionIter<'a> {
 }
 
 pub(crate) struct ActionIterState {
-    state: hexane::column::IterState,
+    state: hexane::IterState,
 }
 
 impl ActionIterState {
@@ -960,9 +960,9 @@ pub(crate) struct SuccIterIter<'a> {
 
 pub(crate) struct SuccIterIterState {
     count: hexane::PrefixIterState<u32>,
-    actor: hexane::column::IterState,
+    actor: hexane::IterState,
     ctr: hexane::DeltaIterState,
-    incs: hexane::column::IterState,
+    incs: hexane::IterState,
 }
 
 impl SuccIterIterState {
@@ -998,18 +998,22 @@ impl<'a> SuccIterIter<'a> {
         self.ctr.advance_to(sub_start);
         self.incs.advance_to(sub_start);
 
-        let iter = SuccCursors {
+        Some(self.take(num_succ))
+    }
+
+    /// The cursors over the next `num_succ` successors; moves past them.
+    #[inline(always)]
+    fn take(&mut self, num_succ: usize) -> SuccCursors<'a> {
+        let cursors = SuccCursors {
             len: num_succ,
             succ_actor: self.actor.clone(),
             succ_counter: self.ctr.clone(),
             inc_values: self.incs.clone(),
         };
-
         self.actor.advance_by(num_succ);
         self.ctr.advance_by(num_succ);
         self.incs.advance_by(num_succ);
-
-        Some(iter)
+        cursors
     }
 
     pub(crate) fn new(
@@ -1033,19 +1037,7 @@ impl<'a> SuccIterIter<'a> {
             .next()
             .ok_or(ReadOpError::MissingValue("succ_count"))?
             .value as usize;
-
-        let result = SuccCursors {
-            len: num_succ,
-            succ_actor: self.actor.clone(),
-            succ_counter: self.ctr.clone(),
-            inc_values: self.incs.clone(),
-        };
-
-        self.actor.advance_by(num_succ);
-        self.ctr.advance_by(num_succ);
-        self.incs.advance_by(num_succ);
-
-        Ok(result)
+        Ok(self.take(num_succ))
     }
 
     pub(crate) fn try_nth(&mut self, n: usize) -> Result<SuccCursors<'a>, ReadOpError> {
@@ -1065,18 +1057,7 @@ impl<'a> SuccIterIter<'a> {
             self.ctr.advance_by(seek);
             self.incs.advance_by(seek);
 
-            let result = SuccCursors {
-                len: num_succ,
-                succ_actor: self.actor.clone(),
-                succ_counter: self.ctr.clone(),
-                inc_values: self.incs.clone(),
-            };
-
-            self.actor.advance_by(num_succ);
-            self.ctr.advance_by(num_succ);
-            self.incs.advance_by(num_succ);
-
-            Ok(result)
+            Ok(self.take(num_succ))
         }
     }
 
@@ -1093,8 +1074,11 @@ impl<'a> SuccIterIter<'a> {
 impl<'a> Iterator for SuccIterIter<'a> {
     type Item = SuccCursors<'a>;
 
+    // not `try_next().ok()`: building the cursors straight into the option
+    // saves a copy of several hundred bytes per op
     fn next(&mut self) -> Option<Self::Item> {
-        self.try_next().ok()
+        let num_succ = self.count.next()?.value as usize;
+        Some(self.take(num_succ))
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
@@ -1235,10 +1219,11 @@ mod tests {
         let o32 = ObjId(OpId::new(3, 2));
         let objs = [r, r, r, r, o11, o11, o12, o21, o21, o21, o22, o22, o32, o32];
         let v1_actor = hexane::Column::<Option<ActorIdx>>::from_values(
-            objs.iter().map(|o| o.actor()).collect::<Vec<_>>(),
+            &objs.iter().map(|o| o.actor()).collect::<Vec<_>>(),
         );
         let v1_ctr = hexane::Column::<Option<u32>>::from_values(
-            objs.iter()
+            &objs
+                .iter()
                 .map(|o| o.counter().map(|c| c as u32))
                 .collect::<Vec<_>>(),
         );

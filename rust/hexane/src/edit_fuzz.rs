@@ -8,9 +8,8 @@
 //!
 //! 1. **Values** — the edited column against a `Vec` model that mirrors
 //!    the cursor's contract exactly (see [`Model`]).
-//! 2. **Structure** — [`check_invariants`](crate::Column::check_invariants)
-//!    for the slab index and lengths, plus the debug-build slab
-//!    validation that runs inside every rebuild.
+//! 2. **Structure** — `check_invariants` for the slab index and
+//!    lengths.
 //! 3. **Bytes** — `save()` against a column freshly built from the model.
 //!    Saving is canonical, so this asserts the *encoding* is right, not
 //!    just the values: a stray count-1 repeat run, two adjacent runs that
@@ -25,10 +24,16 @@
 //! ```
 //!
 //! which is the combination that matters: optimized enough to run
-//! millions of edits, with the in-rebuild slab validation still live.
+//! millions of edits, with the debug assertions still live.
+//!
+//! A cursor must be finished: one dropped without `finish` leaves its
+//! column empty (the verified API's `Edit`). The old cursor's `Drop`
+//! closed the rebuild, and every other batch here was dropped to cover
+//! it; now every cursor is finished. Its `replace(f)` is now
+//! `replace_with(value)`.
 
-use crate::column::Column;
-use crate::{AsColumnRef, ColumnValueRef, Run};
+use crate::tests::{col_of_max, Lend};
+use crate::{Column, Run};
 use std::fmt::Debug;
 
 /// xorshift64* — reproducible without a dev-dependency.
@@ -124,27 +129,23 @@ impl<T: Clone + PartialEq + Debug> Model<T> {
 }
 
 /// Every oracle, against a closed column.
-fn verify<T>(col: &Column<T>, want: &[T], max_seg: usize, ctx: &dyn Fn() -> String)
-where
-    T: ColumnValueRef + Clone + PartialEq + Debug,
-    for<'x> T::Get<'x>: AsColumnRef<T> + PartialEq + Debug,
-{
+fn verify<T: Lend>(col: &Column<T>, want: &[T], max_seg: usize, ctx: &dyn Fn() -> String) {
     col.check_invariants();
-    let got: Vec<T> = col.iter().map(T::to_owned).collect();
+    let got: Vec<T> = col.iter().map(T::keep).collect();
     assert_eq!(got, want, "values: {}", ctx());
     assert_eq!(col.len(), want.len(), "len: {}", ctx());
 
     // random access goes through the slab index rather than the iterator,
     // so it fails independently when the index and the slabs disagree
     for (i, w) in want.iter().enumerate() {
-        let g = col.get(i).map(T::to_owned);
+        let g = col.get(i).map(T::keep);
         assert_eq!(g.as_ref(), Some(w), "get({i}): {}", ctx());
     }
     assert!(col.get(want.len()).is_none(), "get past end: {}", ctx());
 
     // the strong one: an edited column must serialize exactly like a
     // freshly built one holding the same values
-    let fresh = Column::<T>::from_values_with_max_segments(want.to_vec(), max_seg);
+    let fresh = col_of_max(want, max_seg);
     let bytes = col.save();
     assert_eq!(bytes, fresh.save(), "bytes: {}", ctx());
 
@@ -152,7 +153,7 @@ where
     // drifted from its contents can still save, but will not reload
     let back = Column::<T>::load(&bytes)
         .unwrap_or_else(|e| panic!("saved bytes do not load: {e}: {}", ctx()));
-    let back_vals: Vec<T> = back.iter().map(T::to_owned).collect();
+    let back_vals: Vec<T> = back.iter().map(T::keep).collect();
     assert_eq!(back_vals, want, "reloaded values: {}", ctx());
 }
 
@@ -165,7 +166,7 @@ fn splice_after_cursor_edits() {
         for seed in 0..60u64 {
             let mut rng = Rng::new(seed);
             let vals = shape(&mut rng, 80, &small_u64);
-            let mut col = Column::<u64>::from_values_with_max_segments(vals.clone(), max_seg);
+            let mut col = Column::<u64>::from_values_with_max_segments(&vals, max_seg);
             let mut model = Model::new(vals);
 
             // a cursor pass
@@ -282,16 +283,13 @@ where
 }
 
 /// Run a generated script, checking every oracle each time a cursor closes.
-fn run_script<T>(
+fn run_script<T: Lend>(
     mut col: Column<T>,
     vals: Vec<T>,
     batches: &[Vec<Op<T>>],
     max_seg: usize,
     tag: &str,
-) where
-    T: ColumnValueRef + Clone + PartialEq + Debug,
-    for<'x> T::Get<'x>: AsColumnRef<T> + PartialEq + Debug,
-{
+) {
     let mut model = Model::new(vals);
     for (b, batch) in batches.iter().enumerate() {
         let ctx = || format!("{tag} batch={b}\n  ops={batch:?}");
@@ -309,16 +307,16 @@ fn run_script<T>(
                         model.advance(*n);
                     }
                     Op::Insert(v) => {
-                        e.insert(v.clone());
+                        e.insert(v.lend());
                         model.insert(v.clone(), 1);
                     }
                     Op::InsertRun(v, n) => {
-                        e.insert_run(v.clone(), *n);
+                        e.insert_run(v.lend(), *n);
                         model.insert(v.clone(), *n);
                     }
                     Op::InsertRuns(runs) => {
                         e.insert_runs(runs.iter().map(|(v, n)| Run {
-                            value: v.clone(),
+                            value: v.lend(),
                             count: *n,
                         }));
                         for (v, n) in runs {
@@ -331,7 +329,7 @@ fn run_script<T>(
                     }
                     Op::Peek => {
                         // the only read a cursor exposes mid-rebuild
-                        let got = e.peek().map(T::to_owned);
+                        let got = e.peek().map(T::keep);
                         assert_eq!(got.as_ref(), model.peek(), "peek: {}", ctx());
                     }
                     Op::ReplaceSame => {
@@ -341,26 +339,21 @@ fn run_script<T>(
                         // that a no-op replace never dirties a clean
                         // cursor is `read_only_cursor_is_inert`.
                         if let Some(cur) = model.peek().cloned() {
-                            e.replace(T::to_owned);
+                            e.replace_with(cur.lend());
                             model.built.push(cur);
                             model.orig += 1;
                         }
                     }
                     Op::ReplaceWith(v) => {
                         if model.peek().is_some() {
-                            let v2 = v.clone();
-                            e.replace(move |_| v2.clone());
+                            e.replace_with(v.lend());
                             model.built.push(v.clone());
                             model.orig += 1;
                         }
                     }
                 }
             }
-            // every other batch is dropped rather than finished, so the
-            // Drop impl closing the rebuild is covered too
-            if b % 2 == 0 {
-                e.finish();
-            }
+            e.finish();
         }
         let want = model.values();
         verify(&col, &want, max_seg, &ctx);
@@ -372,14 +365,13 @@ fn run_script<T>(
 /// spread over several cursors.
 fn fuzz_one<T, F>(seed: u64, max_seg: usize, len: usize, make: &F, ops: usize)
 where
-    T: ColumnValueRef + Clone + PartialEq + Debug,
-    for<'x> T::Get<'x>: AsColumnRef<T> + PartialEq + Debug,
+    T: Lend,
     F: Fn(&mut Rng) -> T,
 {
     let mut rng = Rng::new(seed);
     let vals = shape(&mut rng, len, make);
     let batches = gen_script(&mut rng, len, make, ops);
-    let col = Column::<T>::from_values_with_max_segments(vals.clone(), max_seg);
+    let col = col_of_max(&vals, max_seg);
     run_script(
         col,
         vals,
@@ -546,10 +538,8 @@ fn exhaustive_tiny() {
                     for del in 0..=(len - pos) {
                         for ins in 0..=2usize {
                             for v in 0..2u64 {
-                                let mut col = Column::<u64>::from_values_with_max_segments(
-                                    vals.clone(),
-                                    max_seg,
-                                );
+                                let mut col =
+                                    Column::<u64>::from_values_with_max_segments(&vals, max_seg);
                                 let mut m = Model::new(vals.clone());
                                 {
                                     let mut e = col.edit();
@@ -590,8 +580,7 @@ fn delete_cascades() {
             for start in (0..len).step_by(7) {
                 for del in [1usize, 2, 9, 31, len, len * 2] {
                     for tail_insert in [0usize, 1, 6] {
-                        let mut col =
-                            Column::<u64>::from_values_with_max_segments(vals.clone(), max_seg);
+                        let mut col = Column::<u64>::from_values_with_max_segments(&vals, max_seg);
                         let mut m = Model::new(vals.clone());
                         {
                             let mut e = col.edit();
@@ -620,12 +609,13 @@ fn delete_cascades() {
 fn peek_after_a_cascading_delete() {
     for max_seg in [2usize, 3, 4, 64] {
         let vals: Vec<u64> = (0..20).collect();
-        let mut col = Column::<u64>::from_values_with_max_segments(vals, max_seg);
+        let mut col = Column::<u64>::from_values_with_max_segments(&vals, max_seg);
         {
             let mut e = col.edit();
             e.delete(5);
             assert_eq!(e.peek(), Some(5), "peek after delete, max_seg={max_seg}");
-            e.replace(|v| v + 100);
+            let v = e.peek().expect("a value at 5");
+            e.replace_with(v + 100);
             e.finish();
         }
         let want: Vec<u64> = std::iter::once(105).chain(6..20).collect();
@@ -645,15 +635,15 @@ fn read_only_cursor_is_inert() {
                 n => Some(n as u64),
             })
             .collect();
-        let col = Column::<Option<u64>>::from_values_with_max_segments(vals.clone(), max_seg);
+        let col = Column::<Option<u64>>::from_values_with_max_segments(&vals, max_seg);
         let before = col.save();
         let mut col = col;
         {
             let mut e = col.edit();
             for (i, want) in vals.iter().enumerate() {
-                let got = e.peek().map(<Option<u64> as ColumnValueRef>::to_owned);
+                let got = e.peek();
                 assert_eq!(got.as_ref(), Some(want));
-                e.replace(<Option<u64> as ColumnValueRef>::to_owned);
+                e.replace_with(*want);
                 assert_eq!(e.rebuilds(), 0, "a no-op replace dirtied the slab at {i}");
             }
             e.finish();
@@ -672,8 +662,7 @@ fn degenerate_columns() {
             for at in 0..=len {
                 for del in 0..=len {
                     for ins in 0..3usize {
-                        let mut col =
-                            Column::<u64>::from_values_with_max_segments(vals.clone(), max_seg);
+                        let mut col = Column::<u64>::from_values_with_max_segments(&vals, max_seg);
                         let mut m = Model::new(vals.clone());
                         {
                             let mut e = col.edit_at(at.min(len));
@@ -682,8 +671,7 @@ fn degenerate_columns() {
                             m.delete(del);
                             e.insert_run(5u64, ins);
                             m.insert(5, ins);
-                            // dropped, not finished: the Drop impl has to
-                            // close the rebuild
+                            e.finish();
                         }
                         let want = m.values();
                         verify(&col, &want, max_seg, &|| {
@@ -750,8 +738,7 @@ fn exhaustive_two_edits() {
                                 for d1 in 0..=(len - p1) {
                                     for i1 in 0..=2usize {
                                         let mut col = Column::<u64>::from_values_with_max_segments(
-                                            vals.clone(),
-                                            max_seg,
+                                            &vals, max_seg,
                                         );
                                         let mut m = Model::new(vals.clone());
                                         {
@@ -798,12 +785,12 @@ mod repro {
         let mut rng = Rng::new(2913);
         let vals = shape(&mut rng, 2, &wide_u64);
         let batches: Vec<Vec<Op<u64>>> = gen_script(&mut rng, 2, &wide_u64, 60);
-        let col = Column::<u64>::from_values_with_max_segments(vals.clone(), 8);
+        let col = Column::<u64>::from_values_with_max_segments(&vals, 8);
         run_script(col, vals, &batches, 8, "repro");
     }
 }
 
-/// `try_merge_range` is shared with the one-shot splice path, so an
+/// The merge walk (`merge_walk::merge_around`) is shared with the one-shot splice path, so an
 /// interior pair it never inspects is not a cursor bug — this drives the
 /// same shape (a spill of several slabs, then a delete cascading into a
 /// partial one) through `splice` alone.
@@ -814,7 +801,7 @@ fn splice_leaves_no_unmerged_pair() {
             let mut rng = Rng::new(seed);
             let len = 20 + rng.below(60);
             let vals: Vec<u64> = (0..len).map(|_| small_u64(&mut rng)).collect();
-            let mut col = Column::<u64>::from_values_with_max_segments(vals.clone(), max_seg);
+            let mut col = Column::<u64>::from_values_with_max_segments(&vals, max_seg);
             let mut want = vals;
             for _ in 0..8 {
                 let pos = rng.below(want.len() + 1);
@@ -833,30 +820,73 @@ fn splice_leaves_no_unmerged_pair() {
 
 // ── delta cursor ────────────────────────────────────────────────────────────
 
-/// The delta cursor against the same three oracles as the plain one, plus
-/// the property that matters most for it: the values *after* the cursor
-/// must be untouched, which is the whole job of the boundary fix-up.
+/// The delta cursor against the oracles of the plain one but the
+/// structural one (a delta column has no `check_invariants`), plus the
+/// property that matters most for it: the values *after* the cursor must
+/// be untouched, which is the whole job of the boundary fix-up.
 mod delta {
     use super::{Model, Rng};
-    use crate::delta::{DeltaColumn, DeltaValue};
+    use crate::{DeltaColumn, DeltaRun, DeltaValue};
     use std::fmt::Debug;
 
-    fn build<T: DeltaValue>(vals: &[T], max_seg: usize) -> DeltaColumn<T> {
+    /// What the fuzzer asks of a delta column's value type, which the
+    /// old `DeltaValue` said and the verified one keeps to itself.
+    trait Num: DeltaValue + Debug + PartialEq {
+        /// Whether the type has a null.
+        const NULLABLE: bool;
+        /// The least number the type holds.
+        const MIN_I64: i64;
+        /// The value of the number `d`, or the null for none.
+        fn of(d: Option<i64>) -> Self;
+        /// The value's number, or none for a null.
+        fn num(self) -> Option<i64>;
+    }
+
+    impl Num for i64 {
+        const NULLABLE: bool = false;
+        const MIN_I64: i64 = i64::MIN;
+        fn of(d: Option<i64>) -> i64 {
+            d.expect("a number")
+        }
+        fn num(self) -> Option<i64> {
+            Some(self)
+        }
+    }
+
+    impl Num for u64 {
+        const NULLABLE: bool = false;
+        const MIN_I64: i64 = 0;
+        fn of(d: Option<i64>) -> u64 {
+            u64::try_from(d.expect("a number")).expect("in the domain")
+        }
+        fn num(self) -> Option<i64> {
+            Some(self as i64)
+        }
+    }
+
+    impl Num for Option<u64> {
+        const NULLABLE: bool = true;
+        const MIN_I64: i64 = 0;
+        fn of(d: Option<i64>) -> Option<u64> {
+            d.map(|d| u64::try_from(d).expect("in the domain"))
+        }
+        fn num(self) -> Option<i64> {
+            self.map(|v| v as i64)
+        }
+    }
+
+    fn build<T: Num>(vals: &[T], max_seg: usize) -> DeltaColumn<T> {
         let mut col = DeltaColumn::<T>::with_max_segments(max_seg);
         col.splice(0, 0, vals.iter().copied());
         col
     }
 
-    fn verify<T: DeltaValue + Debug + PartialEq>(
-        col: &DeltaColumn<T>,
-        want: &[T],
-        max_seg: usize,
-        ctx: &dyn Fn() -> String,
-    ) {
+    /// (A delta column has no `check_invariants`: its structure is
+    /// checked through its bytes, which must be a fresh column's and load.)
+    fn verify<T: Num>(col: &DeltaColumn<T>, want: &[T], max_seg: usize, ctx: &dyn Fn() -> String) {
         let got: Vec<T> = col.iter().collect();
         assert_eq!(got, want, "values: {}", ctx());
         assert_eq!(col.len(), want.len(), "len: {}", ctx());
-        col.check_invariants();
         // random access re-anchors the running value from the index
         for (i, w) in want.iter().enumerate() {
             assert_eq!(col.get(i).as_ref(), Some(w), "get({i}): {}", ctx());
@@ -870,11 +900,7 @@ mod delta {
 
     /// Ascending-ish data with plateaus and dips, which is the shape a
     /// delta column is for.
-    fn shape<T: DeltaValue, F: Fn(&mut Rng, i64) -> T>(
-        r: &mut Rng,
-        len: usize,
-        make: &F,
-    ) -> Vec<T> {
+    fn shape<T: Num, F: Fn(&mut Rng, i64) -> T>(r: &mut Rng, len: usize, make: &F) -> Vec<T> {
         let mut out = Vec::with_capacity(len);
         let mut v = 0i64;
         for _ in 0..len {
@@ -891,7 +917,7 @@ mod delta {
 
     fn one<T, F>(seed: u64, max_seg: usize, len: usize, edits: usize, make: &F)
     where
-        T: DeltaValue + Debug + PartialEq,
+        T: Num,
         F: Fn(&mut Rng, i64) -> T,
     {
         let mut rng = Rng::new(seed);
@@ -921,7 +947,7 @@ mod delta {
                     1 => {
                         if let Some(cur) = m.peek().copied() {
                             let v = make(&mut rng, 0);
-                            e.replace(|_| v);
+                            e.replace_with(v);
                             m.built.push(v);
                             m.orig += 1;
                             log.push(format!("replace({cur:?} -> {v:?})"));
@@ -930,7 +956,7 @@ mod delta {
                     2 => {
                         // replace with the value already there
                         if let Some(cur) = m.peek().copied() {
-                            e.replace(|v| v);
+                            e.replace_with(cur);
                             m.built.push(cur);
                             m.orig += 1;
                             log.push("replace(same)".into());
@@ -960,22 +986,22 @@ mod delta {
                         m.built
                             .last()
                             .or(m.src.get(m.orig.wrapping_sub(1)))
-                            .and_then(|v| v.to_i64())
+                            .and_then(|v| v.num())
                             .unwrap_or(0)
                     } else {
                         rng.below(40) as i64
                     };
                     let nul = T::NULLABLE && rng.chance(4);
-                    e.insert_runs([crate::delta::DeltaRun {
+                    e.insert_runs(&[DeltaRun {
                         prefix,
                         delta: if nul { None } else { Some(step) },
                         count,
                     }]);
                     for k in 1..=count {
                         m.built.push(if nul {
-                            T::null_value()
+                            T::of(None)
                         } else {
-                            T::try_from_i64(prefix + step * k as i64).expect("generated in domain")
+                            T::of(Some(prefix + step * k as i64))
                         });
                     }
                     log.push(format!(
@@ -1099,7 +1125,7 @@ mod delta {
                 let mut e = col.edit();
                 for want in &vals {
                     assert_eq!(e.peek().as_ref(), Some(want));
-                    e.replace(|v| v);
+                    e.replace_with(*want);
                 }
                 e.finish();
             }
@@ -1151,10 +1177,8 @@ fn exhaustive_tiny_bool() {
                     for del in 0..=(len - pos) {
                         for ins in 0..=2usize {
                             for v in [false, true] {
-                                let mut col = Column::<bool>::from_values_with_max_segments(
-                                    vals.clone(),
-                                    max_seg,
-                                );
+                                let mut col =
+                                    Column::<bool>::from_values_with_max_segments(&vals, max_seg);
                                 let mut m = Model::new(vals.clone());
                                 {
                                     let mut e = col.edit();

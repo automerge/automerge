@@ -11,43 +11,41 @@ fn main() {
 const N: usize = 100_000;
 
 fn saved_literals_u64() -> Vec<u8> {
-    Column::<u64>::from_values((0..N as u64).collect()).save()
+    Column::<u64>::from_values(&(0..N as u64).collect::<Vec<_>>()).save()
 }
 
 fn saved_repeats_u64() -> Vec<u8> {
-    Column::<u64>::from_values((0..N as u64).map(|i| i / 1000).collect()).save()
+    Column::<u64>::from_values(&(0..N as u64).map(|i| i / 1000).collect::<Vec<_>>()).save()
 }
 
 fn saved_mixed_nullable() -> Vec<u8> {
     Column::<Option<u64>>::from_values(
-        (0..N as u64)
+        &(0..N as u64)
             .map(|i| if i % 5 == 0 { None } else { Some(i / 7) })
-            .collect(),
+            .collect::<Vec<_>>(),
     )
     .save()
 }
 
 fn saved_strings() -> Vec<u8> {
-    Column::<String>::from_values(
-        (0..N / 10)
-            .map(|i| {
-                if i % 3 == 0 {
-                    "repeated".to_string()
-                } else {
-                    format!("item_{i:06}")
-                }
-            })
-            .collect(),
-    )
-    .save()
+    let strings: Vec<String> = (0..N / 10)
+        .map(|i| {
+            if i % 3 == 0 {
+                "repeated".to_string()
+            } else {
+                format!("item_{i:06}")
+            }
+        })
+        .collect();
+    Column::<String>::from_values(&strings.iter().map(String::as_str).collect::<Vec<_>>()).save()
 }
 
 fn saved_bool() -> Vec<u8> {
-    Column::<bool>::from_values((0..N).map(|i| (i / 17) % 2 == 0).collect()).save()
+    Column::<bool>::from_values(&(0..N).map(|i| (i / 17) % 2 == 0).collect::<Vec<_>>()).save()
 }
 
 fn saved_prefix_u32() -> Vec<u8> {
-    PrefixColumn::<u32>::from_values((0..N).map(|i| (i % 4) as u32).collect()).save()
+    PrefixColumn::<u32>::from_values(&(0..N).map(|i| (i % 4) as u32).collect::<Vec<_>>()).save()
 }
 
 macro_rules! bench_pair {

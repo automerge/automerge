@@ -250,13 +250,14 @@ impl IndexBuilder {
             .map(|(w, t)| if *t { Some(*w as u32) } else { None })
             .collect();
 
-        let visible: Vec<bool> = self.succ.iter().map(|&n| n == 0).collect();
-        let visible = hexane::Column::from_values(visible);
+        // each column's values are freed as soon as it is built, before
+        // the mark index is: they are not held to the end of `finish`
+        let visible =
+            hexane::Column::from_values(&self.succ.iter().map(|&n| n == 0).collect::<Vec<bool>>());
 
-        let top: Vec<bool> = self.top.to_vec();
-        let top = hexane::PrefixColumn::from_values(top);
+        let top = hexane::PrefixColumn::from_values(&self.top);
 
-        let inc = hexane::Column::from_values(self.incs);
+        let inc = hexane::Column::from_values(&std::mem::take(&mut self.incs));
 
         let mut mark = MarkIndexColumn::new();
         mark.extend(0, self.marks);
