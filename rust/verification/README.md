@@ -11,6 +11,7 @@ separate and do not check executable code.
 | [Incoming ancestry worklist](incoming_topology/README.md) | A duplicate-free dependency order containing every resolvable candidate |
 | [Dependency walks](incoming_walk/README.md) | Exact in-group reachability, boundary discovery, and member walks through a supplied causal cut |
 | [Authors and actor slots](incoming_authors/README.md) | Whole-pass propagation from exact predecessors, original causes of broken chains, actor-slot conflicts, and author-source precedence |
+| [Ready ancestry](incoming_ancestry/README.md) | Exact actor row projection, shared batch/cone conflict guard, and the checked derivation of clock and canonical-fragment premises on a ready head’s own past |
 | [Boundary past](boundary_past/README.md) | Exact memo lookup, fill and union on one snapshot, and exact cutoff given the applied-clock contract |
 | [Incoming groups](incoming_groups/README.md) | Delivered/canonical equality, per-actor frontiers, scoped provisional/fresh/cache verification and exact proof contents, and exact unapplied rank order |
 | [Fragment selection](fragment_selection/README.md) | The greatest subset of proved fragment occurrences closed under boundary requirements |
@@ -30,11 +31,13 @@ adapter establishes the next kernel's preconditions. In particular:
   identify applied sources, and which changes/tables correspond to each rank.
   The production index and origin decoders now check the corresponding map
   construction, not the accuracy of those graph/author lookups.
-- The memo now borrows a single immutable graph/candidate view and has a
-  checked lookup, fill, and union. The cutoff theorem still needs a proof at
-  the concrete group call site that the ancestry is resolved, has valid
-  chains and no equivocation, and is queried through the applied-clock
-  contract on that same snapshot.
+- The production actor-row projection and shared batch/cone conflict guard
+  now have contracts. A composition theorem derives complete, conflict-free
+  actor chains for the ready head’s own past and uses them in the boundary
+  cutoff and canonical-descriptor proofs. `incoming.rs` itself is not yet
+  checked against all their alignment premises: notably that the same decoded
+  `Change`/graph/author views supply those rows, exact slots, canonical walks
+  and applied-clock maxima.
 - Evidence preparation and settlement now carry one owned scope and check
   every per-frontier operation; prepared keys can be shared but witnesses
   cannot. The leaf graph/author, wire-bucket, and signature-store observations
@@ -54,7 +57,7 @@ Run all checks with the [pinned Verus release and Rust toolchain](incoming_topol
 from the repository root:
 
 ```sh
-for harness in incoming_intrinsic incoming_topology incoming_walk incoming_authors boundary_past incoming_groups fragment_selection actor_clock incoming_completion; do
+for harness in incoming_intrinsic incoming_topology incoming_walk incoming_authors incoming_ancestry boundary_past incoming_groups fragment_selection actor_clock incoming_completion; do
     verus --edition=2021 --crate-type=lib --cfg automerge_verus --no-cheating \
         "rust/verification/$harness/lib.rs" || exit
 done

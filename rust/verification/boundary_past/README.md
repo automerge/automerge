@@ -28,7 +28,10 @@ applied graph, the full boundary past is the union of the overlay candidate
 ancestors and the inclusive pasts of exactly the applied leaves in the memo
 summary. [The cutoff theorem](cutoff_spec.rs) combines this result, exact
 per-actor maxima, and validated actor chains: the production cutoff test is
-exact membership in that full boundary past, not an approximation.
+exact membership in that full boundary past, not an approximation. The
+[ready-cone composition](ready_cutoff.rs) discharges the actor-chain premise
+with the live rows and conflict guard, then uses the checked walks to
+establish the canonical descriptor.
 
 ## Trusted boundary
 
@@ -36,11 +39,12 @@ exact membership in that full boundary past, not an approximation.
 borrows the applied graph and candidate table for its entire lifetime. The
 boundary walk, memo observer, and membership cutoff use those same references;
 the memo cannot survive document apply or a change to the borrowed table.
-The Verus harness still assumes that the adapter returns the actual metadata
-for each reachable hash, that the relevant ancestry has valid chains and no
-equivocation, and that `ChangeGraph::seq_clock_for_heads` provides exact applied
-maxima for the given seeds. It does not prove those graph APIs or discharge all
-of the cutoff theorem's premises at the concrete group-evaluation call site.
+The composition assumes that the actual Rust adapters return faithful
+metadata for every relevant hash and that `ChangeGraph::seq_clock_for_heads`
+returns exact applied maxima for the given seeds. It derives chain validity
+and non-equivocation from stage contracts rather than assuming them over
+the whole pending batch. The concrete group-evaluation call site still needs
+to establish the raw graph/row/clock alignment contracts.
 Hash/actor equality, hashing, and cloning have their usual identity contracts.
 
 Run with the [pinned Verus toolchain](../incoming_topology/README.md):
