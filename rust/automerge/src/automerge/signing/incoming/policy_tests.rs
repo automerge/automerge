@@ -192,3 +192,74 @@ fn authoritative_author_reads_never_fall_back_across_source_boundaries() {
         Some(None)
     );
 }
+
+#[test]
+fn clean_slot_batch_never_opens_the_cone() {
+    use super::ancestry_gate::Guard;
+    let guard = Guard::new(&[1, 2, 3], |hash| ((hash, 1), false));
+    assert_eq!(
+        guard.check(
+            2,
+            |_| panic!("clean batch walked dependencies"),
+            |_| panic!("clean batch classified a node")
+        ),
+        None
+    );
+}
+
+#[test]
+fn unrelated_conflict_does_not_poison_a_clean_cone_or_open_applied_history() {
+    use super::{ancestry_gate::Guard, walk::Visit};
+    let guard = Guard::new(&[1, 2, 3, 4], |hash| {
+        ((if hash == 3 { 2 } else { hash }, 1), false)
+    });
+    let parents = |hash| match hash {
+        1 => vec![9],
+        2 | 3 => vec![],
+        4 => vec![2, 3],
+        _ => panic!("opened applied history"),
+    };
+    let visit = |hash| {
+        if hash == 9 {
+            Visit::Ignore
+        } else {
+            Visit::KeepAndExpand
+        }
+    };
+    assert_eq!(guard.check(1, parents, visit), None);
+    assert_eq!(guard.check(4, parents, visit), Some(3));
+}
+
+#[test]
+fn actor_input_resolves_the_exact_rank_order_across_applied_and_candidate_parents() {
+    use super::actor_chains::{AuthorSource, Dependency, Resolution};
+    use super::actor_input::{resolve, Observation};
+    let outcomes = resolve(
+        &[10, 20],
+        |hash| match hash {
+            10 => Observation {
+                actor: 1,
+                seq: 2,
+                actor_already_applied: true,
+                parents: &[5],
+            },
+            20 => Observation {
+                actor: 1,
+                seq: 3,
+                actor_already_applied: true,
+                parents: &[5, 10],
+            },
+            _ => unreachable!(),
+        },
+        |parent| match parent {
+            5 => Dependency::Applied {
+                actor: 1,
+                seq: 1,
+                slot: 7,
+            },
+            10 => Dependency::Candidate(0),
+            _ => unreachable!(),
+        },
+    );
+    assert_eq!(outcomes, [Resolution::Linked(AuthorSource::Applied(7)); 2]);
+}

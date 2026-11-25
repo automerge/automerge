@@ -1,4 +1,4 @@
-use crate::spec::model;
+use crate::lookup_spec::model;
 use vstd::prelude::*;
 
 verus! {

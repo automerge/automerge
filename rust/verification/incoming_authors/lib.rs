@@ -2,10 +2,11 @@
 
 #[path = "../../automerge/src/automerge/signing/incoming/author_projection.rs"]
 mod author_projection;
+#[path = "spec.rs"]
+mod lookup_spec;
 mod projection_spec;
 mod slot_spec;
 mod source_spec;
-mod spec;
 
 mod chain_proof;
 mod chain_spec;

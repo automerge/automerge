@@ -8,9 +8,9 @@ fn finds_conflicts_with_applied_slots_and_with_distinct_candidate_hashes() {
         30 => ((3, 9), true),
         _ => unreachable!(),
     };
-    assert_eq!(find_conflict(&[10, 20], view), None);
-    assert_eq!(find_conflict(&[10, 20, 11, 30], view), Some(11));
-    assert_eq!(find_conflict(&[20, 30], view), Some(30));
+    assert_eq!(find_conflict(&[10, 20], &view), None);
+    assert_eq!(find_conflict(&[10, 20, 11, 30], &view), Some(11));
+    assert_eq!(find_conflict(&[20, 30], &view), Some(30));
     // In a different ancestry, only one arm of the candidate fork is present.
-    assert_eq!(find_conflict(&[11, 20], view), None);
+    assert_eq!(find_conflict(&[11, 20], &view), None);
 }

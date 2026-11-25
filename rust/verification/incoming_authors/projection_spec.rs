@@ -1,5 +1,5 @@
 use crate::actor_chains::{AuthorSource, Resolution};
-use crate::spec::{model, modeled};
+use crate::lookup_spec::{model, modeled};
 use std::hash::Hash;
 use vstd::prelude::*;
 use vstd::{laws_eq::obeys_concrete_eq, std_specs::hash::obeys_key_model};

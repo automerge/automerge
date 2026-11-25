@@ -33,7 +33,9 @@ use crate::{ActorId, Author, AutomergeError, Change, ChangeHash, Fragment};
 use super::{has_signature, SigningDocument};
 
 mod actor_chains;
+mod actor_input;
 mod actor_slots;
+mod ancestry_gate;
 mod apply_order;
 mod author_checks;
 mod author_projection;
@@ -107,7 +109,7 @@ struct ResolvedAncestry<'a> {
     topo_rank: HashMap<ChangeHash, usize>,
     valid_authors: HashMap<ChangeHash, Option<Author<'static>>>,
     broken_chain_cause: HashMap<ChangeHash, ChangeHash>,
-    has_any_equivocation: bool,
+    candidate_hashes: Vec<ChangeHash>,
 }
 
 type BoundarySummary = boundary_summary::Summary<ActorId, ChangeHash>;
@@ -452,9 +454,6 @@ impl Incoming<'_> {
         );
 
         let hashes: Vec<_> = changes_by_hash.keys().copied().collect();
-        let has_any_equivocation =
-            actor_slots::find_conflict(&hashes, |hash| self.actor_slot(changes_by_hash[&hash]))
-                .is_some();
         let (resolved_topo, topo_rank) = self.topological_sort_unapplied(&hashes, &changes_by_hash);
         let (valid_authors, broken_chain_cause) =
             self.propagate_actor_authors(&resolved_topo, &topo_rank, &changes_by_hash);
@@ -465,7 +464,7 @@ impl Incoming<'_> {
             topo_rank,
             valid_authors,
             broken_chain_cause,
-            has_any_equivocation,
+            candidate_hashes: hashes,
         }
     }
 
@@ -511,36 +510,29 @@ impl Incoming<'_> {
         HashMap<ChangeHash, Option<Author<'static>>>,
         HashMap<ChangeHash, ChangeHash>,
     ) {
-        use actor_chains::{Candidate, Dependency};
-
-        let rows: Vec<_> = resolved_topo
-            .iter()
-            .map(|hash| {
-                let change = changes_by_hash[hash];
-                Candidate {
+        let outcomes = actor_input::resolve(
+            resolved_topo,
+            |hash| {
+                let change = changes_by_hash[&hash];
+                actor_input::Observation {
                     actor: change.actor_id(),
                     seq: change.seq(),
                     actor_already_applied: change.seq() == 1 && self.has_actor_seq(change),
-                    deps: change
-                        .deps()
-                        .iter()
-                        .map(|dep| {
-                            if let Some((slot, seq)) = self.graph.actor_seq_for_hash(dep) {
-                                Dependency::Applied {
-                                    actor: &self.ops.actors[slot],
-                                    seq: u64::from(seq),
-                                    slot,
-                                }
-                            } else {
-                                Dependency::Candidate(topo_rank[dep])
-                            }
-                        })
-                        .collect(),
+                    parents: change.deps(),
                 }
-            })
-            .collect();
-
-        let outcomes = actor_chains::propagate(&rows);
+            },
+            |parent| {
+                if let Some((slot, seq)) = self.graph.actor_seq_for_hash(&parent) {
+                    actor_chains::Dependency::Applied {
+                        actor: &self.ops.actors[slot],
+                        seq: u64::from(seq),
+                        slot,
+                    }
+                } else {
+                    actor_chains::Dependency::Candidate(topo_rank[&parent])
+                }
+            },
+        );
         author_projection::materialize(
             resolved_topo,
             &outcomes,
@@ -559,18 +551,23 @@ impl Incoming<'_> {
 
     // --- Stage 3: Canonical fragment & attached proof verification ---
 
-    fn verify_resolved_groups(
+    fn verify_resolved_groups<'a>(
         &self,
         candidates: &[CandidateGroup],
-        ancestry: &ResolvedAncestry<'_>,
+        ancestry: &ResolvedAncestry<'a>,
     ) -> Result<EvaluatedGroups, AutomergeError> {
         use evaluation_batch::Outcome;
 
+        let guard = ancestry_gate::Guard::new(&ancestry.candidate_hashes, |hash| {
+            let change: &'a Change = ancestry.changes_by_hash[&hash];
+            self.actor_slot(change)
+        });
         let (waiting_candidate_indices, verified) = evaluation_batch::assess(
             candidates,
             BoundaryPastMemo::new(self.graph, &ancestry.changes_by_hash),
             |mut memo, candidate| {
-                let evaluation = self.evaluate_single_group(&candidate.group, ancestry, &mut memo);
+                let evaluation =
+                    self.evaluate_single_group(&candidate.group, ancestry, &guard, &mut memo);
                 let outcome =
                     pending::route(candidate.origin, evaluation).map(|route| match route {
                         Route::Evaluated(GroupEvaluation::WaitingForAncestry) => Outcome::Waiting,
@@ -602,10 +599,16 @@ impl Incoming<'_> {
         })
     }
 
-    fn evaluate_single_group(
+    fn evaluate_single_group<'a>(
         &self,
         group: &PendingGroup,
-        ancestry: &ResolvedAncestry<'_>,
+        ancestry: &ResolvedAncestry<'a>,
+        guard: &ancestry_gate::Guard<
+            '_,
+            ChangeHash,
+            (&'a ActorId, u64),
+            impl Fn(ChangeHash) -> ((&'a ActorId, u64), bool),
+        >,
         boundary_memo: &mut BoundaryPastMemo<'_, '_>,
     ) -> Result<GroupEvaluation, AutomergeError> {
         let status = evaluation::ancestry(&group.changes, |change| {
@@ -620,13 +623,19 @@ impl Incoming<'_> {
             status,
             boundary_memo,
             || {
-                ancestry
-                    .has_any_equivocation
-                    .then(|| {
-                        self.find_ancestry_equivocation(&group.head, &ancestry.changes_by_hash)
-                            .map(AutomergeError::duplicate_seq)
-                    })
-                    .flatten()
+                guard
+                    .check(
+                        group.head,
+                        |node| ancestry.changes_by_hash[&node].deps().to_vec(),
+                        |node| {
+                            if self.graph.has_change(&node) {
+                                Visit::Ignore
+                            } else {
+                                Visit::KeepAndExpand
+                            }
+                        },
+                    )
+                    .map(|hash| AutomergeError::duplicate_seq(ancestry.changes_by_hash[&hash]))
             },
             |memo| {
                 let canonical = Self::derive_canonical_fragment(group.head, memo);
@@ -670,26 +679,6 @@ impl Incoming<'_> {
             .evidence
             .settle(resolve_author)
             .map_err(|error| SigningError::from(error).into())
-    }
-
-    fn find_ancestry_equivocation<'a>(
-        &self,
-        head: &ChangeHash,
-        changes_by_hash: &HashMap<ChangeHash, &'a Change>,
-    ) -> Option<&'a Change> {
-        let ancestry = walk(
-            vec![*head],
-            |node| changes_by_hash[&node].deps().to_vec(),
-            |node| {
-                if self.graph.has_change(&node) {
-                    Visit::Ignore
-                } else {
-                    Visit::KeepAndExpand
-                }
-            },
-        );
-        actor_slots::find_conflict(&ancestry, |hash| self.actor_slot(changes_by_hash[&hash]))
-            .map(|hash| changes_by_hash[&hash])
     }
 
     fn derive_canonical_fragment(
@@ -801,7 +790,7 @@ impl Incoming<'_> {
         let mut ranks = apply_order::collect_ranks(&accepted_member_hashes, |hash| {
             (!self.graph.has_change(&hash)).then(|| ancestry.topo_rank[&hash])
         });
-        if let Some(conflict) = actor_slots::find_conflict(&ranks, |rank| {
+        if let Some(conflict) = actor_slots::find_conflict(&ranks, &|rank| {
             self.actor_slot(ancestry.changes_by_hash[&ancestry.resolved_topo[rank]])
         }) {
             return Err(AutomergeError::duplicate_seq(

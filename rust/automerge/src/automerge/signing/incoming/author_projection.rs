@@ -8,8 +8,8 @@ use std::hash::Hash;
 
 #[cfg(automerge_verus)]
 use crate::{
+    lookup_spec::{model, modeled},
     projection_spec::*,
-    spec::{model, modeled},
 };
 #[cfg(automerge_verus)]
 use vstd::{prelude::*, std_specs::hash::hash_map_inv};
