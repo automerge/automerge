@@ -27,14 +27,16 @@ verified by this harness. Review these narrow translations of the graph:
 | --- | --- | --- | --- |
 | Intrinsic group validation | The proposed head | Every reached group member, following only in-group edges | Every reached group member |
 | Canonical boundary | The head's parents | Nodes below the head's level | The first equal-or-higher nodes on the paths |
+| Ancestry equivocation | The head | Unapplied ancestors | Unapplied ancestors |
+| Boundary-past memo | A boundary node | Unapplied nodes without an exact memo entry | All visited nodes, including stops |
 | Canonical members | The head | Nodes outside the boundary past | Nodes outside the boundary past |
 
 For canonical members, [the cut lemma](proof.rs) shows that if the excluded
 set is parent-closed and does not include the head, stopping at the cut gives
-exactly the head's ancestry **minus** that set. This does not prove that
-`boundary_past_for` and the two sequence clocks compute the right excluded
-set; that is a separate obligation. The unique-head check, level checks and
-comparison with the delivered group are also outside this proof.
+exactly the head's ancestry **minus** that set. For the proof that stopping
+at a cached ancestor still summarizes the right region, see the separate
+[boundary-past harness](../boundary_past/README.md). The unique-head check,
+level checks, and comparison with the delivered group are outside this proof.
 
 Run with the [same toolchain as the ancestry worklist](../incoming_topology/README.md):
 

@@ -18,7 +18,7 @@
 //!    contents, then `PreparedAdmission::complete` merges proofs, publishes
 //!    history and removes completed or invalidated pending groups.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::admission::{select_fragments, AcceptedHistory};
 use crate::change_graph::ChangeGraph;
@@ -35,6 +35,7 @@ use super::{has_signature, SigningDocument};
 mod actor_chains;
 mod actor_slots;
 mod author_checks;
+mod boundary_summary;
 mod topology;
 mod walk;
 
@@ -120,10 +121,12 @@ struct ResolvedAncestry<'a> {
     has_any_equivocation: bool,
 }
 
+type BoundarySummary = boundary_summary::Summary<ActorId, ChangeHash>;
+
 /// Memoized boundary causal pasts shared across fragment checks in one batch.
 #[derive(Default)]
 struct BoundaryPastMemo {
-    by_boundary: HashMap<ChangeHash, (HashMap<ActorId, u64>, BTreeSet<ChangeHash>)>,
+    by_boundary: HashMap<ChangeHash, BoundarySummary>,
 }
 
 enum GroupEvaluation {
@@ -806,19 +809,11 @@ impl Incoming<'_> {
             },
         );
 
-        let mut candidate_clock: HashMap<ActorId, u64> = HashMap::new();
-        let mut graph_boundary_seeds: BTreeSet<ChangeHash> = BTreeSet::new();
+        let mut boundary_past = BoundarySummary::new();
         for &b in &boundary {
-            let (b_clock, b_seeds) = self.boundary_past_for(b, changes_by_hash, memo);
-            for (actor, seq) in b_clock {
-                candidate_clock
-                    .entry(actor)
-                    .and_modify(|curr| *curr = (*curr).max(seq))
-                    .or_insert(seq);
-            }
-            graph_boundary_seeds.extend(b_seeds);
+            boundary_past.merge(&self.boundary_past_for(b, changes_by_hash, memo));
         }
-        let seeds_vec: Vec<ChangeHash> = graph_boundary_seeds.into_iter().collect();
+        let seeds_vec: Vec<ChangeHash> = boundary_past.seeds.into_iter().collect();
         let graph_boundary_clock = self.graph.seq_clock_for_heads(&seeds_vec);
 
         let in_boundary_past = |hash: &ChangeHash| -> bool {
@@ -828,7 +823,8 @@ impl Incoming<'_> {
                     .is_some_and(|covered| seq <= covered.get())
             } else {
                 let change = changes_by_hash[hash];
-                candidate_clock
+                boundary_past
+                    .maxima
                     .get(change.actor_id())
                     .is_some_and(|&max_seq| change.seq() <= max_seq)
             }
@@ -865,44 +861,39 @@ impl Incoming<'_> {
         boundary_node: ChangeHash,
         changes_by_hash: &HashMap<ChangeHash, &Change>,
         memo: &mut BoundaryPastMemo,
-    ) -> (HashMap<ActorId, u64>, BTreeSet<ChangeHash>) {
+    ) -> BoundarySummary {
+        use boundary_summary::Contribution;
+
         if let Some(cached) = memo.by_boundary.get(&boundary_node) {
             return cached.clone();
         }
         if self.graph.has_change(&boundary_node) {
-            return (HashMap::new(), BTreeSet::from([boundary_node]));
+            let mut result = BoundarySummary::new();
+            result.seed(boundary_node);
+            return result;
         }
 
-        let mut clock: HashMap<ActorId, u64> = HashMap::new();
-        let mut graph_seeds: BTreeSet<ChangeHash> = BTreeSet::new();
-        let mut visited = HashSet::new();
-        let mut stack = vec![boundary_node];
-        while let Some(node) = stack.pop() {
-            if self.graph.has_change(&node) {
-                graph_seeds.insert(node);
-                continue;
-            }
-            if let Some((cached_clock, cached_seeds)) = memo.by_boundary.get(&node) {
-                for (actor, &seq) in cached_clock {
-                    clock
-                        .entry(actor.clone())
-                        .and_modify(|curr| *curr = (*curr).max(seq))
-                        .or_insert(seq);
+        let visited = walk(
+            vec![boundary_node],
+            |node| changes_by_hash[&node].deps().to_vec(),
+            |node| {
+                if self.graph.has_change(&node) || memo.by_boundary.contains_key(&node) {
+                    Visit::Keep
+                } else {
+                    Visit::KeepAndExpand
                 }
-                graph_seeds.extend(cached_seeds.iter().copied());
-                continue;
+            },
+        );
+        let result = boundary_summary::summarize(&visited, |node| {
+            if self.graph.has_change(&node) {
+                Contribution::Applied(node)
+            } else if let Some(cached) = memo.by_boundary.get(&node) {
+                Contribution::Memoized(cached)
+            } else {
+                let change = changes_by_hash[&node];
+                Contribution::Candidate(change.actor_id().clone(), change.seq())
             }
-            if !visited.insert(node) {
-                continue;
-            }
-            let change = changes_by_hash[&node];
-            clock
-                .entry(change.actor_id().clone())
-                .and_modify(|curr| *curr = (*curr).max(change.seq()))
-                .or_insert(change.seq());
-            stack.extend(change.deps().iter().copied());
-        }
-        let result = (clock, graph_seeds);
+        });
         memo.by_boundary.insert(boundary_node, result.clone());
         result
     }
@@ -1085,3 +1076,6 @@ impl PreparedAdmission {
         signing.state.pending = pending;
     }
 }
+
+#[cfg(test)]
+mod boundary_tests;

@@ -6,7 +6,7 @@ use std::collections::{HashSet, VecDeque};
 use std::hash::Hash;
 
 #[cfg(automerge_verus)]
-use crate::{proof::*, spec::*};
+use crate::{walk_proof::*, walk_spec::*};
 #[cfg(automerge_verus)]
 use vstd::laws_eq::obeys_concrete_eq;
 #[cfg(automerge_verus)]

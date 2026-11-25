@@ -1,4 +1,4 @@
-use crate::spec::*;
+use crate::walk_spec::*;
 use vstd::prelude::*;
 use vstd::set_lib::lemma_len_subset;
 
