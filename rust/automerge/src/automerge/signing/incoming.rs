@@ -32,6 +32,8 @@ use crate::{ActorId, Author, AutomergeError, Change, ChangeHash, Fragment};
 
 use super::{has_signature, SigningDocument};
 
+mod actor_chains;
+mod actor_slots;
 mod author_checks;
 mod topology;
 mod walk;
@@ -176,6 +178,13 @@ impl Incoming<'_> {
         self.ops
             .lookup_actor(change.actor_id())
             .is_some_and(|actor| self.graph.seq_for_actor(actor) >= change.seq())
+    }
+
+    fn actor_slot<'a>(&self, change: &'a Change) -> ((&'a ActorId, u64), bool) {
+        (
+            (change.actor_id(), change.seq()),
+            self.has_actor_seq(change),
+        )
     }
 
     /// Plan without mutating pending history. Blocked groups remain pending;
@@ -485,33 +494,22 @@ impl Incoming<'_> {
         candidates: &'a [CandidateGroup],
     ) -> ResolvedAncestry<'a> {
         let mut changes_by_hash: HashMap<ChangeHash, &'a Change> = HashMap::new();
-        let mut seen_actor_seqs: HashMap<(&'a ActorId, u64), ChangeHash> = HashMap::new();
-        let mut has_any_equivocation = false;
-
         for candidate in candidates {
             for change in &candidate.group.changes {
                 let hash = change.hash();
-                if self.graph.has_change(&hash) {
-                    continue;
+                if !self.graph.has_change(&hash) {
+                    changes_by_hash.entry(hash).or_insert(change);
                 }
-                if self.has_actor_seq(change) {
-                    has_any_equivocation = true;
-                }
-                let key = (change.actor_id(), change.seq());
-                if let Some(&prev) = seen_actor_seqs.get(&key) {
-                    if prev != hash {
-                        has_any_equivocation = true;
-                    }
-                } else {
-                    seen_actor_seqs.insert(key, hash);
-                }
-                changes_by_hash.entry(hash).or_insert(change);
             }
         }
 
-        let (resolved_topo, topo_rank) = self.topological_sort_unapplied(&changes_by_hash);
+        let hashes: Vec<_> = changes_by_hash.keys().copied().collect();
+        let has_any_equivocation =
+            actor_slots::find_conflict(&hashes, |hash| self.actor_slot(changes_by_hash[&hash]))
+                .is_some();
+        let (resolved_topo, topo_rank) = self.topological_sort_unapplied(&hashes, &changes_by_hash);
         let (valid_authors, broken_chain_cause) =
-            self.propagate_actor_authors(&resolved_topo, &changes_by_hash);
+            self.propagate_actor_authors(&resolved_topo, &topo_rank, &changes_by_hash);
 
         ResolvedAncestry {
             changes_by_hash,
@@ -524,22 +522,22 @@ impl Incoming<'_> {
 
     fn topological_sort_unapplied(
         &self,
+        hashes: &[ChangeHash],
         changes_by_hash: &HashMap<ChangeHash, &Change>,
     ) -> (Vec<ChangeHash>, HashMap<ChangeHash, usize>) {
         // Give every unapplied candidate an index for the worklist. Each
         // unapplied dependency occurrence contributes one to the count;
         // exactly those with a candidate parent have a reverse edge to
         // subtract later. Applied dependencies contribute neither.
-        let candidates: Vec<_> = changes_by_hash.iter().collect();
-        let index_by_hash: HashMap<_, _> = candidates
+        let index_by_hash: HashMap<_, _> = hashes
             .iter()
             .enumerate()
-            .map(|(index, (&hash, _))| (hash, index))
+            .map(|(index, &hash)| (hash, index))
             .collect();
-        let mut waiting = vec![0; candidates.len()];
-        let mut dependents = vec![Vec::new(); candidates.len()];
-        for (index, (_, change)) in candidates.iter().enumerate() {
-            for dep in change.deps() {
+        let mut waiting = vec![0; hashes.len()];
+        let mut dependents = vec![Vec::new(); hashes.len()];
+        for (index, hash) in hashes.iter().enumerate() {
+            for dep in changes_by_hash[hash].deps() {
                 if !self.graph.has_change(dep) {
                     waiting[index] += 1;
                     if let Some(&parent) = index_by_hash.get(dep) {
@@ -552,7 +550,7 @@ impl Incoming<'_> {
 
         let resolved_topo: Vec<_> = topology::resolve(&dependents, waiting)
             .into_iter()
-            .map(|index| *candidates[index].0)
+            .map(|index| hashes[index])
             .collect();
         let topo_rank = resolved_topo
             .iter()
@@ -565,84 +563,60 @@ impl Incoming<'_> {
     fn propagate_actor_authors(
         &self,
         resolved_topo: &[ChangeHash],
+        topo_rank: &HashMap<ChangeHash, usize>,
         changes_by_hash: &HashMap<ChangeHash, &Change>,
     ) -> (
         HashMap<ChangeHash, Option<Author<'static>>>,
         HashMap<ChangeHash, ChangeHash>,
     ) {
-        let mut valid_authors: HashMap<ChangeHash, Option<Author<'static>>> = HashMap::new();
-        let mut broken_chain_cause: HashMap<ChangeHash, ChangeHash> = HashMap::new();
+        use actor_chains::{AuthorSource, Candidate, Dependency, Resolution};
 
-        for &hash in resolved_topo {
-            let change = changes_by_hash[&hash];
-            if let Some(&cause) = change
-                .deps()
-                .iter()
-                .find_map(|dep| broken_chain_cause.get(dep))
-            {
-                broken_chain_cause.insert(hash, cause);
-                continue;
-            }
-            if change.seq() == 1 {
-                let already_applied = self
-                    .ops
-                    .lookup_actor(change.actor_id())
-                    .is_some_and(|idx| self.graph.seq_for_actor(idx) > 0);
-                if already_applied {
-                    broken_chain_cause.insert(hash, hash);
-                } else {
-                    valid_authors.insert(hash, change.author().map(Author::into_owned));
+        let rows: Vec<_> = resolved_topo
+            .iter()
+            .map(|hash| {
+                let change = changes_by_hash[hash];
+                Candidate {
+                    actor: change.actor_id(),
+                    seq: change.seq(),
+                    actor_already_applied: change.seq() == 1 && self.has_actor_seq(change),
+                    deps: change
+                        .deps()
+                        .iter()
+                        .map(|dep| {
+                            if let Some((slot, seq)) = self.graph.actor_seq_for_hash(dep) {
+                                Dependency::Applied {
+                                    actor: &self.ops.actors[slot],
+                                    seq: u64::from(seq),
+                                    slot,
+                                }
+                            } else {
+                                Dependency::Candidate(topo_rank[dep])
+                            }
+                        })
+                        .collect(),
                 }
-            } else {
-                match self.find_predecessor_author(change, changes_by_hash, &valid_authors) {
-                    Some(author) => {
-                        valid_authors.insert(hash, author);
-                    }
-                    None => {
-                        broken_chain_cause.insert(hash, hash);
-                    }
+            })
+            .collect();
+
+        let mut valid_authors = HashMap::new();
+        let mut broken_chain_cause = HashMap::new();
+        for (&hash, resolution) in resolved_topo.iter().zip(actor_chains::propagate(&rows)) {
+            match resolution {
+                Resolution::Linked(source) => {
+                    let author = match source {
+                        AuthorSource::Initial(index) => {
+                            changes_by_hash[&resolved_topo[index]].author()
+                        }
+                        AuthorSource::Applied(slot) => self.authors.get_author_for_actor(slot),
+                    };
+                    valid_authors.insert(hash, author.map(Author::into_owned));
+                }
+                Resolution::Broken(index) => {
+                    broken_chain_cause.insert(hash, resolved_topo[index]);
                 }
             }
         }
         (valid_authors, broken_chain_cause)
-    }
-
-    fn find_predecessor_author(
-        &self,
-        change: &Change,
-        changes_by_hash: &HashMap<ChangeHash, &Change>,
-        valid_authors: &HashMap<ChangeHash, Option<Author<'static>>>,
-    ) -> Option<Option<Author<'static>>> {
-        enum Source<'a> {
-            Applied(usize),
-            Candidate(&'a Option<Author<'static>>),
-        }
-
-        let predecessor = author_checks::find_predecessor(
-            change.deps(),
-            change.actor_id(),
-            change.seq() - 1,
-            |dep| {
-                if let Some((actor, seq)) = self.graph.actor_seq_for_hash(&dep) {
-                    Some((
-                        &self.ops.actors[actor],
-                        u64::from(seq),
-                        Source::Applied(actor),
-                    ))
-                } else {
-                    let author = valid_authors.get(&dep)?;
-                    let pred = changes_by_hash[&dep];
-                    Some((pred.actor_id(), pred.seq(), Source::Candidate(author)))
-                }
-            },
-        )?;
-        Some(match predecessor {
-            Source::Applied(actor) => self
-                .authors
-                .get_author_for_actor(actor)
-                .map(Author::into_owned),
-            Source::Candidate(author) => author.clone(),
-        })
     }
 
     // --- Stage 3: Canonical fragment & attached proof verification ---
@@ -780,28 +754,19 @@ impl Incoming<'_> {
         head: &ChangeHash,
         changes_by_hash: &HashMap<ChangeHash, &'a Change>,
     ) -> Option<&'a Change> {
-        let mut seen = HashSet::new();
-        let mut actor_seqs: HashMap<(&ActorId, u64), ChangeHash> = HashMap::new();
-        let mut stack = vec![*head];
-        while let Some(hash) = stack.pop() {
-            if self.graph.has_change(&hash) || !seen.insert(hash) {
-                continue;
-            }
-            let change = changes_by_hash[&hash];
-            if self.has_actor_seq(change) {
-                return Some(change);
-            }
-            let key = (change.actor_id(), change.seq());
-            if let Some(&prev) = actor_seqs.get(&key) {
-                if prev != hash {
-                    return Some(change);
+        let ancestry = walk(
+            vec![*head],
+            |node| changes_by_hash[&node].deps().to_vec(),
+            |node| {
+                if self.graph.has_change(&node) {
+                    Visit::Ignore
+                } else {
+                    Visit::KeepAndExpand
                 }
-            } else {
-                actor_seqs.insert(key, hash);
-            }
-            stack.extend(change.deps().iter().copied());
-        }
-        None
+            },
+        );
+        actor_slots::find_conflict(&ancestry, |hash| self.actor_slot(changes_by_hash[&hash]))
+            .map(|hash| changes_by_hash[&hash])
     }
 
     fn derive_canonical_fragment(
@@ -964,33 +929,27 @@ impl Incoming<'_> {
         let selected_verified_indices: Vec<usize> = selection.selected_indices().collect();
 
         let mut selected_unapplied: HashSet<ChangeHash> = HashSet::new();
-        let mut selected_actor_seqs: HashMap<(ActorId, u64), ChangeHash> = HashMap::new();
+        let mut ordered_unapplied_hashes = Vec::new();
         let mut accepted_member_hashes: Vec<ChangeHash> = Vec::new();
         for &v_idx in &selected_verified_indices {
             let group = &candidates[evaluated.verified[v_idx].candidate_index].group;
             for change in &group.changes {
                 let hash = change.hash();
                 accepted_member_hashes.push(hash);
-                if self.graph.has_change(&hash) {
-                    continue;
+                if !self.graph.has_change(&hash) && selected_unapplied.insert(hash) {
+                    ordered_unapplied_hashes.push(hash);
                 }
-                if self.has_actor_seq(change) {
-                    return Err(AutomergeError::duplicate_seq(change));
-                }
-                let key = (change.actor_id().clone(), change.seq());
-                if let Some(&prev) = selected_actor_seqs.get(&key) {
-                    if prev != hash {
-                        return Err(AutomergeError::duplicate_seq(change));
-                    }
-                } else {
-                    selected_actor_seqs.insert(key, hash);
-                }
-                selected_unapplied.insert(hash);
             }
         }
 
-        let mut ordered_unapplied_hashes: Vec<ChangeHash> =
-            selected_unapplied.into_iter().collect();
+        drop(selected_unapplied);
+        if let Some(conflict) = actor_slots::find_conflict(&ordered_unapplied_hashes, |hash| {
+            self.actor_slot(ancestry.changes_by_hash[&hash])
+        }) {
+            return Err(AutomergeError::duplicate_seq(
+                ancestry.changes_by_hash[&conflict],
+            ));
+        }
         ordered_unapplied_hashes.sort_unstable_by_key(|hash| ancestry.topo_rank[hash]);
 
         let mut remaining_candidate_indices: HashSet<usize> = evaluated

@@ -1,24 +1,47 @@
-# Incoming author checks
+# Incoming authors and actor slots
 
-[spec.rs](spec.rs) describes the two checks in the [production code](../../automerge/src/automerge/signing/incoming/author_checks.rs):
+## Propagation
 
-- **Predecessor lookup:** Return the author source of the first direct
-  dependency with the required actor and sequence, or no source if none
-  qualifies. An existing predecessor with no author is distinct from a missing
-  predecessor. The caller supplies `seq - 1` and the lookup exposes only applied
-  changes and already-valid candidate changes.
-- **Cached proof reuse:** Reuse cached evidence only if every required frontier
-  has an established author and a cached witness under that exact author.
-  Missing authors don't match, even if both lookups return no author.
+[chain_spec.rs](chain_spec.rs) specifies the [production propagation pass](../../automerge/src/automerge/signing/incoming/actor_chains.rs).
+Every resolved change is classified exactly once:
 
-The callback contracts assume accurate, stable lookup results and exact
-identity equality. They do not assume that a predecessor matches or that a
-cache entry can be reused; those are the checks proved here. Reviewing the
-call sites in [incoming.rs](../../automerge/src/automerge/signing/incoming.rs)
-also establishes that the cache lookup is scoped to this delivery's verified
-store and the exact frontier hash. The proof does not cover construction of
-that store, computation of the frontier hashes, cryptography, or the complete
-actor-author propagation loop.
+- If a direct dependency is broken, inherit the first such dependency's
+  cause, even if a matching predecessor was seen earlier. The cause eventually
+  traces back to the original local failure.
+- Otherwise, sequence one starts a new origin unless the actor already has
+  applied history. A later change takes its origin from the first direct
+  predecessor with the same actor and sequence exactly one less. If there is
+  no matching predecessor, this change is itself broken.
+
+The pass returns origin IDs rather than copying keys through the proof. An
+origin can legitimately have no author; that is different from a broken chain.
+The [adapter](../../automerge/src/automerge/signing/incoming.rs) translates
+resolved candidates and their dependencies to topological ranks or applied
+actor slots, and reads the author or error hash back from those origins. It
+trusts the applied graph and author lookup and the input's positive sequences.
+
+## Equivocation
+
+[slot_spec.rs](slot_spec.rs) says that the [conflict scan](../../automerge/src/automerge/signing/incoming/actor_slots.rs)
+returns no conflict exactly when all distinct unapplied candidates have
+unoccupied and pairwise distinct `(actor, seq)` slots. Otherwise it reports
+a hash witnessing the conflict. The proof also shows why a conflict-free
+batch needs no per-ancestry recheck: every subset is conflict-free. A
+conflict elsewhere in the batch does **not** invalidate an unrelated ancestry.
+The caller runs the scan over the unique batch hashes, over the verified walk
+of the relevant ancestry, and over the selected unapplied union. The proof
+trusts those projections and that an applied-slot query uses the same stable
+actor/sequence snapshot in all three cases.
+
+## Cached proof reuse
+
+[spec.rs](spec.rs) specifies when the [cache check](../../automerge/src/automerge/signing/incoming/author_checks.rs)
+permits reusing evidence: every required frontier must have an established
+author and a cached witness under that exact author. Missing authors don't
+match. This assumes accurate, stable lookups, concrete identity equality, and
+that the cache lookup is scoped to this delivery's verified store and frontier
+hash. It does not prove construction of that store, the frontier calculation,
+or cryptography.
 
 Run with the [same toolchain as the ancestry worklist](../incoming_topology/README.md):
 
