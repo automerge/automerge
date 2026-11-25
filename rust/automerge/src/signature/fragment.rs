@@ -20,6 +20,7 @@ use super::store::SignatureStore;
 
 mod evidence;
 mod frontiers;
+mod scoped;
 
 pub(crate) use evidence::assemble_frontiers;
 
@@ -87,21 +88,55 @@ impl FragmentRequirements {
         attached: &HashEntries,
         author_for_hash: impl Fn(&ChangeHash) -> Option<Author<'a>>,
     ) -> Result<SignatureStore, ProofError> {
-        assemble_frontiers(
-            &self.hashes,
+        Self::verify_hashes(&self.hashes, attached, |hash| author_for_hash(&hash))
+    }
+
+    fn verify_hashes<'a>(
+        hashes: &[ChangeHash],
+        attached: &HashEntries,
+        author_for_hash: impl Fn(ChangeHash) -> Option<Author<'a>>,
+    ) -> Result<SignatureStore, ProofError> {
+        scoped::fresh(
+            hashes,
+            attached,
             SignatureStore::default(),
-            |hash, mut verified| {
-                if attached.for_hash(&hash).next().is_none() {
-                    return Err(ProofError::MissingSignature(hash));
-                }
-                let author = author_for_hash(&hash).ok_or(ProofError::MissingAuthor(hash))?;
-                let witness = verify_frontier_entry(attached, &hash, author)?;
-                verified
-                    .insert_ed25519(witness)
-                    .expect("each frontier has one fixed author and is inserted once");
-                Ok(verified)
+            scoped::Operations {
+                entries: attached_bucket,
+                author: author_for_hash,
+                decode: ed25519::VerifyingAuthor::new,
+                check: check_entry,
+                retain: retain_witness,
             },
         )
+        .map_err(proof_error)
+    }
+}
+
+fn check_entry<'a, 's>(
+    key: &ed25519::VerifyingAuthor<'a>,
+    hash: ChangeHash,
+    signature: &'s ed25519::Signature,
+) -> Option<ed25519::VerifiedSignature<'a, 's>> {
+    key.verify_hash(&hash, signature).ok()
+}
+
+fn retain_witness(
+    mut store: SignatureStore,
+    witness: ed25519::VerifiedSignature<'_, '_>,
+) -> SignatureStore {
+    store
+        .insert_ed25519(witness)
+        .expect("each frontier has one fixed author and is inserted once");
+    store
+}
+
+fn proof_error(
+    failure: scoped::Failure<ChangeHash, ed25519::error::VerifyingAuthor>,
+) -> ProofError {
+    match failure {
+        scoped::Failure::MissingSignature(hash) => ProofError::MissingSignature(hash),
+        scoped::Failure::MissingAuthor(hash) => ProofError::MissingAuthor(hash),
+        scoped::Failure::InvalidKey(hash, source) => ProofError::InvalidAuthorKey { hash, source },
     }
 }
 
@@ -140,6 +175,27 @@ pub(crate) fn verify_prepared_frontier<'a, 's>(
         verifier.verify_hash(hash, entry?).ok()
     })
     .ok_or(ProofError::MissingSignature(*hash))
+}
+
+fn attached_bucket(
+    attached: &HashEntries,
+    hash: ChangeHash,
+) -> scoped::Bucket<&ed25519::Signature, MAX_SIGNATURES_PER_HASH> {
+    // Parsing and construction bound the total raw entries per hash. Keep
+    // typed entries on the stack, retaining raw presence for error ordering.
+    let mut bucket = scoped::Bucket {
+        present: false,
+        entries: [None; MAX_SIGNATURES_PER_HASH],
+        len: 0,
+    };
+    for entry in attached.for_hash(&hash) {
+        bucket.present = true;
+        if let Some(signature) = entry.as_ed25519() {
+            bucket.entries[bucket.len] = Some(signature);
+            bucket.len += 1;
+        }
+    }
+    bucket
 }
 
 #[cfg(test)]

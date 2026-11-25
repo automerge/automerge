@@ -4,6 +4,10 @@ mod evidence_spec;
 mod frontier_spec;
 mod membership_proof;
 mod order_spec;
+#[path = "../../automerge/src/signature/fragment/scoped.rs"]
+mod scoped;
+mod scoped_soundness;
+mod scoped_spec;
 
 #[path = "../../automerge/src/automerge/signing/incoming/apply_order.rs"]
 mod apply_order;
