@@ -10,6 +10,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{ChangeHash, Fragment};
 
+mod selection;
+
 /// Membership in dependency-closed accepted history.
 pub(crate) trait AcceptedHistory {
     fn contains(&self, hash: &ChangeHash) -> bool;
@@ -43,15 +45,29 @@ pub(crate) fn select_fragments<'a>(
     accepted: &impl AcceptedHistory,
     fragments: &'a [Fragment],
 ) -> Selection<'a> {
-    let mut counts: HashMap<ChangeHash, usize> = HashMap::new();
-    for fragment in fragments {
-        for &hash in &fragment.members {
-            *counts.entry(hash).or_default() += 1;
-        }
-    }
+    // Index only hashes mentioned by the candidates, never all of accepted
+    // history. The count includes each supplying member occurrence.
+    let mut hash_ids = HashMap::new();
+    let mut counts = Vec::new();
+    let member_ids: Vec<Vec<_>> = fragments
+        .iter()
+        .map(|fragment| {
+            fragment
+                .members
+                .iter()
+                .map(|&hash| {
+                    let id = *hash_ids.entry(hash).or_insert_with(|| {
+                        counts.push(0);
+                        counts.len() - 1
+                    });
+                    counts[id] += 1;
+                    id
+                })
+                .collect()
+        })
+        .collect();
 
-    let mut dependents: HashMap<ChangeHash, Vec<usize>> = HashMap::new();
-    let mut to_exclude = Vec::new();
+    let mut required_by = vec![Vec::new(); counts.len()];
     for (index, fragment) in fragments.iter().enumerate() {
         let members: HashSet<_> = fragment.members.iter().copied().collect();
         let dependencies: HashSet<_> = fragment
@@ -61,29 +77,16 @@ pub(crate) fn select_fragments<'a>(
             .filter(|hash| !members.contains(hash) && !accepted.contains(hash))
             .collect();
         for dependency in dependencies {
-            if !counts.contains_key(&dependency) {
-                to_exclude.push(index);
-            }
-            dependents.entry(dependency).or_default().push(index);
+            let id = *hash_ids.entry(dependency).or_insert_with(|| {
+                required_by.push(Vec::new());
+                counts.push(0);
+                counts.len() - 1
+            });
+            required_by[id].push(index);
         }
     }
-
-    let mut excluded = vec![false; fragments.len()];
-    while let Some(index) = to_exclude.pop() {
-        if excluded[index] {
-            continue;
-        }
-        excluded[index] = true;
-        for &hash in &fragments[index].members {
-            let count = counts.get_mut(&hash).expect("fragment member was counted");
-            *count -= 1;
-            if *count == 0 && !accepted.contains(&hash) {
-                if let Some(waiting) = dependents.get(&hash) {
-                    to_exclude.extend(waiting.iter().copied());
-                }
-            }
-        }
-    }
+    drop(hash_ids);
+    let excluded = selection::exclude(&member_ids, &required_by, counts);
 
     let mut selected = Vec::new();
     let mut pending = Vec::new();

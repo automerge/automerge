@@ -110,6 +110,18 @@ fn overlapping_supplier_keeps_dependent_admissible_until_last_supplier_is_exclud
 }
 
 #[test]
+fn repeated_member_edges_do_not_leave_phantom_suppliers() {
+    let candidates = [
+        frag(3, &[2, 2, 3], &[1]), // excluded; removes both occurrences of hash 2
+        frag(4, &[4], &[2, 2]),    // no remaining supplier for hash 2
+        frag(5, &[5], &[]),
+    ];
+    let selection = select_fragments(&SetHistory::default(), &candidates);
+    assert_eq!(selection.selected_indices().collect::<Vec<_>>(), [2]);
+    assert_eq!(selection.pending_indices().collect::<Vec<_>>(), [0, 1]);
+}
+
+#[test]
 fn duplicate_occurrences_and_accepted_boundaries_preserve_exact_partition() {
     let accepted = SetHistory::new([hash(1), hash(99)]);
     let f = frag(2, &[2], &[1]);

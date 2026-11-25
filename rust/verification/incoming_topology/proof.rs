@@ -21,7 +21,7 @@ pub open spec fn worklist(
 }
 
 // The count is zero exactly when every candidate predecessor has fired.
-proof fn zero_edges(edges: Seq<Vec<usize>>, done: Seq<usize>, v: usize)
+pub proof fn zero_edges(edges: Seq<Vec<usize>>, done: Seq<usize>, v: usize)
     requires edges.len() <= usize::MAX,
     ensures
         candidate_edges(edges, done, v) == 0 <==>
@@ -57,7 +57,7 @@ proof fn zero_edges(edges: Seq<Vec<usize>>, done: Seq<usize>, v: usize)
 
 // Moving one source into the processed prefix transfers its outgoing edges
 // from the graph-wide count to the current row's unprocessed suffix.
-proof fn partition_edges(edges: Seq<Vec<usize>>, done: Seq<usize>, parent: usize, v: usize)
+pub proof fn partition_edges(edges: Seq<Vec<usize>>, done: Seq<usize>, parent: usize, v: usize)
     requires edges.len() <= usize::MAX, !done.contains(parent),
     ensures candidate_edges(edges, done, v) == candidate_edges(edges, done.push(parent), v)
         + if parent < edges.len() { edges[parent as int]@.to_multiset().count(v) } else { 0 },
@@ -130,7 +130,7 @@ pub proof fn begin_parent(
     }
 }
 
-proof fn split_tail(tail: Seq<usize>, v: usize)
+pub proof fn split_tail(tail: Seq<usize>, v: usize)
     requires tail.len() > 0,
     ensures tail.to_multiset().count(v) == tail.drop_first().to_multiset().count(v)
         + if v == tail.first() { 1nat } else { 0nat },
