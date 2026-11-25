@@ -1,4 +1,4 @@
-use super::{BoundaryPastMemo, Incoming};
+use super::{boundary_cutoff, boundary_summary::Summary, BoundaryPastMemo};
 use crate::transaction::Transactable;
 use crate::{Author, Automerge, ChangeHash, Config, ReadDoc, ROOT};
 use ed25519_dalek::SigningKey;
@@ -25,25 +25,48 @@ fn warm_boundary_past_matches_a_cold_walk_on_both_sides_of_application() {
 
     receiver
         .try_with_signing(|signing| {
-            let incoming = Incoming {
-                graph: signing.graph,
-                ops: signing.ops,
-                authors: signing.authors,
-                state: signing.state,
-            };
-            let cold =
-                incoming.boundary_past_for(head, &candidates, &mut BoundaryPastMemo::default());
-            let mut memo = BoundaryPastMemo::default();
-            let prefix = incoming.boundary_past_for(middle, &candidates, &mut memo);
+            let cold = BoundaryPastMemo::new(signing.graph, &candidates).summary(&[head]);
+            let mut memo = BoundaryPastMemo::new(signing.graph, &candidates);
+            let prefix = memo.summary(&[middle]);
             assert_eq!(prefix.maxima.get(middle_change.actor_id()), Some(&2));
             assert_eq!(prefix.seeds.iter().copied().collect::<Vec<_>>(), [applied]);
-            let warm = incoming.boundary_past_for(head, &candidates, &mut memo);
+            let warm = memo.summary(&[head]);
             assert_eq!(warm.maxima.get(head_change.actor_id()), Some(&3));
             assert_eq!(warm.maxima, cold.maxima);
             assert_eq!(warm.seeds, cold.seeds);
-            let hit = incoming.boundary_past_for(head, &candidates, &mut memo);
+            let hit = memo.summary(&[head]);
             assert_eq!(hit.maxima, cold.maxima);
             assert_eq!(hit.seeds, cold.seeds);
+            let union = memo.summary(&[middle, applied, head, middle]);
+            assert_eq!(union.maxima, cold.maxima);
+            assert_eq!(union.seeds, cold.seeds);
         })
         .unwrap();
+}
+
+#[test]
+fn each_side_of_the_cut_uses_its_own_maximum() {
+    let mut summary = Summary::<u8, u8>::new();
+    summary.candidate(42, 9);
+    let position = |hash| (hash == 1).then_some((0, 6));
+    let clock = |_| Some(5);
+    let candidate = |hash| match hash {
+        2 => (&42, 9),
+        3 => (&42, 10),
+        _ => panic!("applied change queried as a candidate"),
+    };
+    // The candidate maximum of 9 must not cover the applied sequence 6.
+    assert!(!boundary_cutoff::covers(
+        &summary, 1, position, clock, candidate
+    ));
+    assert!(boundary_cutoff::covers(
+        &summary, 2, position, clock, candidate
+    ));
+    assert!(!boundary_cutoff::covers(
+        &summary,
+        3,
+        position,
+        |_| Some(20),
+        candidate
+    ));
 }

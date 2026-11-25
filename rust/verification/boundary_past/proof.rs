@@ -1,4 +1,3 @@
-use crate::boundary_summary::Contribution;
 use crate::spec::*;
 use vstd::prelude::*;
 
@@ -43,36 +42,6 @@ pub(crate) proof fn seed_step<K>(base: Set<K>, entries: Seq<&K>, i: int, before:
 {
     entries.lemma_take_succ_push(i);
     assert(entries.take(i + 1).unref() =~= entries.take(i).unref().push(*entries[i]));
-}
-
-pub(crate) proof fn aggregate_step<'a, A: 'a, K: 'a, F: Fn(K) -> Contribution<'a, A, K>>(
-    nodes: Seq<K>, project: F, i: int, before: SummaryView<A, K>, next: SummaryView<A, K>,
-)
-    requires 0 <= i < nodes.len(), aggregate(nodes, project, i, before),
-        join(before, term(project, nodes[i]), next),
-    ensures aggregate(nodes, project, i + 1, next),
-{
-    let last = term(project, nodes[i]);
-    assert forall|j: int, a: A| 0 <= j < i + 1 && #[trigger] term(project, nodes[j]).maxima.contains_key(a)
-        implies next.maxima.contains_key(a) && next.maxima[a] >= term(project, nodes[j]).maxima[a] by {
-        assert(value(next.maxima, a) == maximum(value(before.maxima, a), value(last.maxima, a)));
-    }
-    assert forall|a: A| #[trigger] next.maxima.contains_key(a) implies exists|j: int| 0 <= j < i + 1
-        && #[trigger] term(project, nodes[j]).maxima.contains_key(a)
-        && term(project, nodes[j]).maxima[a] == next.maxima[a] by {
-        assert(value(next.maxima, a) == maximum(value(before.maxima, a), value(last.maxima, a)));
-        if before.maxima.contains_key(a) && before.maxima[a] == next.maxima[a] {
-            let j = choose|j: int| 0 <= j < i && #[trigger] term(project, nodes[j]).maxima.contains_key(a)
-                && term(project, nodes[j]).maxima[a] == before.maxima[a];
-            assert(term(project, nodes[j]).maxima[a] == next.maxima[a]);
-        } else {
-            assert(last.maxima.contains_key(a) && last.maxima[a] == next.maxima[a]);
-        }
-    }
-    assert forall|k: K| #[trigger] next.seeds.contains(k) <==> exists|j: int| 0 <= j < i + 1
-        && #[trigger] term(project, nodes[j]).seeds.contains(k) by {
-        assert(next.seeds.contains(k) <==> before.seeds.contains(k) || last.seeds.contains(k));
-    }
 }
 
 } // verus!

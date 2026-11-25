@@ -1,9 +1,9 @@
 use crate::admission_proof::selection_preserves_causal_closure;
 use crate::admission_spec::{assembly, selected_member, Fragments};
 use crate::clock_spec::{maxima, number};
+use crate::history_spec::{actor_chains, History};
 use crate::lookup_spec::model;
 use crate::proof::chain_prefix;
-use crate::spec::{actor_chains, History};
 use std::num::NonZeroU32;
 use vstd::prelude::*;
 

@@ -37,6 +37,8 @@ mod actor_chains;
 mod actor_slots;
 mod apply_order;
 mod author_checks;
+mod boundary_cutoff;
+mod boundary_memo;
 mod boundary_summary;
 mod canonical_shape;
 mod evaluation;
@@ -117,10 +119,42 @@ struct ResolvedAncestry<'a> {
 
 type BoundarySummary = boundary_summary::Summary<ActorId, ChangeHash>;
 
-/// Memoized boundary causal pasts shared across fragment checks in one batch.
-#[derive(Default)]
-struct BoundaryPastMemo {
-    by_boundary: HashMap<ChangeHash, BoundarySummary>,
+/// One memo belongs to one immutable applied graph and candidate view. In
+/// particular, it does not survive document apply or follow actor-table shifts.
+struct BoundaryPastMemo<'view, 'change> {
+    graph: &'view ChangeGraph,
+    changes_by_hash: &'view HashMap<ChangeHash, &'change Change>,
+    cache: boundary_memo::Cache<ActorId, ChangeHash>,
+}
+
+impl<'view, 'change> BoundaryPastMemo<'view, 'change> {
+    fn new(
+        graph: &'view ChangeGraph,
+        changes_by_hash: &'view HashMap<ChangeHash, &'change Change>,
+    ) -> Self {
+        Self {
+            graph,
+            changes_by_hash,
+            cache: boundary_memo::Cache::new(),
+        }
+    }
+
+    fn summary(&mut self, roots: &[ChangeHash]) -> BoundarySummary {
+        let graph = self.graph;
+        let changes_by_hash = self.changes_by_hash;
+        self.cache.union(roots, &|hash| {
+            if graph.has_change(&hash) {
+                boundary_memo::Node::Applied
+            } else {
+                let change = changes_by_hash[&hash];
+                boundary_memo::Node::Candidate {
+                    actor: change.actor_id().clone(),
+                    seq: change.seq(),
+                    parents: change.deps(),
+                }
+            }
+        })
+    }
 }
 
 enum GroupEvaluation {
@@ -593,7 +627,7 @@ impl Incoming<'_> {
 
         let (waiting_candidate_indices, verified) = evaluation_batch::assess(
             candidates,
-            BoundaryPastMemo::default(),
+            BoundaryPastMemo::new(self.graph, &ancestry.changes_by_hash),
             |mut memo, candidate| {
                 let evaluation = self.evaluate_single_group(&candidate.group, ancestry, &mut memo);
                 let outcome =
@@ -631,7 +665,7 @@ impl Incoming<'_> {
         &self,
         group: &PendingGroup,
         ancestry: &ResolvedAncestry<'_>,
-        boundary_memo: &mut BoundaryPastMemo,
+        boundary_memo: &mut BoundaryPastMemo<'_, '_>,
     ) -> Result<GroupEvaluation, AutomergeError> {
         let status = evaluation::ancestry(&group.changes, |change| {
             let hash = change.hash();
@@ -654,8 +688,7 @@ impl Incoming<'_> {
                     .flatten()
             },
             |memo| {
-                let canonical =
-                    self.derive_canonical_fragment(group.head, &ancestry.changes_by_hash, memo);
+                let canonical = Self::derive_canonical_fragment(group.head, memo);
                 let group_hashes = group.changes.iter().map(Change::hash).collect();
                 let result = if group_membership::matches(&canonical.members, &group_hashes) {
                     Ok(canonical)
@@ -734,14 +767,14 @@ impl Incoming<'_> {
     }
 
     fn derive_canonical_fragment(
-        &self,
         head: ChangeHash,
-        changes_by_hash: &HashMap<ChangeHash, &Change>,
-        memo: &mut BoundaryPastMemo,
+        memo: &mut BoundaryPastMemo<'_, '_>,
     ) -> Fragment {
+        let graph = memo.graph;
+        let changes_by_hash = memo.changes_by_hash;
         let parents_of = |hash: &ChangeHash| -> Vec<ChangeHash> {
-            if self.graph.has_change(hash) {
-                self.graph.deps(hash).collect()
+            if graph.has_change(hash) {
+                graph.deps(hash).collect()
             } else {
                 changes_by_hash[hash].deps().to_vec()
             }
@@ -765,32 +798,31 @@ impl Incoming<'_> {
                 )
             },
             |boundary| {
-                let mut boundary_past = BoundarySummary::new();
-                for &b in boundary {
-                    boundary_past.merge(&self.boundary_past_for(b, changes_by_hash, memo));
-                }
-                let seeds_vec: Vec<ChangeHash> = boundary_past.seeds.into_iter().collect();
-                let graph_boundary_clock = self.graph.seq_clock_for_heads(&seeds_vec);
-
-                let in_boundary_past = |hash: &ChangeHash| -> bool {
-                    if let Some((actor_idx, seq)) = self.graph.actor_seq_for_hash(hash) {
-                        graph_boundary_clock
-                            .get_for_actor(&actor_idx)
-                            .is_some_and(|covered| seq <= covered.get())
-                    } else {
-                        let change = changes_by_hash[hash];
-                        boundary_past
-                            .maxima
-                            .get(change.actor_id())
-                            .is_some_and(|&max_seq| change.seq() <= max_seq)
-                    }
+                let boundary_past = memo.summary(boundary);
+                let seeds_vec: Vec<_> = boundary_past.seeds.iter().copied().collect();
+                let graph_boundary_clock = graph.seq_clock_for_heads(&seeds_vec);
+                let in_boundary_past = |hash| {
+                    boundary_cutoff::covers(
+                        &boundary_past,
+                        hash,
+                        |hash| graph.actor_seq_for_hash(&hash),
+                        |actor| {
+                            graph_boundary_clock
+                                .get_for_actor(&actor)
+                                .map(|seq| seq.get())
+                        },
+                        |hash| {
+                            let change = changes_by_hash[&hash];
+                            (change.actor_id(), change.seq())
+                        },
+                    )
                 };
 
                 walk(
                     vec![head],
                     |node| parents_of(&node),
                     |node| {
-                        if node == head || !in_boundary_past(&node) {
+                        if node == head || !in_boundary_past(node) {
                             Visit::KeepAndExpand
                         } else {
                             Visit::Ignore
@@ -806,48 +838,6 @@ impl Incoming<'_> {
             members: shape.members,
             checkpoints: shape.checkpoints,
         }
-    }
-
-    fn boundary_past_for(
-        &self,
-        boundary_node: ChangeHash,
-        changes_by_hash: &HashMap<ChangeHash, &Change>,
-        memo: &mut BoundaryPastMemo,
-    ) -> BoundarySummary {
-        use boundary_summary::Contribution;
-
-        if let Some(cached) = memo.by_boundary.get(&boundary_node) {
-            return cached.clone();
-        }
-        if self.graph.has_change(&boundary_node) {
-            let mut result = BoundarySummary::new();
-            result.seed(boundary_node);
-            return result;
-        }
-
-        let visited = walk(
-            vec![boundary_node],
-            |node| changes_by_hash[&node].deps().to_vec(),
-            |node| {
-                if self.graph.has_change(&node) || memo.by_boundary.contains_key(&node) {
-                    Visit::Keep
-                } else {
-                    Visit::KeepAndExpand
-                }
-            },
-        );
-        let result = boundary_summary::summarize(&visited, |node| {
-            if self.graph.has_change(&node) {
-                Contribution::Applied(node)
-            } else if let Some(cached) = memo.by_boundary.get(&node) {
-                Contribution::Memoized(cached)
-            } else {
-                let change = changes_by_hash[&node];
-                Contribution::Candidate(change.actor_id().clone(), change.seq())
-            }
-        });
-        memo.by_boundary.insert(boundary_node, result.clone());
-        result
     }
 
     // --- Stage 4: Causal selection & admission planning ---

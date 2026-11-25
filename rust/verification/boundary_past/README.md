@@ -1,44 +1,49 @@
-# Incoming boundary-past summaries
+# Incoming boundary-past memo and cutoff
 
-Review [interpretation.rs](interpretation.rs) for what an exact summary means.
-The ordinary dependency walk cannot open an applied node or a node with a
-reusable memo entry. It visits the stops themselves:
+[The memo spec](memo_spec.rs) describes the overlay of candidate changes and
+applied leaves. A summary consists of **exactly** the applied leaves reachable
+from its root, and each candidate actor's highest reachable sequence. Every
+stored maximum must be attained by an actual reachable candidate. No memo
+or traversal order appears in this definition.
 
-- An expanded candidate contributes just its own actor and sequence.
-- An applied stop contributes its hash as a seed for `ChangeGraph`.
-- A memoized candidate stop contributes the saved summary of its inclusive
-  past, not just its own actor and sequence.
+## Checked production code
 
-The [production summary fold](../../automerge/src/automerge/signing/incoming/boundary_summary.rs)
-is verified against [spec.rs](spec.rs): it takes the exact union of the seed
-sets and the attained maximum for each candidate actor. The
-[composition proof](exactness.rs) shows that, with an initially exact memo,
-that walk and fold produce an exact summary of the boundary node's inclusive
-past. In particular, the applied seeds need not be minimal; following their
-pasts recovers exactly the applied portion of the boundary past. Overlapping
-memo entries are harmless.
+- [`boundary_memo.rs`](../../automerge/src/automerge/signing/incoming/boundary_memo.rs)
+  computes that summary directly. Cache hits copy an exact summary for the
+  requested key. A miss walks the candidate graph, stops at applied leaves
+  or exact memo entries, and inserts the result under the requested root
+  without changing another entry. The union fold visits exactly the supplied
+  boundary roots and preserves old bindings. An initially empty memo satisfies
+  the invariant; each checked call preserves it for the same observation.
+- [`boundary_summary.rs`](../../automerge/src/automerge/signing/incoming/boundary_summary.rs)
+  checks summary cloning and the exact union/maximum operations used in the
+  walk and the boundary fold, using standard Rust collection specifications.
+- [`boundary_cutoff.rs`](../../automerge/src/automerge/signing/incoming/boundary_cutoff.rs)
+  tests an applied hash against its applied slot's maximum, and a candidate
+  against its own actor's candidate maximum. It cannot use one side's maximum
+  for the other side.
+
+[Overlay composition](overlay_bridge.rs) proves that, for a dependency-closed
+applied graph, the full boundary past is the union of the overlay candidate
+ancestors and the inclusive pasts of exactly the applied leaves in the memo
+summary. [The cutoff theorem](cutoff_spec.rs) combines this result, exact
+per-actor maxima, and validated actor chains: the production cutoff test is
+exact membership in that full boundary past, not an approximation.
 
 ## Trusted boundary
 
-- [`boundary_past_for`](../../automerge/src/automerge/signing/incoming.rs)
-  translates the stable graph snapshot to the walk and fold callbacks. They
-  agree about which hashes are applied or memoized; the applied graph must
-  already be dependency-closed. For a newly computed result the caller inserts
-  the summary under that boundary node's own hash. Cache hits copy the stored
-  summary, and each evaluation pass starts with an empty memo. The raw
-  `HashMap` lookup/insert wiring and `ChangeGraph` queries are outside the
-  harness.
-- The fold trusts the standard collection specifications and that actor
-  equality, hashing and cloning agree with actor identity, and that hash
-  ordering agrees with change identity.
-- Turning the summary into a membership test also needs
-  `ChangeGraph::seq_clock_for_heads` to return the actual applied maxima for
-  the given seeds. The [actor-clock theorem](../actor_clock/README.md) explains
-  why those maxima and the candidate-side maxima represent exact membership
-  in a valid, non-equivocating history. This harness does not verify the
-  applied clock implementation or the entire `evaluate_single_group` call.
+[`BoundaryPastMemo` in `incoming.rs`](../../automerge/src/automerge/signing/incoming.rs)
+borrows the applied graph and candidate table for its entire lifetime. The
+boundary walk, memo observer, and membership cutoff use those same references;
+the memo cannot survive document apply or a change to the borrowed table.
+The Verus harness still assumes that the adapter returns the actual metadata
+for each reachable hash, that the relevant ancestry has valid chains and no
+equivocation, and that `ChangeGraph::seq_clock_for_heads` provides exact applied
+maxima for the given seeds. It does not prove those graph APIs or discharge all
+of the cutoff theorem's premises at the concrete group-evaluation call site.
+Hash/actor equality, hashing, and cloning have their usual identity contracts.
 
-Run with the [same toolchain as the ancestry worklist](../incoming_topology/README.md):
+Run with the [pinned Verus toolchain](../incoming_topology/README.md):
 
 ```sh
 verus --edition=2021 --crate-type=lib --cfg automerge_verus --no-cheating \

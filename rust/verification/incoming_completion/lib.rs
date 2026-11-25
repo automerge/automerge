@@ -6,6 +6,8 @@ mod admission_proof;
 mod admission_spec;
 mod clock_spec;
 mod exact_publication;
+#[path = "../actor_clock/spec.rs"]
+mod history_spec;
 #[path = "../incoming_authors/spec.rs"]
 mod lookup_spec;
 #[path = "../../automerge/src/automerge/signing/incoming/pending.rs"]
@@ -18,5 +20,3 @@ mod publication;
 mod publication_spec;
 #[path = "../../automerge/src/clock/seq_slots.rs"]
 mod seq_slots;
-#[path = "../actor_clock/spec.rs"]
-mod spec;

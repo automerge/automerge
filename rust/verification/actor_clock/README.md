@@ -22,8 +22,10 @@ production clock or cache implementation. The reviewed definitions are in
 The connection to the runtime remains conditional: canonical descriptions must
 satisfy the cut and level contracts, the selected history must satisfy the
 actor-chain and uniqueness contracts, and clock updates must implement the
-stated maxima. This harness does not verify `boundary_past_for` or its memo,
-`AcceptedClock::include_hashes`, document application, or `complete`.
+stated maxima. The production [boundary memo and cutoff](../boundary_past/README.md)
+and [incoming clock update](../incoming_completion/README.md) are checked in
+separate harnesses. This theorem does not check document application or all
+of `complete`'s effects.
 
 Run with the [same toolchain as the ancestry worklist](../incoming_topology/README.md):
 

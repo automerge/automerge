@@ -15,55 +15,9 @@ use vstd::std_specs::{btree::*, hash::*, iter::IteratorSpec};
 verus! { broadcast use {vstd::seq_lib::group_seq_properties, vstd::set::group_set_lemmas}; }
 
 #[cfg_attr(automerge_verus, verus_verify)]
-#[derive(Clone)]
 pub(crate) struct Summary<A, K> {
     pub maxima: HashMap<A, u64>,
     pub seeds: BTreeSet<K>,
-}
-
-#[cfg_attr(automerge_verus, verus_verify)]
-pub(crate) enum Contribution<'a, A, K> {
-    Applied(K),
-    Candidate(A, u64),
-    Memoized(&'a Summary<A, K>),
-}
-
-/// Summarize exactly the visited nodes, substituting a stored summary at
-/// each memoized stop.
-#[cfg_attr(automerge_verus, verus_spec(out =>
-    requires laws::<A, K>(),
-        forall|i: int| 0 <= i < visited@.len() ==> models(project, #[trigger] visited@[i]),
-    ensures summary_inv(&out), aggregate(visited@, project, visited@.len() as int, view(&out)),
-))]
-pub(super) fn summarize<'a, A: Clone + Eq + Hash + 'a, K: Copy + Ord + 'a>(
-    visited: &[K],
-    project: impl Fn(K) -> Contribution<'a, A, K>,
-) -> Summary<A, K> {
-    let mut result = Summary::new();
-    let mut i = 0;
-    #[cfg_attr(automerge_verus, verus_spec(
-        invariant laws::<A, K>(), summary_inv(&result), i <= visited@.len(),
-            forall|j: int| 0 <= j < visited@.len() ==> models(project, #[trigger] visited@[j]),
-            aggregate(visited@, project, i as int, view(&result)),
-        decreases visited@.len() - i,
-    ))]
-    while i < visited.len() {
-        let node = visited[i];
-        #[cfg(automerge_verus)]
-        proof_decl! { let ghost before = view(&result); assert(models(project, node)); }
-        let part = project(node);
-        #[cfg(automerge_verus)]
-        proof! { assert(part == projected(project, node)); }
-        match part {
-            Contribution::Applied(hash) => result.seed(hash),
-            Contribution::Candidate(actor, seq) => result.candidate(actor, seq),
-            Contribution::Memoized(cached) => result.merge(cached),
-        }
-        #[cfg(automerge_verus)]
-        proof! { aggregate_step(visited@, project, i as int, before, view(&result)); }
-        i += 1;
-    }
-    result
 }
 
 #[cfg_attr(automerge_verus, verus_verify)]
@@ -75,6 +29,27 @@ impl<A: Clone + Eq + Hash, K: Copy + Ord> Summary<A, K> {
         Self {
             maxima: HashMap::new(),
             seeds: BTreeSet::new(),
+        }
+    }
+
+    #[cfg_attr(automerge_verus, verus_spec(out =>
+        requires laws::<A, K>(), vstd::pervasive::obeys_clone_eq::<K>(), summary_inv(self),
+        ensures summary_inv(&out), view(&out) == view(self),
+    ))]
+    pub(super) fn copy_exact(&self) -> Self {
+        let maxima = self.maxima.clone();
+        #[cfg(automerge_verus)]
+        proof! {
+            assert(vstd::pervasive::obeys_clone_eq::<u64>());
+            assert(maxima@ =~= self.maxima@) by {
+                assert forall|a: A| #[trigger] maxima@.contains_key(a) implies maxima@[a] == self.maxima@[a] by {
+                    assert(vstd::pervasive::cloned::<u64>(self.maxima@[a], maxima@[a]));
+                }
+            }
+        }
+        Self {
+            maxima,
+            seeds: self.seeds.clone(),
         }
     }
 

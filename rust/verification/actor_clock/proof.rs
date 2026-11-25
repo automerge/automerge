@@ -1,4 +1,4 @@
-use crate::spec::*;
+use crate::history_spec::*;
 use vstd::prelude::*;
 
 verus! {
