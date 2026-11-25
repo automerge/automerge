@@ -14,9 +14,7 @@ pub mod error;
 mod fragment;
 mod store;
 
-pub(crate) use fragment::{
-    assemble_frontiers, verify_frontier_entry, verify_prepared_frontier, FragmentRequirements,
-};
+pub(crate) use fragment::{verify_frontier_entry, FragmentRequirements, IncomingProof};
 pub(crate) use store::SignatureStore;
 pub use store::{Insert, InsertError};
 

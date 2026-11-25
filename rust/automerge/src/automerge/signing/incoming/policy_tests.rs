@@ -155,3 +155,40 @@ fn delivery_members_are_compared_as_sets_and_candidate_origin_is_preserved() {
     assert!(matches!(tagged[1].origin, Origin::IncomingBatch));
     assert_eq!(tagged[1].group, "new");
 }
+
+#[test]
+fn authoritative_author_reads_never_fall_back_across_source_boundaries() {
+    use super::author_checks::{established, tentative};
+    assert_eq!(
+        established::<u8>(
+            Some(4),
+            |i| {
+                assert_eq!(i, 4);
+                None
+            },
+            || panic!("applied hash queried in candidate map")
+        ),
+        None
+    );
+    assert_eq!(
+        tentative::<u8>(
+            Some(5),
+            |i| {
+                assert_eq!(i, 5);
+                None
+            },
+            || panic!("registered actor read a delivery hint"),
+            || panic!("registered actor read a batch hint")
+        ),
+        None
+    );
+    assert_eq!(
+        tentative::<u8>(
+            None,
+            |_| panic!("unregistered actor read history"),
+            || Some(None),
+            || panic!("known authorless hint fell back")
+        ),
+        Some(None)
+    );
+}

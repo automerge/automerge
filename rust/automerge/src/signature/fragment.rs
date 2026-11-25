@@ -9,7 +9,7 @@
 //! fragment's content chunk. Resident evidence can construct outgoing proofs,
 //! but must not repair an incomplete incoming proof.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::storage::signatures::{HashEntries, MAX_SIGNATURES_PER_HASH};
 use crate::{Author, Change, ChangeHash};
@@ -18,11 +18,10 @@ use super::ed25519;
 use super::error::ProofError;
 use super::store::SignatureStore;
 
-mod evidence;
 mod frontiers;
+mod provisional;
 mod scoped;
-
-pub(crate) use evidence::assemble_frontiers;
+mod scoped_cache;
 
 /// Fixed proof obligations, independent of available signatures and other groups.
 ///
@@ -112,6 +111,74 @@ impl FragmentRequirements {
     }
 }
 
+/// The preverified store cannot be detached from its own frontier list or
+/// raw attachment. Only the preparation path can construct this scope.
+#[derive(Clone, Debug)]
+pub(crate) struct IncomingProof(scoped_cache::Owned<ChangeHash, HashEntries, SignatureStore>);
+
+impl IncomingProof {
+    /// Check attached evidence under provisional identities, sharing only
+    /// decoded keys with other deliveries in this call.
+    pub(crate) fn prepare(
+        requirements: FragmentRequirements,
+        attachment: HashEntries,
+        prepared_keys: &mut HashMap<Author<'static>, ed25519::VerifyingAuthor<'static>>,
+        tentative: impl Fn(&ChangeHash) -> Option<Option<Author<'static>>>,
+    ) -> Result<Self, ProofError> {
+        scoped_cache::Owned::prepare(requirements.hashes, attachment, |hashes, attachment| {
+            provisional::verify(
+                hashes,
+                attachment,
+                SignatureStore::default(),
+                prepared_keys,
+                scoped::Operations {
+                    entries: attached_bucket,
+                    author: |hash| tentative(&hash),
+                    decode: ed25519::VerifyingAuthor::new,
+                    check: check_entry,
+                    retain: retain_witness,
+                },
+            )
+            .map_err(proof_error)
+        })
+        .map(Self)
+    }
+
+    pub(crate) fn attachment(&self) -> &HashEntries {
+        &self.0.attachment
+    }
+
+    pub(crate) fn hashes(&self) -> &[ChangeHash] {
+        &self.0.hashes
+    }
+
+    /// Settle this delivery's provisional proof against its established authors.
+    pub(crate) fn settle<'a>(
+        &self,
+        author_for_hash: impl Fn(&ChangeHash) -> Option<Author<'a>>,
+    ) -> Result<SignatureStore, ProofError> {
+        scoped_cache::settle(
+            self.0.scope(),
+            SignatureStore::default(),
+            scoped::Operations {
+                entries: attached_bucket,
+                author: |hash| author_for_hash(&hash),
+                decode: ed25519::VerifyingAuthor::new,
+                check: check_entry,
+                retain: retain_witness,
+            },
+            |store: &SignatureStore, hash| {
+                store
+                    .ed25519_entries(&hash)
+                    .next()
+                    .map(|(author, _)| author)
+            },
+            SignatureStore::clone,
+        )
+        .map_err(proof_error)
+    }
+}
+
 fn check_entry<'a, 's>(
     key: &ed25519::VerifyingAuthor<'a>,
     hash: ChangeHash,
@@ -155,25 +222,19 @@ pub(crate) fn verify_frontier_entry<'a, 's>(
 }
 
 /// Use the same exact-hash attachment search with an already decoded key.
-pub(crate) fn verify_prepared_frontier<'a, 's>(
+fn verify_prepared_frontier<'a, 's>(
     attached: &'s HashEntries,
     hash: &ChangeHash,
     verifier: &ed25519::VerifyingAuthor<'a>,
 ) -> Result<ed25519::VerifiedSignature<'a, 's>, ProofError> {
-    // HashEntries enforces this per-hash bound on construction and parsing.
-    // Use a stack slice so the checked search needs no new heap allocation.
-    let mut entries = [None; MAX_SIGNATURES_PER_HASH];
-    let mut len = 0;
-    for entry in attached
-        .for_hash(hash)
-        .filter_map(|entry| entry.as_ed25519())
-    {
-        entries[len] = Some(entry);
-        len += 1;
-    }
-    evidence::first_witness(&entries[..len], |entry| {
-        verifier.verify_hash(hash, entry?).ok()
-    })
+    scoped::search(
+        &attached_bucket(attached, *hash),
+        verifier,
+        *hash,
+        &|key: &ed25519::VerifyingAuthor<'a>, hash, signature| {
+            key.verify_hash(&hash, signature).ok()
+        },
+    )
     .ok_or(ProofError::MissingSignature(*hash))
 }
 

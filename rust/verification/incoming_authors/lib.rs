@@ -4,6 +4,7 @@
 mod author_projection;
 mod projection_spec;
 mod slot_spec;
+mod source_spec;
 mod spec;
 
 mod chain_proof;

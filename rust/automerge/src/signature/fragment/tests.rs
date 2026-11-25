@@ -188,3 +188,71 @@ proptest! {
         prop_assert_eq!(FragmentRequirements::for_members(members.into_iter().rev()), requirements);
     }
 }
+
+#[test]
+fn settled_evidence_rechecks_the_same_attachment_when_the_author_changes() {
+    let provisional = SigningKey::from_bytes(&[51; 32]);
+    let established = SigningKey::from_bytes(&[52; 32]);
+    let required = hash(21);
+    let requirements = FragmentRequirements::for_members([(0, 1, required)]);
+    let mut keys = HashMap::new();
+    let both = entries([
+        (required, signature(required, &provisional)),
+        (required, signature(required, &established)),
+    ]);
+    let proof = IncomingProof::prepare(requirements.clone(), both.clone(), &mut keys, |_| {
+        Some(Some(author(&provisional)))
+    })
+    .unwrap();
+    assert_eq!(proof.attachment(), &both);
+    assert_eq!(proof.hashes(), &[required]);
+    let local = proof.settle(|_| Some(author(&provisional))).unwrap();
+    assert_eq!(
+        local.ed25519_entries(&required).next().unwrap().0,
+        &author(&provisional)
+    );
+    let corrected = proof.settle(|_| Some(author(&established))).unwrap();
+    assert_eq!(
+        corrected.ed25519_entries(&required).next().unwrap().0,
+        &author(&established)
+    );
+    assert_eq!(corrected.ed25519_entries(&required).count(), 1);
+
+    let only_provisional = IncomingProof::prepare(
+        requirements,
+        entries([(required, signature(required, &provisional))]),
+        &mut keys,
+        |_| Some(Some(author(&provisional))),
+    )
+    .unwrap();
+    assert!(
+        matches!(only_provisional.settle(|_| Some(author(&established))), Err(ProofError::MissingSignature(h)) if h == required)
+    );
+}
+
+#[test]
+fn a_shared_prepared_key_never_supplies_a_missing_delivery_witness() {
+    let signer = SigningKey::from_bytes(&[61; 32]);
+    let required = hash(22);
+    let other = hash(23);
+    let requirements = FragmentRequirements::for_members([(0, 1, required)]);
+    let mut keys = HashMap::new();
+    IncomingProof::prepare(
+        requirements.clone(),
+        entries([(required, signature(required, &signer))]),
+        &mut keys,
+        |_| Some(Some(author(&signer))),
+    )
+    .unwrap();
+    assert!(keys.contains_key(&author(&signer)));
+    let wrong_hash = entries([(required, signature(other, &signer))]);
+    let rejected =
+        IncomingProof::prepare(requirements.clone(), wrong_hash.clone(), &mut keys, |_| {
+            Some(Some(author(&signer)))
+        });
+    assert!(matches!(rejected, Err(ProofError::MissingSignature(h)) if h == required));
+    let deferred = IncomingProof::prepare(requirements, wrong_hash, &mut keys, |_| None).unwrap();
+    assert!(
+        matches!(deferred.settle(|_| Some(author(&signer))), Err(ProofError::MissingSignature(h)) if h == required)
+    );
+}

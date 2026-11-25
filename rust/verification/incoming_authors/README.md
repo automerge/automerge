@@ -36,15 +36,16 @@ of the relevant ancestry, and over the selected unapplied union. The proof
 trusts those projections and that an applied-slot query uses the same stable
 actor/sequence snapshot in all three cases.
 
-## Cached proof reuse
+## Source precedence
 
-[spec.rs](spec.rs) specifies when the [cache check](../../automerge/src/automerge/signing/incoming/author_checks.rs)
-permits reusing evidence: every required frontier must have an established
-author and a cached witness under that exact author. Missing authors don't
-match. This assumes accurate, stable lookups, concrete identity equality, and
-that the cache lookup is scoped to this delivery's verified store and frontier
-hash. It does not prove construction of that store, the frontier calculation,
-or cryptography.
+The [checked source choices](../../automerge/src/automerge/signing/incoming/author_checks.rs)
+never consult a candidate author when the hash has an applied slot, including
+when that slot is authorless. During provisional evaluation a registered
+actor uses its history lookup (which can still say unresolved); only an
+unregistered actor uses the delivery's hint or, failing that, the batch hint.
+The adapter supplies exact registration, applied-slot, and author observations.
+See [scoped evidence](../incoming_groups/README.md) for the checked cache choice
+and its connection to the original attachment.
 
 Run with the [same toolchain as the ancestry worklist](../incoming_topology/README.md):
 

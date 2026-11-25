@@ -3,8 +3,6 @@
 #![allow(unexpected_cfgs)]
 
 #[cfg(automerge_verus)]
-use crate::spec::*;
-#[cfg(automerge_verus)]
 use vstd::laws_eq::obeys_concrete_eq;
 #[cfg(automerge_verus)]
 use vstd::prelude::*;
@@ -25,52 +23,56 @@ pub(super) fn same<A: Eq>(left: &A, right: &A) -> bool {
     equal
 }
 
-/// Reuse a group's preverification only when every required frontier has a
-/// cached witness under the exact author established by ancestry.
-#[cfg_attr(automerge_verus, verus_spec(matches =>
-    requires obeys_concrete_eq::<A>(),
-        forall|i: int| 0 <= i < frontiers@.len() ==> modeled(expected, #[trigger] frontiers@[i]),
-        forall|i: int| 0 <= i < frontiers@.len() ==> modeled(cached, #[trigger] frontiers@[i]),
-    ensures matches <==> forall|i: int| 0 <= i < frontiers@.len()
-        ==> matches_author(expected, cached, #[trigger] frontiers@[i]),
+/// Once a hash is applied, use its historical slot, even if it has no
+/// author. The candidate table is only a source for unapplied hashes.
+#[cfg_attr(automerge_verus, verus_spec(out =>
+    requires match slot { Some(i)=>history.requires((i,)), None=>candidate.requires(()) },
+    ensures match slot {
+        Some(i)=>history.ensures((i,),out),
+        None=>({
+            exists|answer:Option<Option<A>>| #[trigger] candidate.ensures((),answer)
+                && out==crate::source_spec::author_value(answer)
+        }),
+    },
 ))]
-pub(super) fn cache_matches<'a, H: Copy, A: Eq + 'a>(
-    frontiers: &[H],
-    expected: impl Fn(H) -> Option<A>,
-    cached: impl Fn(H) -> Option<&'a A>,
-) -> bool {
-    let mut i = 0;
-    #[cfg_attr(automerge_verus, verus_spec(
-        invariant i <= frontiers@.len(), obeys_concrete_eq::<A>(),
-            forall|j: int| 0 <= j < frontiers@.len() ==> modeled(expected, #[trigger] frontiers@[j]),
-            forall|j: int| 0 <= j < frontiers@.len() ==> modeled(cached, #[trigger] frontiers@[j]),
-            forall|j: int| 0 <= j < i ==> matches_author(expected, cached, #[trigger] frontiers@[j]),
-        decreases frontiers@.len() - i,
-    ))]
-    while i < frontiers.len() {
-        let hash = frontiers[i];
-        #[cfg(automerge_verus)]
-        proof! { assert(modeled(expected, hash)); assert(modeled(cached, hash)); }
-        let established = expected(hash);
-        #[cfg(automerge_verus)]
-        proof! { assert(established == model(expected, hash)); }
-        let Some(author) = established else {
-            return false;
-        };
-        let recorded = cached(hash);
-        #[cfg(automerge_verus)]
-        proof! { assert(recorded == model(cached, hash)); }
-        let Some(saved) = recorded else { return false };
-        if !same(&author, saved) {
-            return false;
-        }
-        #[cfg(automerge_verus)]
-        proof! { assert(matches_author(expected, cached, hash)); }
-        i += 1;
+pub(super) fn established<A>(
+    slot: Option<usize>,
+    history: impl FnOnce(usize) -> Option<A>,
+    candidate: impl FnOnce() -> Option<Option<A>>,
+) -> Option<A> {
+    match slot {
+        Some(i) => history(i),
+        None => candidate().unwrap_or_default(),
     }
-    true
 }
 
-#[cfg(test)]
-#[path = "author_checks/tests.rs"]
-mod tests;
+/// Before ancestry resolution, obey the existing precedence: a registered
+/// actor is governed by the applied-history lookup (including "not yet
+/// applied"); only an unregistered actor can use a delivery or batch hint.
+#[cfg_attr(automerge_verus, verus_spec(out =>
+    requires match slot {
+        Some(i)=>history.requires((i,)),
+        None=>delivery.requires(()) && (delivery.ensures((),None) ==> batch.requires(())),
+    },
+    ensures match slot {
+        Some(i)=>history.ensures((i,),out),
+        None=>match out {
+            Some(_) => delivery.ensures((),out) || (delivery.ensures((),None) && batch.ensures((),out)),
+            None => delivery.ensures((),None) && batch.ensures((),None),
+        },
+    },
+))]
+pub(super) fn tentative<A>(
+    slot: Option<usize>,
+    history: impl FnOnce(usize) -> Option<Option<A>>,
+    delivery: impl FnOnce() -> Option<Option<A>>,
+    batch: impl FnOnce() -> Option<Option<A>>,
+) -> Option<Option<A>> {
+    if let Some(i) = slot {
+        return history(i);
+    }
+    match delivery() {
+        Some(author) => Some(author),
+        None => batch(),
+    }
+}

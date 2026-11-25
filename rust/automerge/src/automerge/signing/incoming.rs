@@ -24,8 +24,7 @@ use crate::admission::{select_fragments, AcceptedHistory};
 use crate::change_graph::ChangeGraph;
 use crate::signature::error::{InvalidFragment, ProofError, SigningError};
 use crate::signature::{
-    assemble_frontiers, ed25519, verify_frontier_entry, verify_prepared_frontier,
-    FragmentRequirements, Signature, SignatureStore,
+    ed25519, verify_frontier_entry, FragmentRequirements, IncomingProof, SignatureStore,
 };
 use crate::storage::load::{LoadedGroup, LoadedGroupBody};
 use crate::storage::signatures::HashEntries;
@@ -67,16 +66,14 @@ use walk::{walk, Visit};
 pub(super) struct PendingGroup {
     head: ChangeHash,
     changes: Vec<Change>,
-    signatures: HashEntries,
-    /// Frontiers already cryptographically verified against established authors.
-    preverified: SignatureStore,
+    evidence: IncomingProof,
 }
 
 impl PendingGroup {
     fn same_delivery(&self, other: &Self) -> bool {
         if self.head != other.head
             || self.changes.len() != other.changes.len()
-            || self.signatures != other.signatures
+            || self.evidence.attachment() != other.evidence.attachment()
         {
             return false;
         }
@@ -299,15 +296,15 @@ impl Incoming<'_> {
         let in_group = self.check_group_members(&changes, incoming_actor_seqs)?;
         let head = Self::find_single_reachable_head(&changes, &in_group)?;
         let group_seq1_authors = Self::check_intra_group_actor_chains(&changes)?;
+        let requirements = FragmentRequirements::for_changes(&changes);
         let Some(signatures) = group.signatures else {
-            let requirements = FragmentRequirements::for_changes(&changes);
             let missing = *requirements.hashes().next().unwrap();
             return Err(SigningError::from(ProofError::MissingSignature(missing)).into());
         };
-        let preverified = self.verify_known_author_frontiers(
-            &changes,
+        let evidence = self.prepare_group_evidence(
+            requirements,
             &in_group,
-            &signatures,
+            signatures,
             &group_seq1_authors,
             incoming_actor_authors,
             prepared_keys,
@@ -316,8 +313,7 @@ impl Incoming<'_> {
         Ok(PendingGroup {
             head,
             changes,
-            signatures,
-            preverified,
+            evidence,
         })
     }
 
@@ -413,71 +409,33 @@ impl Incoming<'_> {
             .collect())
     }
 
-    fn verify_known_author_frontiers(
+    fn prepare_group_evidence(
         &self,
-        changes: &[Change],
+        requirements: FragmentRequirements,
         in_group: &HashMap<ChangeHash, &Change>,
-        signatures: &HashEntries,
+        signatures: HashEntries,
         group_seq1_authors: &HashMap<&ActorId, Option<Author<'_>>>,
         incoming_actor_authors: &HashMap<ActorId, Option<Author<'static>>>,
         prepared_keys: &mut HashMap<Author<'static>, ed25519::VerifyingAuthor<'static>>,
-    ) -> Result<SignatureStore, AutomergeError> {
-        let requirements = FragmentRequirements::for_changes(changes);
-        let (preverified, _) = assemble_frontiers(
-            requirements.hashes().as_slice(),
-            (SignatureStore::default(), prepared_keys),
-            |hash, (mut preverified, prepared_keys)| -> Result<_, AutomergeError> {
-                let frontier = &hash;
-                let actor = in_group[frontier].actor_id();
-                if signatures
-                    .for_hash(frontier)
-                    .filter_map(Signature::as_ed25519)
-                    .next()
-                    .is_none()
-                {
-                    return Err(SigningError::from(ProofError::MissingSignature(*frontier)).into());
-                }
-
-                let known_author: Option<Option<Author<'_>>> =
-                    if let Some(actor_idx) = self.ops.lookup_actor(actor) {
-                        (self.graph.seq_for_actor(actor_idx) > 0)
-                            .then(|| self.authors.get_author_for_actor(actor_idx))
-                    } else if let Some(author) = group_seq1_authors.get(actor) {
-                        Some(author.clone())
-                    } else {
-                        incoming_actor_authors
-                            .get(actor)
-                            .map(|opt| opt.as_ref().map(Author::as_borrowed))
-                    };
-
-                if let Some(expected_author) = known_author {
-                    let author = expected_author
-                        .ok_or_else(|| SigningError::from(ProofError::MissingAuthor(*frontier)))?
-                        .into_owned();
-                    let verifier = match prepared_keys.get(&author) {
-                        Some(verifier) => verifier,
-                        None => {
-                            let prepared = ed25519::VerifyingAuthor::new(author.clone()).map_err(
-                                |source| {
-                                    SigningError::from(ProofError::InvalidAuthorKey {
-                                        hash: *frontier,
-                                        source,
-                                    })
-                                },
-                            )?;
-                            prepared_keys.entry(author).or_insert(prepared)
-                        }
-                    };
-                    let witness = verify_prepared_frontier(signatures, frontier, verifier)
-                        .map_err(SigningError::from)?;
-                    preverified
-                        .insert_ed25519(witness)
-                        .expect("each frontier has one fixed author");
-                }
-                Ok((preverified, prepared_keys))
-            },
-        )?;
-        Ok(preverified)
+    ) -> Result<IncomingProof, AutomergeError> {
+        IncomingProof::prepare(requirements, signatures, prepared_keys, |frontier| {
+            let actor = in_group[frontier].actor_id();
+            let known_author = author_checks::tentative(
+                self.ops.lookup_actor(actor),
+                |actor_idx| {
+                    (self.graph.seq_for_actor(actor_idx) > 0)
+                        .then(|| self.authors.get_author_for_actor(actor_idx))
+                },
+                || group_seq1_authors.get(actor).cloned(),
+                || {
+                    incoming_actor_authors
+                        .get(actor)
+                        .map(|opt| opt.as_ref().map(Author::as_borrowed))
+                },
+            );
+            known_author.map(|hint| hint.map(Author::into_owned))
+        })
+        .map_err(|error| SigningError::from(error).into())
     }
 
     // --- Stage 2: Causal ancestry & actor-author resolution ---
@@ -696,37 +654,22 @@ impl Incoming<'_> {
         group: &PendingGroup,
         ancestry: &ResolvedAncestry<'_>,
     ) -> Result<SignatureStore, AutomergeError> {
-        let requirements = FragmentRequirements::for_changes(&group.changes);
         let resolve_author = |hash: &ChangeHash| -> Option<Author<'static>> {
-            if let Some((actor_idx, _)) = self.graph.actor_seq_for_hash(hash) {
-                self.authors
-                    .get_author_for_actor(actor_idx)
-                    .map(Author::into_owned)
-            } else {
-                ancestry.valid_authors.get(hash).cloned().flatten()
-            }
+            author_checks::established(
+                self.graph.actor_seq_for_hash(hash).map(|(slot, _)| slot),
+                |slot| {
+                    self.authors
+                        .get_author_for_actor(slot)
+                        .map(Author::into_owned)
+                },
+                || ancestry.valid_authors.get(hash).cloned(),
+            )
         };
 
-        // Reuse Stage 1's preverified store whenever every frontier already
-        // verified under the exact author established by causal ancestry.
-        let can_reuse_preverified = author_checks::cache_matches(
-            requirements.hashes().as_slice(),
-            |frontier| resolve_author(&frontier),
-            |frontier| {
-                group
-                    .preverified
-                    .ed25519_entries(&frontier)
-                    .next()
-                    .map(|(author, _)| author)
-            },
-        );
-        if can_reuse_preverified {
-            Ok(group.preverified.clone())
-        } else {
-            requirements
-                .verify_entries(&group.signatures, resolve_author)
-                .map_err(|error| SigningError::from(error).into())
-        }
+        group
+            .evidence
+            .settle(resolve_author)
+            .map_err(|error| SigningError::from(error).into())
     }
 
     fn find_ancestry_equivocation<'a>(
@@ -903,23 +846,19 @@ impl Incoming<'_> {
     fn pending_frontiers_viable(&self, group: &PendingGroup) -> bool {
         let in_group: HashMap<ChangeHash, &Change> =
             group.changes.iter().map(|c| (c.hash(), c)).collect();
-        let requirements = FragmentRequirements::for_changes(&group.changes);
-        pending::all(
-            requirements.hashes().as_slice(),
-            &|frontier: &ChangeHash| {
-                let Some(actor_idx) = self.ops.lookup_actor(in_group[frontier].actor_id()) else {
-                    return true;
-                };
-                if self.graph.seq_for_actor(actor_idx) == 0 {
-                    return true;
-                }
-                self.authors
-                    .get_author_for_actor(actor_idx)
-                    .is_some_and(|author| {
-                        verify_frontier_entry(&group.signatures, frontier, author).is_ok()
-                    })
-            },
-        )
+        pending::all(group.evidence.hashes(), &|frontier: &ChangeHash| {
+            let Some(actor_idx) = self.ops.lookup_actor(in_group[frontier].actor_id()) else {
+                return true;
+            };
+            if self.graph.seq_for_actor(actor_idx) == 0 {
+                return true;
+            }
+            self.authors
+                .get_author_for_actor(actor_idx)
+                .is_some_and(|author| {
+                    verify_frontier_entry(group.evidence.attachment(), frontier, author).is_ok()
+                })
+        })
     }
 }
 

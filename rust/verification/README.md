@@ -10,9 +10,9 @@ separate and do not check executable code.
 | [Intrinsic validation and plan assembly](incoming_intrinsic/README.md) | Member/slot indexing, head/reachability/level checks, actor chains, exact reverse-edge inputs, ordered validation and evaluation, descriptor assembly, selected and blocked plan projections |
 | [Incoming ancestry worklist](incoming_topology/README.md) | A duplicate-free dependency order containing every resolvable candidate |
 | [Dependency walks](incoming_walk/README.md) | Exact in-group reachability, boundary discovery, and member walks through a supplied causal cut |
-| [Authors and actor slots](incoming_authors/README.md) | Whole-pass propagation from exact predecessors, original causes of broken chains, actor-slot conflicts, and group-local cache reuse |
+| [Authors and actor slots](incoming_authors/README.md) | Whole-pass propagation from exact predecessors, original causes of broken chains, actor-slot conflicts, and author-source precedence |
 | [Boundary past](boundary_past/README.md) | Exact memo lookup, fill and union on one snapshot, and exact cutoff given the applied-clock contract |
-| [Incoming groups](incoming_groups/README.md) | Delivered/canonical equality, per-actor frontiers, attachment search and proof assembly, and exact unapplied rank order |
+| [Incoming groups](incoming_groups/README.md) | Delivered/canonical equality, per-actor frontiers, scoped provisional/fresh/cache verification and exact proof contents, and exact unapplied rank order |
 | [Fragment selection](fragment_selection/README.md) | The greatest subset of proved fragment occurrences closed under boundary requirements |
 | [Actor clocks](actor_clock/README.md) | Conditional theorems: representing a closed past by maxima, preservation of causal closure, and exact accepted-set extension |
 | [Incoming completion](incoming_completion/README.md) | Apply/error gating, selected-proof publication order, exact accepted-clock update, and the post-apply pending policy |
@@ -35,12 +35,14 @@ adapter establishes the next kernel's preconditions. In particular:
   the concrete group call site that the ancestry is resolved, has valid
   chains and no equivocation, and is queried through the applied-clock
   contract on that same snapshot.
-- The per-frontier adapters must use the correct attachment and established
-  author. Pending deduplication has a checked member-set comparison, but
-  still depends on exact head and attachment equality and validated candidates.
-  Prepared admission carries only the selected proof payloads across apply;
-  the full relation between those proofs, members and graph effects is not
-  yet checked at the original entry point.
+- Evidence preparation and settlement now carry one owned scope and check
+  every per-frontier operation; prepared keys can be shared but witnesses
+  cannot. The leaf graph/author, wire-bucket, and signature-store observations
+  still need faithful adapters. Pending deduplication has a checked member-set
+  comparison, but still depends on exact head and attachment equality and
+  validated candidates. Prepared admission carries only the selected proof
+  payloads across apply; the full relation between those proofs, members and
+  graph effects is not yet checked at the original entry point.
 
 Document application, Ed25519, graph/actor queries, and signature
 merge/reclamation, readiness, and draft pruning are external operations; the
