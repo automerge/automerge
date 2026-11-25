@@ -35,6 +35,7 @@ use super::{has_signature, SigningDocument};
 
 mod actor_chains;
 mod actor_slots;
+mod apply_order;
 mod author_checks;
 mod boundary_summary;
 mod group_membership;
@@ -117,6 +118,7 @@ struct CandidateGroup {
 /// dependencies, annotated with topological order and inherited actor authors.
 struct ResolvedAncestry<'a> {
     changes_by_hash: HashMap<ChangeHash, &'a Change>,
+    resolved_topo: Vec<ChangeHash>,
     topo_rank: HashMap<ChangeHash, usize>,
     valid_authors: HashMap<ChangeHash, Option<Author<'static>>>,
     broken_chain_cause: HashMap<ChangeHash, ChangeHash>,
@@ -513,6 +515,7 @@ impl Incoming<'_> {
 
         ResolvedAncestry {
             changes_by_hash,
+            resolved_topo,
             topo_rank,
             valid_authors,
             broken_chain_cause,
@@ -906,29 +909,31 @@ impl Incoming<'_> {
         let selection = select_fragments(&accepted_view, &fragments);
         let selected_verified_indices: Vec<usize> = selection.selected_indices().collect();
 
-        let mut selected_unapplied: HashSet<ChangeHash> = HashSet::new();
-        let mut ordered_unapplied_hashes = Vec::new();
-        let mut accepted_member_hashes: Vec<ChangeHash> = Vec::new();
-        for &v_idx in &selected_verified_indices {
-            let group = &candidates[evaluated.verified[v_idx].candidate_index].group;
-            for change in &group.changes {
-                let hash = change.hash();
-                accepted_member_hashes.push(hash);
-                if !self.graph.has_change(&hash) && selected_unapplied.insert(hash) {
-                    ordered_unapplied_hashes.push(hash);
-                }
-            }
-        }
+        let accepted_member_hashes: Vec<_> = selected_verified_indices
+            .iter()
+            .flat_map(|&v_idx| {
+                &candidates[evaluated.verified[v_idx].candidate_index]
+                    .group
+                    .changes
+            })
+            .map(Change::hash)
+            .collect();
 
-        drop(selected_unapplied);
-        if let Some(conflict) = actor_slots::find_conflict(&ordered_unapplied_hashes, |hash| {
-            self.actor_slot(ancestry.changes_by_hash[&hash])
+        let mut ranks = apply_order::collect_ranks(&accepted_member_hashes, |hash| {
+            (!self.graph.has_change(&hash)).then(|| ancestry.topo_rank[&hash])
+        });
+        if let Some(conflict) = actor_slots::find_conflict(&ranks, |rank| {
+            self.actor_slot(ancestry.changes_by_hash[&ancestry.resolved_topo[rank]])
         }) {
             return Err(AutomergeError::duplicate_seq(
-                ancestry.changes_by_hash[&conflict],
+                ancestry.changes_by_hash[&ancestry.resolved_topo[conflict]],
             ));
         }
-        ordered_unapplied_hashes.sort_unstable_by_key(|hash| ancestry.topo_rank[hash]);
+        apply_order::sort_ranks(&mut ranks);
+        let ordered_unapplied_hashes = ranks
+            .into_iter()
+            .map(|rank| ancestry.resolved_topo[rank])
+            .collect();
 
         let mut remaining_candidate_indices: HashSet<usize> = evaluated
             .waiting_candidate_indices
