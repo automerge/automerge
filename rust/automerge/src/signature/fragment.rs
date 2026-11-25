@@ -11,12 +11,17 @@
 
 use std::collections::BTreeMap;
 
-use crate::storage::signatures::HashEntries;
-use crate::{Author, ChangeHash};
+use crate::storage::signatures::{HashEntries, MAX_SIGNATURES_PER_HASH};
+use crate::{Author, Change, ChangeHash};
 
 use super::ed25519;
 use super::error::ProofError;
 use super::store::SignatureStore;
+
+mod evidence;
+mod frontiers;
+
+pub(crate) use evidence::assemble_frontiers;
 
 /// Fixed proof obligations, independent of available signatures and other groups.
 ///
@@ -36,13 +41,22 @@ impl FragmentRequirements {
     pub(crate) fn for_members<A: Ord>(
         members: impl IntoIterator<Item = (A, u64, ChangeHash)>,
     ) -> Self {
-        let mut frontiers = BTreeMap::<A, (u64, ChangeHash)>::new();
+        let mut frontiers = BTreeMap::new();
         for (actor, seq, hash) in members {
-            let frontier = frontiers.entry(actor).or_insert((seq, hash));
-            if seq > frontier.0 {
-                *frontier = (seq, hash);
-            }
+            frontiers::offer(&mut frontiers, actor, seq, hash);
         }
+        Self::from_frontiers(frontiers)
+    }
+
+    /// Compute incoming frontiers from precisely this group's delivery.
+    pub(crate) fn for_changes(changes: &[Change]) -> Self {
+        let frontiers = frontiers::pick(changes, |change| {
+            (change.actor_id(), change.seq(), change.hash())
+        });
+        Self::from_frontiers(frontiers)
+    }
+
+    fn from_frontiers<A>(frontiers: BTreeMap<A, (u64, ChangeHash)>) -> Self {
         let mut hashes: Vec<_> = frontiers.into_values().map(|(_, hash)| hash).collect();
         hashes.sort_unstable();
         Self { hashes }
@@ -71,20 +85,23 @@ impl FragmentRequirements {
     pub(crate) fn verify_entries<'a>(
         &self,
         attached: &HashEntries,
-        mut author_for_hash: impl FnMut(&ChangeHash) -> Option<Author<'a>>,
+        author_for_hash: impl Fn(&ChangeHash) -> Option<Author<'a>>,
     ) -> Result<SignatureStore, ProofError> {
-        let mut verified = SignatureStore::default();
-        for hash in self.hashes() {
-            if attached.for_hash(hash).next().is_none() {
-                return Err(ProofError::MissingSignature(*hash));
-            }
-            let author = author_for_hash(hash).ok_or(ProofError::MissingAuthor(*hash))?;
-            let witness = verify_frontier_entry(attached, hash, author)?;
-            verified
-                .insert_ed25519(witness)
-                .expect("each frontier has one fixed author and is inserted once");
-        }
-        Ok(verified)
+        assemble_frontiers(
+            &self.hashes,
+            SignatureStore::default(),
+            |hash, mut verified| {
+                if attached.for_hash(&hash).next().is_none() {
+                    return Err(ProofError::MissingSignature(hash));
+                }
+                let author = author_for_hash(&hash).ok_or(ProofError::MissingAuthor(hash))?;
+                let witness = verify_frontier_entry(attached, &hash, author)?;
+                verified
+                    .insert_ed25519(witness)
+                    .expect("each frontier has one fixed author and is inserted once");
+                Ok(verified)
+            },
+        )
     }
 }
 
@@ -99,11 +116,30 @@ pub(crate) fn verify_frontier_entry<'a, 's>(
             hash: *hash,
             source,
         })?;
-    attached
+    verify_prepared_frontier(attached, hash, &verifier)
+}
+
+/// Use the same exact-hash attachment search with an already decoded key.
+pub(crate) fn verify_prepared_frontier<'a, 's>(
+    attached: &'s HashEntries,
+    hash: &ChangeHash,
+    verifier: &ed25519::VerifyingAuthor<'a>,
+) -> Result<ed25519::VerifiedSignature<'a, 's>, ProofError> {
+    // HashEntries enforces this per-hash bound on construction and parsing.
+    // Use a stack slice so the checked search needs no new heap allocation.
+    let mut entries = [None; MAX_SIGNATURES_PER_HASH];
+    let mut len = 0;
+    for entry in attached
         .for_hash(hash)
         .filter_map(|entry| entry.as_ed25519())
-        .find_map(|signature| verifier.verify_hash(hash, signature).ok())
-        .ok_or(ProofError::MissingSignature(*hash))
+    {
+        entries[len] = Some(entry);
+        len += 1;
+    }
+    evidence::first_witness(&entries[..len], |entry| {
+        verifier.verify_hash(hash, entry?).ok()
+    })
+    .ok_or(ProofError::MissingSignature(*hash))
 }
 
 #[cfg(test)]

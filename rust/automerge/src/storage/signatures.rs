@@ -11,7 +11,7 @@ use super::{parse, Header};
 pub(crate) use error::HashEntries as EntriesError;
 pub(super) use error::Signatures as ParseError;
 
-const MAX_SIGNATURES_PER_HASH: usize = 16;
+pub(crate) const MAX_SIGNATURES_PER_HASH: usize = 16;
 
 /// The storage representation of a domain signature.
 ///

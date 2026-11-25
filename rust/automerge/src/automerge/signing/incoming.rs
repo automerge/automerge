@@ -24,7 +24,8 @@ use crate::admission::{select_fragments, AcceptedHistory};
 use crate::change_graph::ChangeGraph;
 use crate::signature::error::{InvalidFragment, ProofError, SigningError};
 use crate::signature::{
-    ed25519, verify_frontier_entry, FragmentRequirements, Signature, SignatureStore,
+    assemble_frontiers, ed25519, verify_frontier_entry, verify_prepared_frontier,
+    FragmentRequirements, Signature, SignatureStore,
 };
 use crate::storage::load::{LoadedGroup, LoadedGroupBody};
 use crate::storage::signatures::HashEntries;
@@ -36,6 +37,7 @@ mod actor_chains;
 mod actor_slots;
 mod author_checks;
 mod boundary_summary;
+mod group_membership;
 mod topology;
 mod walk;
 
@@ -267,11 +269,7 @@ impl Incoming<'_> {
         let head = Self::find_single_reachable_head(&changes, &in_group)?;
         let group_seq1_authors = Self::check_intra_group_actor_chains(&changes)?;
         let Some(signatures) = group.signatures else {
-            let requirements = FragmentRequirements::for_members(
-                changes
-                    .iter()
-                    .map(|change| (change.actor_id(), change.seq(), change.hash())),
-            );
+            let requirements = FragmentRequirements::for_changes(&changes);
             let missing = *requirements.hashes().next().unwrap();
             return Err(SigningError::from(ProofError::MissingSignature(missing)).into());
         };
@@ -415,62 +413,61 @@ impl Incoming<'_> {
         incoming_actor_authors: &HashMap<ActorId, Option<Author<'static>>>,
         prepared_keys: &mut HashMap<Author<'static>, ed25519::VerifyingAuthor<'static>>,
     ) -> Result<SignatureStore, AutomergeError> {
-        let requirements = FragmentRequirements::for_members(
-            changes
-                .iter()
-                .map(|change| (change.actor_id(), change.seq(), change.hash())),
-        );
-        let mut preverified = SignatureStore::default();
-        for frontier in requirements.hashes() {
-            let actor = in_group[frontier].actor_id();
-            if signatures
-                .for_hash(frontier)
-                .filter_map(Signature::as_ed25519)
-                .next()
-                .is_none()
-            {
-                return Err(SigningError::from(ProofError::MissingSignature(*frontier)).into());
-            }
-
-            let known_author: Option<Option<Author<'_>>> =
-                if let Some(actor_idx) = self.ops.lookup_actor(actor) {
-                    (self.graph.seq_for_actor(actor_idx) > 0)
-                        .then(|| self.authors.get_author_for_actor(actor_idx))
-                } else if let Some(author) = group_seq1_authors.get(actor) {
-                    Some(author.clone())
-                } else {
-                    incoming_actor_authors
-                        .get(actor)
-                        .map(|opt| opt.as_ref().map(Author::as_borrowed))
-                };
-
-            if let Some(expected_author) = known_author {
-                let author = expected_author
-                    .ok_or_else(|| SigningError::from(ProofError::MissingAuthor(*frontier)))?
-                    .into_owned();
-                let verifier = match prepared_keys.get(&author) {
-                    Some(verifier) => verifier,
-                    None => {
-                        let prepared =
-                            ed25519::VerifyingAuthor::new(author.clone()).map_err(|source| {
-                                SigningError::from(ProofError::InvalidAuthorKey {
-                                    hash: *frontier,
-                                    source,
-                                })
-                            })?;
-                        prepared_keys.entry(author).or_insert(prepared)
-                    }
-                };
-                let witness = signatures
+        let requirements = FragmentRequirements::for_changes(changes);
+        let (preverified, _) = assemble_frontiers(
+            requirements.hashes().as_slice(),
+            (SignatureStore::default(), prepared_keys),
+            |hash, (mut preverified, prepared_keys)| -> Result<_, AutomergeError> {
+                let frontier = &hash;
+                let actor = in_group[frontier].actor_id();
+                if signatures
                     .for_hash(frontier)
                     .filter_map(Signature::as_ed25519)
-                    .find_map(|sig| verifier.verify_hash(frontier, sig).ok())
-                    .ok_or_else(|| SigningError::from(ProofError::MissingSignature(*frontier)))?;
-                preverified
-                    .insert_ed25519(witness)
-                    .expect("each frontier has one fixed author");
-            }
-        }
+                    .next()
+                    .is_none()
+                {
+                    return Err(SigningError::from(ProofError::MissingSignature(*frontier)).into());
+                }
+
+                let known_author: Option<Option<Author<'_>>> =
+                    if let Some(actor_idx) = self.ops.lookup_actor(actor) {
+                        (self.graph.seq_for_actor(actor_idx) > 0)
+                            .then(|| self.authors.get_author_for_actor(actor_idx))
+                    } else if let Some(author) = group_seq1_authors.get(actor) {
+                        Some(author.clone())
+                    } else {
+                        incoming_actor_authors
+                            .get(actor)
+                            .map(|opt| opt.as_ref().map(Author::as_borrowed))
+                    };
+
+                if let Some(expected_author) = known_author {
+                    let author = expected_author
+                        .ok_or_else(|| SigningError::from(ProofError::MissingAuthor(*frontier)))?
+                        .into_owned();
+                    let verifier = match prepared_keys.get(&author) {
+                        Some(verifier) => verifier,
+                        None => {
+                            let prepared = ed25519::VerifyingAuthor::new(author.clone()).map_err(
+                                |source| {
+                                    SigningError::from(ProofError::InvalidAuthorKey {
+                                        hash: *frontier,
+                                        source,
+                                    })
+                                },
+                            )?;
+                            prepared_keys.entry(author).or_insert(prepared)
+                        }
+                    };
+                    let witness = verify_prepared_frontier(signatures, frontier, verifier)
+                        .map_err(SigningError::from)?;
+                    preverified
+                        .insert_ed25519(witness)
+                        .expect("each frontier has one fixed author");
+                }
+                Ok((preverified, prepared_keys))
+            },
+        )?;
         Ok(preverified)
     }
 
@@ -698,23 +695,13 @@ impl Incoming<'_> {
         let canonical =
             self.derive_canonical_fragment(group.head, &ancestry.changes_by_hash, boundary_memo);
         let group_hashes: HashSet<ChangeHash> = group.changes.iter().map(Change::hash).collect();
-        let matches_canonical = canonical.members.len() == group_hashes.len()
-            && canonical
-                .members
-                .iter()
-                .all(|member| group_hashes.contains(member));
-        if !matches_canonical {
+        if !group_membership::matches(&canonical.members, &group_hashes) {
             return Err(
                 SigningError::from(InvalidFragment::NonCanonicalMembership(group.head)).into(),
             );
         }
 
-        let requirements = FragmentRequirements::for_members(
-            group
-                .changes
-                .iter()
-                .map(|c| (c.actor_id(), c.seq(), c.hash())),
-        );
+        let requirements = FragmentRequirements::for_changes(&group.changes);
         let resolve_author = |hash: &ChangeHash| -> Option<Author<'static>> {
             if let Some((actor_idx, _)) = self.graph.actor_seq_for_hash(hash) {
                 self.authors
@@ -978,12 +965,7 @@ impl Incoming<'_> {
         }
         let in_group: HashMap<ChangeHash, &Change> =
             group.changes.iter().map(|c| (c.hash(), c)).collect();
-        let requirements = FragmentRequirements::for_members(
-            group
-                .changes
-                .iter()
-                .map(|c| (c.actor_id(), c.seq(), c.hash())),
-        );
+        let requirements = FragmentRequirements::for_changes(&group.changes);
         for frontier in requirements.hashes() {
             let Some(actor_idx) = self.ops.lookup_actor(in_group[frontier].actor_id()) else {
                 continue;

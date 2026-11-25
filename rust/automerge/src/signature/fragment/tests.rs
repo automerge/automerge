@@ -142,6 +142,33 @@ fn invalid_unsupported_wrong_author_and_missing_author_cases_are_rejected() {
     ));
 }
 
+#[test]
+fn a_full_attachment_bucket_retains_only_the_exact_valid_witness() {
+    let required = hash(1);
+    let unrelated = hash(2);
+    let signer = SigningKey::from_bytes(&[40; 32]);
+    let proof = FragmentRequirements::for_members([(0, 2, required), (0, 1, unrelated)]);
+    let entries = entries(
+        (1..MAX_SIGNATURES_PER_HASH)
+            .map(|i| {
+                (
+                    required,
+                    signature(unrelated, &SigningKey::from_bytes(&[i as u8; 32])),
+                )
+            })
+            .chain([(required, signature(required, &signer))]),
+    );
+    assert_eq!(entries.for_hash(&required).count(), MAX_SIGNATURES_PER_HASH);
+    let verified = proof
+        .verify_entries(&entries, |_| Some(author(&signer)))
+        .unwrap();
+    assert_eq!(
+        verified.verified_hashes().copied().collect::<Vec<_>>(),
+        [required]
+    );
+    assert_eq!(verified.ed25519_entries(&required).count(), 1);
+}
+
 proptest! {
     #[test]
     fn frontier_selection_matches_a_member_scan(sequences in prop::collection::vec((0u8..8, 1u8..32), 0..100)) {
@@ -152,6 +179,8 @@ proptest! {
             (*actor, u64::from(*seq), ChangeHash(hash))
         }).collect();
         let requirements = FragmentRequirements::for_members(members.iter().copied());
+        let picked = FragmentRequirements::from_frontiers(frontiers::pick(&members, |member| *member));
+        prop_assert_eq!(&requirements, &picked);
         let expected: std::collections::BTreeSet<_> = members.iter()
             .filter(|(actor, seq, _)| !members.iter().any(|(a, s, _)| a == actor && s > seq))
             .map(|(_, _, hash)| *hash).collect();
