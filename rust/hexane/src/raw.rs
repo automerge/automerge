@@ -550,6 +550,12 @@ fn splice_slab(
         suffix
     };
 
+    // `truncate` keeps the allocation: without this the left half would
+    // hold the whole pre-split capacity.  A loaded column starts as one
+    // oversize slab, so every splice into it would otherwise leave behind
+    // a short slab still owning a document-sized buffer.
+    slab.data.shrink_to_fit();
+
     (vec![RawSlab { data: right_data }], overflow_del)
 }
 
@@ -684,6 +690,21 @@ mod tests {
         assert!(col.is_empty());
         assert_eq!(col.len(), 0);
         assert_eq!(col.save(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn split_of_loaded_slab_releases_capacity() {
+        // A loaded column is one oversize slab; repeated splices near its
+        // front must not leave short slabs holding the full buffer.
+        let data = vec![7u8; 1 << 20];
+        let mut col = RawColumn::load(&data).unwrap();
+        for i in 0..64 {
+            // splice points sit further apart than a slab budget, so the
+            // short left halves stay unmerged (as values of a few KiB do).
+            col.splice(i * 5_000, 0, [&[1u8, 2, 3][..]]);
+        }
+        let cap: usize = col.slabs.iter().map(|s| s.data.capacity()).sum();
+        assert!(cap < 4 * col.len(), "capacity {cap} vs len {}", col.len());
     }
 
     #[test]
