@@ -159,6 +159,7 @@ pub(crate) open spec fn projected_order<'a,'m,C:'a,M:'m,F,P,H:'static,S,R:Fn(&'a
 )->bool {
     &&& greatest(verified,view,accepted,mask)
     &&& exact(candidates,verified,mask,waiting,contents,hash,verified.len() as int,&projection)
+    &&& vstd::std_specs::hash::hash_set_inv(&projection.remaining)
     &&& schedule_result(projection.members@,ranked,rank,slot,order)
 }
 

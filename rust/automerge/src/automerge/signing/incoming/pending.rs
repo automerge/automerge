@@ -2,13 +2,15 @@
 
 #![allow(unexpected_cfgs)]
 
+use std::collections::HashSet;
+
 #[cfg(automerge_verus)]
 use crate::{
     lookup_spec::{model, modeled},
     pending_spec::*,
 };
 #[cfg(automerge_verus)]
-use vstd::prelude::*;
+use vstd::{prelude::*, std_specs::hash::hash_set_inv};
 
 /// Disproved old orphans must not block a new batch; invalid new deliveries
 /// still abort the batch without reaching application or completion.
@@ -90,67 +92,64 @@ pub(super) fn all<T, F: Fn(&T) -> bool>(items: &[T], test: &F) -> bool {
 /// Keep the first viable representative of each still-blocked delivery.
 /// Recheck viability against the post-apply view, never the planning view.
 #[cfg_attr(automerge_verus, verus_spec(out =>
-    requires callbacks(candidates@, remaining, viable, same),
-    ensures retention(candidates@, remaining, viable, same, out@),
+    requires hash_set_inv(remaining), callbacks(candidates@, remaining@, state, viable, same),
+    ensures retention(candidates@, remaining@, state, viable, same, out@),
 ))]
-pub(super) fn rebuild<T>(
+pub(super) fn rebuild<T, S>(
     candidates: Vec<T>,
-    remaining: impl Fn(usize) -> bool,
-    viable: impl Fn(&T) -> bool,
+    remaining: &HashSet<usize>,
+    state: &S,
+    viable: impl Fn(&S, &T) -> bool,
     same: impl Fn(&T, &T) -> bool,
 ) -> Vec<T> {
     #[cfg(automerge_verus)]
     proof_decl! { let ghost input = candidates@; let ghost mut positions = Seq::<int>::empty(); }
     let mut kept = Vec::new();
     #[cfg(automerge_verus)]
-    proof! { assert(retained(input, remaining, viable, same, 0, kept@, positions)); }
+    proof! { assert(retained(input, remaining@, state, viable, same, 0, kept@, positions)); }
     #[cfg_attr(automerge_verus, verus_spec(iter =>
-        invariant iter.seq().len() == input.len(), callbacks(input, remaining, viable, same),
+        invariant hash_set_inv(remaining), iter.seq().len() == input.len(), callbacks(input, remaining@, state, viable, same),
             forall|j: int| 0 <= j < input.len() ==> #[trigger] iter.seq()[j] == (j as usize, input[j]),
-            retained(input, remaining, viable, same, iter.index(), kept@, positions),
-        ensures retained(input, remaining, viable, same, input.len() as int, kept@, positions),
+            retained(input, remaining@, state, viable, same, iter.index(), kept@, positions),
+        ensures retained(input, remaining@, state, viable, same, input.len() as int, kept@, positions),
     ))]
     for (i, candidate) in candidates.into_iter().enumerate() {
-        #[cfg(automerge_verus)]
-        proof! { assert(modeled(remaining, i)); }
-        let eligible = remaining(i);
-        #[cfg(automerge_verus)]
-        proof! { assert(eligible == model(remaining, i)); }
+        let eligible = remaining.contains(&i);
         if eligible {
             #[cfg(automerge_verus)]
             proof! {
                 assert(input.contains(input[i as int]));
-                assert(modeled(viable, &candidate));
+                assert(viability_ready(viable,state,&candidate));
             }
-            let still_viable = viable(&candidate);
+            let still_viable = viable(state, &candidate);
             #[cfg(automerge_verus)]
-            proof! { assert(still_viable == model(viable, &candidate)); }
+            proof! { assert(still_viable == observed_viability(viable,state,&candidate)); }
             if still_viable {
                 #[cfg(automerge_verus)]
-                proof! { compare_kept(input, remaining, viable, same, i as int, kept@, positions); }
+                proof! { compare_kept(input, remaining@, state, viable, same, i as int, kept@, positions); }
                 let duplicate = already_kept(&kept, &candidate, &same);
                 if !duplicate {
                     #[cfg(automerge_verus)]
                     proof! {
-                        keep_one(input, remaining, viable, same, i as int, kept@, positions);
+                        keep_one(input, remaining@, state, viable, same, i as int, kept@, positions);
                         positions = positions.push(i as int);
                     }
                     kept.push(candidate);
                 } else {
                     #[cfg(automerge_verus)]
-                    proof! { skip_one(input, remaining, viable, same, i as int, kept@, positions); }
+                    proof! { skip_one(input, remaining@, state, viable, same, i as int, kept@, positions); }
                 }
             } else {
                 #[cfg(automerge_verus)]
-                proof! { skip_one(input, remaining, viable, same, i as int, kept@, positions); }
+                proof! { skip_one(input, remaining@, state, viable, same, i as int, kept@, positions); }
             }
         } else {
             #[cfg(automerge_verus)]
-            proof! { skip_one(input, remaining, viable, same, i as int, kept@, positions); }
+            proof! { skip_one(input, remaining@, state, viable, same, i as int, kept@, positions); }
         }
     }
     #[cfg(automerge_verus)]
-    proof! { finish(input, remaining, viable, same, kept@, positions); }
+    proof! { finish(input, remaining@, state, viable, same, kept@, positions); }
     kept
 }
 
@@ -189,6 +188,7 @@ fn already_kept<T, F: Fn(&T, &T) -> bool>(kept: &[T], new: &T, same: &F) -> bool
 #[cfg(test)]
 mod tests {
     use super::{rebuild, recheck, route, Origin, Route};
+    use std::collections::HashSet;
 
     #[test]
     fn retains_first_viable_copy_but_notices_a_different_attachment() {
@@ -202,8 +202,9 @@ mod tests {
         ];
         let retained = rebuild(
             queued,
-            |index| index != 0,
-            |entry| {
+            &HashSet::from([1, 2, 3, 4]),
+            &(),
+            |_, entry| {
                 assert_ne!(entry.3, 'a');
                 entry.2
             },

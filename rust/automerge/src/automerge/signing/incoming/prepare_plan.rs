@@ -28,7 +28,7 @@ pub(crate) struct Projection<H, P> {
 /// delivery whose members are published cannot come from different indices.
 #[cfg_attr(automerge_verus, verus_spec(out =>
     requires views(candidates@,verified@,excluded@,contents,hash),
-    ensures exact(candidates@,verified@,excluded@,waiting@,contents,hash,verified@.len() as int,&out),
+    ensures exact(candidates@,verified@,excluded@,waiting@,contents,hash,verified@.len() as int,&out),hash_set_inv(&out.remaining),
 ))]
 pub(super) fn project<'a, 'm, C: 'a, M: 'm, F, P, H>(
     candidates: &'a [C],
@@ -69,7 +69,7 @@ pub(super) fn project<'a, 'm, C: 'a, M: 'm, F, P, H>(
         invariant iter.seq().len()==occurrences.len(), views(candidates@,occurrences,excluded@,contents,hash),
             forall|j:int| 0<=j<occurrences.len() ==> #[trigger] iter.seq()[j]==(j as usize,occurrences[j]),
             hash_set_inv(&out.remaining),exact(candidates@,occurrences,excluded@,waiting@,contents,hash,iter.index(),&out),
-        ensures exact(candidates@,occurrences,excluded@,waiting@,contents,hash,occurrences.len() as int,&out),
+        ensures exact(candidates@,occurrences,excluded@,waiting@,contents,hash,occurrences.len() as int,&out),hash_set_inv(&out.remaining),
     ))]
     for (i, (candidate, (_, proof))) in verified.into_iter().enumerate() {
         #[cfg(automerge_verus)]

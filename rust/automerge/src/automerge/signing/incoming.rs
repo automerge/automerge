@@ -15,7 +15,7 @@
 //!    selects the maximal subset causally closed down to `AcceptedClock` and
 //!    orders unapplied changes topologically before any mutation.
 //! 5. **Completion**: the document coordinator applies borrowed selected
-//!    contents, then `PreparedAdmission::complete` merges proofs, publishes
+//!    contents, then the transaction driver merges proofs, publishes
 //!    history and removes completed or invalidated pending groups.
 
 use std::collections::HashMap;
@@ -35,8 +35,10 @@ use super::{has_signature, SigningDocument};
 mod actor_chains;
 mod actor_input;
 mod actor_slots;
+mod admission_txn;
 mod ancestry_gate;
 mod apply_order;
+mod apply_payloads;
 mod author_checks;
 mod author_projection;
 mod boundary_cutoff;
@@ -62,7 +64,6 @@ mod topology_input;
 mod walk;
 
 use pending::Route;
-pub(super) use publication::run as run_admission;
 use walk::{walk, Visit};
 
 /// An intrinsically validated incoming group waiting for missing causal history.
@@ -233,7 +234,6 @@ impl Incoming<'_> {
                 )
             },
         )
-        .map(PreparedAdmission)
     }
 
     // --- Stage 1: Intrinsic per-group validation ---
@@ -758,7 +758,7 @@ impl Incoming<'_> {
                 view: fragment_view,
                 accepted: |hash| accepted.contains(&hash),
             },
-            |candidate| candidate.group.changes.as_slice(),
+            candidate_members,
             Change::hash,
             prepare_plan::Sources {
                 ranked: &ancestry.resolved_topo,
@@ -787,8 +787,12 @@ impl Incoming<'_> {
     }
 
     fn pending_frontiers_viable(&self, group: &PendingGroup) -> bool {
-        let in_group: HashMap<ChangeHash, &Change> =
-            group.changes.iter().map(|c| (c.hash(), c)).collect();
+        let in_group = snapshot_index::build(
+            std::slice::from_ref(group),
+            |group| group.changes.as_slice(),
+            |change| Some((change.hash(), change)),
+            snapshot_index::Keep::Last,
+        );
         pending::all(group.evidence.hashes(), &|frontier: &ChangeHash| {
             let Some(actor_idx) = self.ops.lookup_actor(in_group[frontier].actor_id()) else {
                 return true;
@@ -806,78 +810,113 @@ impl Incoming<'_> {
 }
 
 /// Owned input and plan survive releasing the immutable signing view before apply.
-pub(super) struct PreparedAdmission(prepare_entry::Prepared<PendingGroup, AdmissionPlan>);
+pub(super) type PreparedAdmission = prepare_entry::Prepared<PendingGroup, AdmissionPlan>;
 
-impl PreparedAdmission {
-    pub(super) fn changes(&self) -> Vec<&Change> {
-        let by_hash = snapshot_index::build(
-            &self.0.candidates,
-            |candidate| candidate.group.changes.as_slice(),
-            |change| Some((change.hash(), change)),
-            snapshot_index::Keep::Last,
-        );
-        plan_contents::ordered_refs(&self.0.plan.ordered, |hash| by_hash[&hash])
+fn candidate_members(candidate: &CandidateGroup) -> &[Change] {
+    &candidate.group.changes
+}
+
+type ApplyState<'doc, 'log> = (&'doc mut crate::Automerge, &'log mut crate::PatchLog);
+
+fn apply_payloads_to_document<'doc, 'log>(
+    (doc, log): ApplyState<'doc, 'log>,
+    changes: Vec<&Change>,
+) -> (ApplyState<'doc, 'log>, Result<(), AutomergeError>) {
+    let result = doc.apply_prepared_changes(changes, log).map_err(Into::into);
+    ((doc, log), result)
+}
+
+/// Concrete document operations for the checked transaction driver.
+pub(super) fn run_admission<'doc, 'log>(
+    doc: &'doc mut crate::Automerge,
+    groups: Vec<LoadedGroup>,
+    log: &'log mut crate::PatchLog,
+) -> Result<(), AutomergeError> {
+    use admission_txn::{DeliveryRead, Effects, Outcome, SigningEffects};
+
+    match admission_txn::run(
+        (doc, log),
+        DeliveryRead {
+            members: candidate_members,
+            key: Change::hash,
+        },
+        Effects {
+            prepare: |(doc, log): ApplyState<'doc, 'log>| {
+                let prepared = doc
+                    .try_with_signing(|signing| signing.admit_with_pending(groups))
+                    .expect("signed admission requires signing mode");
+                ((doc, log), prepared)
+            },
+            apply: apply_payloads_to_document,
+            open_signing: |(doc, _): ApplyState<'doc, 'log>| {
+                // The actor table may have shifted. No signing view from
+                // preparation survives into completion.
+                doc.try_signing()
+                    .expect("application preserves signing mode")
+            },
+            signing: SigningEffects {
+                publish: publish_step,
+                viable: |signing: &SigningDocument<'_>, candidate: &CandidateGroup| {
+                    let after = Incoming {
+                        graph: signing.graph,
+                        ops: signing.ops,
+                        authors: signing.authors,
+                        state: signing.state,
+                    };
+                    after.pending_group_remains_viable(&candidate.group)
+                },
+                same_delivery: |left: &CandidateGroup, right: &CandidateGroup| {
+                    left.group.same_delivery(&right.group)
+                },
+                install_pending: |signing: SigningDocument<'doc>, groups| {
+                    signing.state.pending = PendingGroups { groups };
+                    signing
+                },
+            },
+        },
+    ) {
+        Outcome::Aborted(_, error) => Err(error),
+        Outcome::Committed(_) => Ok(()),
     }
+}
 
-    pub(super) fn complete(self, signing: &mut SigningDocument<'_>) {
-        use publication::Publish;
-
-        let prepare_entry::Prepared { candidates, plan } = self.0;
-        let signing = publication::publish(signing, &plan.projection.proofs, |signing, step| {
-            match step {
-                Publish::MergeProof(proof) => {
-                    Self::merge_selected_proof(signing, proof);
-                }
-                Publish::IncludeMembers => signing
-                    .state
-                    .accepted
-                    .include_prepared(signing.graph, &plan.projection.members),
-                Publish::Reclaim => signing.state.reclaim_covered(signing.graph),
-                Publish::RemoveDrafts => signing.state.remove_published_drafts(signing.graph),
-            }
-            signing
-        });
-        let incoming = Incoming {
-            graph: signing.graph,
-            ops: signing.ops,
-            authors: signing.authors,
-            state: signing.state,
-        };
-        let retained = pending::rebuild(
-            candidates,
-            |index| plan.projection.remaining.contains(&index),
-            |candidate| incoming.pending_group_remains_viable(&candidate.group),
-            |left, right| left.group.same_delivery(&right.group),
-        );
-        signing.state.pending = PendingGroups {
-            groups: retained
-                .into_iter()
-                .map(|candidate| candidate.group)
-                .collect(),
-        };
-    }
-
-    fn merge_selected_proof(signing: &mut SigningDocument<'_>, proof: &SignatureStore) {
-        let newly_verified: Vec<_> = proof
-            .verified_hashes()
-            .filter(|hash| {
-                !has_signature(
-                    signing.graph,
-                    signing.authors,
-                    &signing.state.signatures,
-                    hash,
-                )
-            })
-            .copied()
-            .collect();
-        signing
+fn publish_step<'doc, 'event>(
+    mut signing: SigningDocument<'doc>,
+    step: publication::Publish<&'event SignatureStore, &'event [ChangeHash]>,
+) -> SigningDocument<'doc> {
+    use publication::Publish;
+    match step {
+        Publish::MergeProof(proof) => merge_selected_proof(&mut signing, proof),
+        Publish::IncludeMembers(members) => signing
             .state
-            .signatures
-            .merge_verified(proof)
-            .expect("admitted proof must match historical authors");
-        for hash in newly_verified {
-            signing.state.fragment_readiness.signature_added(&hash);
-        }
+            .accepted
+            .include_prepared(signing.graph, members),
+        Publish::Reclaim => signing.state.reclaim_covered(signing.graph),
+        Publish::RemoveDrafts => signing.state.remove_published_drafts(signing.graph),
+    }
+    signing
+}
+
+fn merge_selected_proof(signing: &mut SigningDocument<'_>, proof: &SignatureStore) {
+    let newly_verified: Vec<_> = proof
+        .verified_hashes()
+        .filter(|hash| {
+            !has_signature(
+                signing.graph,
+                signing.authors,
+                &signing.state.signatures,
+                hash,
+            )
+        })
+        .copied()
+        .collect();
+    signing
+        .state
+        .signatures
+        .merge_verified(proof)
+        .expect("admitted proof must match historical authors");
+    for hash in newly_verified {
+        signing.state.fragment_readiness.signature_added(&hash);
     }
 }
 

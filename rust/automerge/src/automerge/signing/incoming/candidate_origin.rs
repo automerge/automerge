@@ -48,3 +48,21 @@ fn append<G>(out: &mut Vec<Candidate<G>>, groups: Vec<G>, tag: Origin) {
         out.push(Candidate { origin: tag, group });
     }
 }
+
+/// Drop provenance tags, not delivery payloads or queue order.
+#[cfg_attr(automerge_verus, verus_spec(out=>ensures out@ =~= groups_of(candidates@)))]
+pub(super) fn into_groups<G>(candidates: Vec<Candidate<G>>) -> Vec<G> {
+    let mut out = Vec::with_capacity(candidates.len());
+    #[cfg(automerge_verus)]
+    proof_decl! {let ghost input=candidates@;}
+    #[cfg_attr(automerge_verus, verus_spec(iter =>
+        invariant iter.seq()==input,out@ =~= groups_of(input.take(iter.index())),
+        ensures out@ =~= groups_of(input),
+    ))]
+    for candidate in candidates {
+        #[cfg(automerge_verus)]
+        proof! {append_group(input,iter.index());}
+        out.push(candidate.group);
+    }
+    out
+}

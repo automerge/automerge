@@ -653,31 +653,7 @@ impl Automerge {
         groups: Vec<crate::LoadedGroup>,
         log: &mut PatchLog,
     ) -> Result<(), crate::AutomergeError> {
-        let (_, result) = run_admission(
-            (self, log),
-            |(doc, log)| {
-                let prepared = doc
-                    .try_with_signing(|signing| signing.admit_with_pending(groups))
-                    .expect("signed admission requires signing mode");
-                ((doc, log), prepared)
-            },
-            |(doc, log), prepared: &PreparedAdmission| {
-                let changes = prepared.changes();
-                let result = if changes.is_empty() {
-                    Ok(())
-                } else {
-                    doc.apply_prepared_changes(changes, log).map_err(Into::into)
-                };
-                ((doc, log), result)
-            },
-            |(doc, log), prepared| {
-                // The actor table may have changed; publish through a fresh view.
-                doc.try_with_signing(|mut signing| prepared.complete(&mut signing))
-                    .expect("application preserves signing mode");
-                (doc, log)
-            },
-        );
-        result
+        run_admission(self, groups, log)
     }
 
     /// Verify and insert signatures for applied changes, then complete
