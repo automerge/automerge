@@ -11,6 +11,8 @@ mod clock_spec;
 mod delivery;
 mod delivery_spec;
 mod exact_publication;
+#[path = "../actor_clock/proof.rs"]
+mod history_proof;
 #[path = "../actor_clock/spec.rs"]
 mod history_spec;
 #[path = "../incoming_authors/spec.rs"]
@@ -21,8 +23,6 @@ mod origin_spec;
 #[path = "../../automerge/src/automerge/signing/incoming/pending.rs"]
 mod pending;
 mod pending_spec;
-#[path = "../actor_clock/proof.rs"]
-mod proof;
 #[path = "../../automerge/src/automerge/signing/incoming/publication.rs"]
 mod publication;
 mod publication_spec;

@@ -18,9 +18,9 @@
 //!    contents, then `PreparedAdmission::complete` merges proofs, publishes
 //!    history and removes completed or invalidated pending groups.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use crate::admission::{select_fragments, AcceptedHistory};
+use crate::admission::{AcceptedHistory, FragmentView};
 use crate::change_graph::ChangeGraph;
 use crate::signature::error::{InvalidFragment, ProofError, SigningError};
 use crate::signature::{
@@ -53,6 +53,8 @@ mod intrinsic_index;
 mod intrinsic_shape;
 mod pending;
 mod plan_contents;
+mod prepare_entry;
+mod prepare_plan;
 mod publication;
 mod snapshot_index;
 mod topology;
@@ -160,23 +162,19 @@ enum GroupEvaluation {
     },
 }
 
-struct VerifiedGroup {
-    candidate_index: usize,
-    fragment: Fragment,
-    proof: SignatureStore,
+fn fragment_view(
+    occurrence: &prepare_plan::Verified<Fragment, SignatureStore>,
+) -> FragmentView<'_, ChangeHash> {
+    let (_, (fragment, _)) = occurrence;
+    FragmentView {
+        members: &fragment.members,
+        boundary: &fragment.boundary,
+    }
 }
 
-struct EvaluatedGroups {
-    verified: Vec<VerifiedGroup>,
-    waiting_candidate_indices: Vec<usize>,
-}
+type EvaluatedGroups = evaluation_batch::Partition<(Fragment, SignatureStore)>;
 
-struct AdmissionPlan {
-    selected_verified_indices: Vec<usize>,
-    ordered_unapplied_hashes: Vec<ChangeHash>,
-    accepted_member_hashes: Vec<ChangeHash>,
-    remaining_candidate_indices: HashSet<usize>,
-}
+type AdmissionPlan = prepare_plan::Plan<ChangeHash, SignatureStore>;
 
 struct AcceptedGraph<'a> {
     graph: &'a ChangeGraph,
@@ -220,27 +218,22 @@ impl Incoming<'_> {
         &self,
         groups: Vec<LoadedGroup>,
     ) -> Result<PreparedAdmission, AutomergeError> {
-        let incoming = self.validate_incoming_batch(groups)?;
-        let candidates = candidate_origin::candidates(self.state.pending.groups.clone(), incoming);
-        let ancestry = self.resolve_unapplied_ancestry(&candidates);
-        let evaluated = self.verify_resolved_groups(&candidates, &ancestry)?;
-        let AdmissionPlan {
-            selected_verified_indices,
-            ordered_unapplied_hashes,
-            accepted_member_hashes,
-            remaining_candidate_indices,
-        } = self.plan_group_admission(&candidates, &ancestry, &evaluated)?;
-        let selected_proofs =
-            plan_contents::take_selected(evaluated.verified, &selected_verified_indices, |group| {
-                group.proof
-            });
-        Ok(PreparedAdmission {
-            candidates,
-            selected_proofs,
-            ordered_unapplied_hashes,
-            accepted_member_hashes,
-            remaining_candidate_indices,
-        })
+        prepare_entry::prepare(
+            groups,
+            || self.state.pending.groups.clone(),
+            |raw| self.validate_incoming_batch(raw),
+            |candidates| {
+                prepare_entry::analyze(
+                    candidates,
+                    |same| self.resolve_unapplied_ancestry(same),
+                    |same, ancestry| self.verify_resolved_groups(same, ancestry),
+                    |same, ancestry, evaluated| {
+                        self.plan_group_admission(same, ancestry, evaluated)
+                    },
+                )
+            },
+        )
+        .map(PreparedAdmission)
     }
 
     // --- Stage 1: Intrinsic per-group validation ---
@@ -562,7 +555,7 @@ impl Incoming<'_> {
             let change: &'a Change = ancestry.changes_by_hash[&hash];
             self.actor_slot(change)
         });
-        let (waiting_candidate_indices, verified) = evaluation_batch::assess(
+        evaluation_batch::assess(
             candidates,
             BoundaryPastMemo::new(self.graph, &ancestry.changes_by_hash),
             |mut memo, candidate| {
@@ -585,18 +578,7 @@ impl Incoming<'_> {
                     });
                 (memo, outcome)
             },
-        )?;
-        Ok(EvaluatedGroups {
-            verified: verified
-                .into_iter()
-                .map(|(candidate_index, (fragment, proof))| VerifiedGroup {
-                    candidate_index,
-                    fragment,
-                    proof,
-                })
-                .collect(),
-            waiting_candidate_indices,
-        })
+        )
     }
 
     fn evaluate_single_group<'a>(
@@ -761,60 +743,32 @@ impl Incoming<'_> {
         &self,
         candidates: &[CandidateGroup],
         ancestry: &ResolvedAncestry<'_>,
-        evaluated: &EvaluatedGroups,
+        evaluated: EvaluatedGroups,
     ) -> Result<AdmissionPlan, AutomergeError> {
-        let signing = self.state;
-        let fragments: Vec<Fragment> = evaluated
-            .verified
-            .iter()
-            .map(|v| v.fragment.clone())
-            .collect();
-        let accepted_view = AcceptedGraph {
+        let (waiting, verified) = evaluated;
+        let accepted = AcceptedGraph {
             graph: self.graph,
-            signing,
+            signing: self.state,
         };
-        let selection = select_fragments(&accepted_view, &fragments);
-        let selected_verified_indices: Vec<usize> = selection.selected_indices().collect();
-
-        let accepted_member_hashes = plan_contents::selected_members(
-            &selected_verified_indices,
-            |verified_index| {
-                candidates[evaluated.verified[verified_index].candidate_index]
-                    .group
-                    .changes
-                    .as_slice()
+        prepare_plan::build(
+            candidates,
+            verified,
+            &waiting,
+            prepare_plan::Selector {
+                view: fragment_view,
+                accepted: |hash| accepted.contains(&hash),
             },
+            |candidate| candidate.group.changes.as_slice(),
             Change::hash,
-        );
-
-        let mut ranks = apply_order::collect_ranks(&accepted_member_hashes, |hash| {
-            (!self.graph.has_change(&hash)).then(|| ancestry.topo_rank[&hash])
-        });
-        if let Some(conflict) = actor_slots::find_conflict(&ranks, &|rank| {
-            self.actor_slot(ancestry.changes_by_hash[&ancestry.resolved_topo[rank]])
-        }) {
-            return Err(AutomergeError::duplicate_seq(
-                ancestry.changes_by_hash[&ancestry.resolved_topo[conflict]],
-            ));
-        }
-        apply_order::sort_ranks(&mut ranks);
-        let ordered_unapplied_hashes = ranks
-            .into_iter()
-            .map(|rank| ancestry.resolved_topo[rank])
-            .collect();
-
-        let excluded: Vec<_> = selection.pending_indices().collect();
-        let remaining_candidate_indices =
-            plan_contents::blocked(&evaluated.waiting_candidate_indices, &excluded, |index| {
-                evaluated.verified[index].candidate_index
-            });
-
-        Ok(AdmissionPlan {
-            selected_verified_indices,
-            ordered_unapplied_hashes,
-            accepted_member_hashes,
-            remaining_candidate_indices,
-        })
+            prepare_plan::Sources {
+                ranked: &ancestry.resolved_topo,
+                rank: |hash| (!self.graph.has_change(&hash)).then(|| ancestry.topo_rank[&hash]),
+                slot: |rank| {
+                    self.actor_slot(ancestry.changes_by_hash[&ancestry.resolved_topo[rank]])
+                },
+            },
+        )
+        .map_err(|hash| AutomergeError::duplicate_seq(ancestry.changes_by_hash[&hash]))
     }
 
     fn pending_group_remains_viable(&self, group: &PendingGroup) -> bool {
@@ -852,29 +806,24 @@ impl Incoming<'_> {
 }
 
 /// Owned input and plan survive releasing the immutable signing view before apply.
-pub(super) struct PreparedAdmission {
-    candidates: Vec<CandidateGroup>,
-    selected_proofs: Vec<SignatureStore>,
-    ordered_unapplied_hashes: Vec<ChangeHash>,
-    accepted_member_hashes: Vec<ChangeHash>,
-    remaining_candidate_indices: HashSet<usize>,
-}
+pub(super) struct PreparedAdmission(prepare_entry::Prepared<PendingGroup, AdmissionPlan>);
 
 impl PreparedAdmission {
     pub(super) fn changes(&self) -> Vec<&Change> {
         let by_hash = snapshot_index::build(
-            &self.candidates,
+            &self.0.candidates,
             |candidate| candidate.group.changes.as_slice(),
             |change| Some((change.hash(), change)),
             snapshot_index::Keep::Last,
         );
-        plan_contents::ordered_refs(&self.ordered_unapplied_hashes, |hash| by_hash[&hash])
+        plan_contents::ordered_refs(&self.0.plan.ordered, |hash| by_hash[&hash])
     }
 
     pub(super) fn complete(self, signing: &mut SigningDocument<'_>) {
         use publication::Publish;
 
-        let signing = publication::publish(signing, &self.selected_proofs, |signing, step| {
+        let prepare_entry::Prepared { candidates, plan } = self.0;
+        let signing = publication::publish(signing, &plan.projection.proofs, |signing, step| {
             match step {
                 Publish::MergeProof(proof) => {
                     Self::merge_selected_proof(signing, proof);
@@ -882,7 +831,7 @@ impl PreparedAdmission {
                 Publish::IncludeMembers => signing
                     .state
                     .accepted
-                    .include_prepared(signing.graph, &self.accepted_member_hashes),
+                    .include_prepared(signing.graph, &plan.projection.members),
                 Publish::Reclaim => signing.state.reclaim_covered(signing.graph),
                 Publish::RemoveDrafts => signing.state.remove_published_drafts(signing.graph),
             }
@@ -895,8 +844,8 @@ impl PreparedAdmission {
             state: signing.state,
         };
         let retained = pending::rebuild(
-            self.candidates,
-            |index| self.remaining_candidate_indices.contains(&index),
+            candidates,
+            |index| plan.projection.remaining.contains(&index),
             |candidate| incoming.pending_group_remains_viable(&candidate.group),
             |left, right| left.group.same_delivery(&right.group),
         );

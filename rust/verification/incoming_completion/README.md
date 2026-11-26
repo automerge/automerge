@@ -14,9 +14,9 @@ These are ordering and selection guarantees. The adapter in
 mutating the document and apply the prepared schedule without mutating it on
 error. On successful apply it must supply a fresh, aligned actor/graph view.
 The [completion adapter](../../automerge/src/automerge/signing/incoming.rs)
-supplies the selected member list. The [checked proof projection](../incoming_intrinsic/plan_spec.rs)
-moves only the selected proof payloads into `PreparedAdmission`, so
-completion no longer indexes the verified occurrence list after apply. The
+supplies the selected member list. The [checked prepare plan](../incoming_plan/README.md)
+keeps exactly those members and proof payloads together in `PreparedAdmission`,
+so completion does not select again or index the verified occurrence list. The
 behavior of merging evidence and readiness, reclaiming covered records, and
 pruning drafts is still an external contract; the scheduling proof does not
 verify those implementations.

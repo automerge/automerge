@@ -1,6 +1,6 @@
 use crate::admission_spec::*;
+use crate::history_proof::exact_clock;
 use crate::history_spec::*;
-use crate::proof::exact_clock;
 use vstd::prelude::*;
 
 verus! {

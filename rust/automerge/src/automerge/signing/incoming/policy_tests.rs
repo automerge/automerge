@@ -134,13 +134,21 @@ fn a_resolved_authorless_change_is_neither_missing_nor_broken() {
 }
 
 #[test]
-fn prepared_payloads_are_selected_by_verified_occurrence_order() {
-    let selected = super::plan_contents::take_selected(
-        vec!["unselected", "first", "second", "discard"],
-        &[1, 2],
-        |value| value,
+fn prepared_projection_keeps_proofs_members_and_blocked_occurrences_together() {
+    use super::prepare_plan::project;
+    let candidates = vec![vec![1, 2], vec![3], vec![4, 5], vec![6]];
+    let verified = vec![(0, ((), "one")), (2, ((), "two")), (3, ((), "three"))];
+    let selected = project(
+        &candidates,
+        verified,
+        &[true, false, false],
+        &[1],
+        Vec::as_slice,
+        |value| *value,
     );
-    assert_eq!(selected, ["first", "second"]);
+    assert_eq!(selected.proofs, ["two", "three"]);
+    assert_eq!(selected.members, [4, 5, 6]);
+    assert_eq!(selected.remaining, std::collections::HashSet::from([0, 1]));
 }
 
 #[test]
@@ -262,4 +270,118 @@ fn actor_input_resolves_the_exact_rank_order_across_applied_and_candidate_parent
         },
     );
     assert_eq!(outcomes, [Resolution::Linked(AuthorSource::Applied(7)); 2]);
+}
+
+#[test]
+fn prepare_uses_one_cohort_and_one_ancestry_view_and_stops_before_planning_on_error() {
+    use super::pending::Origin;
+    use super::prepare_entry::{analyze, prepare};
+
+    let rejected = prepare::<_, usize, usize, _>(
+        vec![1],
+        || panic!("invalid input must not open pending"),
+        |_| Err("validation"),
+        |_| panic!("invalid input must not plan"),
+    );
+    assert!(matches!(rejected, Err("validation")));
+
+    let cohort = [4, 5];
+    let failed = analyze::<_, _, usize, usize, _>(
+        &cohort,
+        |items| items.as_ptr(),
+        |items, pointer| {
+            assert_eq!(*pointer, items.as_ptr());
+            Err("evaluation")
+        },
+        |_, _, _| panic!("failed evaluation must not plan"),
+    );
+    assert_eq!(failed, Err("evaluation"));
+
+    let prepared = prepare(
+        vec![7, 8],
+        || vec![4],
+        Ok::<_, ()>,
+        |items| {
+            assert!(matches!(items[0].origin, Origin::ExistingPending));
+            assert!(matches!(items[1].origin, Origin::IncomingBatch));
+            Ok(items.iter().map(|item| item.group).sum::<usize>())
+        },
+    )
+    .unwrap();
+    assert_eq!(prepared.plan, 19);
+    assert_eq!(
+        prepared
+            .candidates
+            .into_iter()
+            .map(|item| item.group)
+            .collect::<Vec<_>>(),
+        [4, 7, 8]
+    );
+}
+
+#[test]
+fn checked_prepare_plan_selects_once_and_schedules_the_exact_chosen_members() {
+    use super::prepare_plan::{build, Selector, Sources, Verified};
+    use crate::admission::FragmentView;
+    type Description = (Vec<u8>, Vec<u8>);
+    fn view<'a>(
+        (_, ((members, boundary), _)): &'a Verified<Description, &'static str>,
+    ) -> FragmentView<'a, u8> {
+        FragmentView { members, boundary }
+    }
+    let candidates = [vec![9], vec![3], vec![1], vec![1, 2]];
+    let verified = vec![
+        (0, ((vec![9], vec![8]), "unavailable")),
+        (2, ((vec![1], vec![]), "one")),
+        (3, ((vec![1, 2], vec![1]), "overlap")),
+    ];
+    let plan = build(
+        &candidates,
+        verified,
+        &[1],
+        Selector {
+            view,
+            accepted: |_| false,
+        },
+        Vec::as_slice,
+        |hash| *hash,
+        Sources {
+            ranked: &[1, 2, 9],
+            rank: |hash| match hash {
+                1 => Some(0),
+                2 => Some(1),
+                _ => panic!("excluded hash ranked"),
+            },
+            slot: |rank| ((rank, 1), false),
+        },
+    )
+    .unwrap();
+    assert_eq!(plan.projection.proofs, ["one", "overlap"]);
+    assert_eq!(plan.projection.members, [1, 1, 2]);
+    assert_eq!(
+        plan.projection.remaining,
+        std::collections::HashSet::from([0, 1])
+    );
+    assert_eq!(plan.ordered, [1, 2]);
+
+    let conflict = build(
+        &candidates,
+        vec![
+            (2, ((vec![1], vec![]), "one")),
+            (3, ((vec![1, 2], vec![]), "fork")),
+        ],
+        &[],
+        Selector {
+            view,
+            accepted: |_| false,
+        },
+        Vec::as_slice,
+        |hash| *hash,
+        Sources {
+            ranked: &[1, 2],
+            rank: |hash| Some(usize::from(hash) - 1),
+            slot: |_| ((0, 1), false),
+        },
+    );
+    assert!(matches!(conflict, Err(2)));
 }

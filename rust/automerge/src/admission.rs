@@ -23,6 +23,7 @@ pub(crate) trait AcceptedHistory {
 #[must_use]
 pub(crate) struct Selection<'a> {
     selected: Vec<(usize, &'a Fragment)>,
+    #[cfg(test)]
     pending: Vec<(usize, &'a Fragment)>,
 }
 
@@ -35,6 +36,7 @@ impl<'a> Selection<'a> {
         self.selected.iter().map(|(index, _)| *index)
     }
 
+    #[cfg(test)]
     pub(crate) fn pending_indices(&self) -> impl ExactSizeIterator<Item = usize> + '_ {
         self.pending.iter().map(|(index, _)| *index)
     }
@@ -48,15 +50,21 @@ pub(crate) fn select_fragments<'a>(
 ) -> Selection<'a> {
     let excluded = exclude_by_view(accepted, fragments, |fragment| fragment);
     let mut selected = Vec::new();
+    #[cfg(test)]
     let mut pending = Vec::new();
     for (index, fragment) in fragments.iter().enumerate() {
         if excluded[index] {
+            #[cfg(test)]
             pending.push((index, fragment));
         } else {
             selected.push((index, fragment));
         }
     }
-    Selection { selected, pending }
+    Selection {
+        selected,
+        #[cfg(test)]
+        pending,
+    }
 }
 
 /// Select directly on the supplied occurrence order; return its exclusion mask.

@@ -14,7 +14,8 @@ separate and do not check executable code.
 | [Ready ancestry](incoming_ancestry/README.md) | Exact actor row projection, shared batch/cone conflict guard, and the checked derivation of clock and canonical-fragment premises on a ready head’s own past |
 | [Boundary past](boundary_past/README.md) | Exact memo lookup, fill and union on one snapshot, and exact cutoff given the applied-clock contract |
 | [Incoming groups](incoming_groups/README.md) | Delivered/canonical equality, per-actor frontiers, scoped provisional/fresh/cache verification and exact proof contents, and exact unapplied rank order |
-| [Fragment selection](fragment_selection/README.md) | The greatest subset of proved fragment occurrences closed under boundary requirements |
+| [Fragment selection](fragment_selection/README.md) | Exact hash-to-index projection and the greatest boundary-closed subset of verified occurrences |
+| [Incoming plan](incoming_plan/README.md) | One tagged candidate cohort and ancestry view; exact selected proofs, members, pending indices, and a dependency-closed apply schedule |
 | [Actor clocks](actor_clock/README.md) | Conditional theorems: representing a closed past by maxima, preservation of causal closure, and exact accepted-set extension |
 | [Incoming completion](incoming_completion/README.md) | Apply/error gating, selected-proof publication order, exact accepted-clock update, and the post-apply pending policy |
 
@@ -43,9 +44,11 @@ adapter establishes the next kernel's preconditions. In particular:
   cannot. The leaf graph/author, wire-bucket, and signature-store observations
   still need faithful adapters. Pending deduplication has a checked member-set
   comparison, but still depends on exact head and attachment equality and
-  validated candidates. Prepared admission carries only the selected proof
-  payloads across apply; the full relation between those proofs, members and
-  graph effects is not yet checked at the original entry point.
+  validated candidates. The checked prepare driver now binds the actual
+  selector to one exact member/proof/pending projection and one apply order
+  on the same cohort. It relies on faithful group evaluation and aligned
+  graph/rank observations. The proof that applying that owned plan produces
+  exactly the visible and accepted document state is still open.
 
 Document application, Ed25519, graph/actor queries, and signature
 merge/reclamation, readiness, and draft pruning are external operations; the
@@ -57,7 +60,7 @@ Run all checks with the [pinned Verus release and Rust toolchain](incoming_topol
 from the repository root:
 
 ```sh
-for harness in incoming_intrinsic incoming_topology incoming_walk incoming_authors incoming_ancestry boundary_past incoming_groups fragment_selection actor_clock incoming_completion; do
+for harness in incoming_intrinsic incoming_topology incoming_walk incoming_authors incoming_ancestry boundary_past incoming_groups fragment_selection incoming_plan actor_clock incoming_completion; do
     verus --edition=2021 --crate-type=lib --cfg automerge_verus --no-cheating \
         "rust/verification/$harness/lib.rs" || exit
 done
