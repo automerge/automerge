@@ -37,7 +37,7 @@ pub(crate) open spec fn chosen_heads<F,P,H>(verified:Seq<Verified<F,P>>,mask:Seq
     kept(mask).map(|i:usize| head(verified[i as int].1.0))
 }
 
-proof fn exact_members<'a,'m,C:'a,M:'m,F,P,H:'static,R:Fn(&'a C)->&'m[M],K:Fn(&'m M)->H,V:for<'v> Fn(&'v Verified<F,P>)->FragmentView<'v,H>>(
+pub(crate) proof fn exact_members<'a,'m,C:'a,M:'m,F,P,H:'static,R:Fn(&'a C)->&'m[M],K:Fn(&'m M)->H,V:for<'v> Fn(&'v Verified<F,P>)->FragmentView<'v,H>>(
     candidates:Seq<C>,verified:Seq<Verified<F,P>>,mask:Seq<bool>,fragments:Fragments<H>,head:spec_fn(F)->H,view:V,contents:R,hash:K,end:int,
 )
     requires 0<=end<=verified.len()==mask.len(),occurrence_alignment(candidates,verified,fragments,head,view,contents,hash),

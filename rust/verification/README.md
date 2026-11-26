@@ -1,9 +1,10 @@
 # Incoming signing admission: Verus coverage
 
-The spec in each directory is the review surface, together with the listed
-trusted adapters. The production harnesses import the actual Rust kernels;
-there is no Verus dependency in the Cargo workspace. The clock theorems are
-separate and do not check executable code.
+**Review the [abstract admission spec](incoming_transaction/spec.rs) first.**
+It describes the transaction without implementation types or proof lemmas.
+The [checked refinement](incoming_transaction/refinement.rs) links it to the
+production transaction and the stage proofs below. The production harnesses
+import the actual Rust kernels; there is no Verus dependency in Cargo builds.
 
 | Spec | Checked |
 | --- | --- |
@@ -18,7 +19,7 @@ separate and do not check executable code.
 | [Incoming plan](incoming_plan/README.md) | One tagged candidate cohort and ancestry view; exact selected proofs, members, pending indices, and a dependency-closed apply schedule |
 | [Actor clocks](actor_clock/README.md) | Conditional theorems: representing a closed past by maxima, preservation of causal closure, and exact accepted-set extension |
 | [Incoming completion](incoming_completion/README.md) | Publication order, exact accepted-clock update, and the post-apply pending policy |
-| [Linked transaction](incoming_transaction/README.md) | Exact apply payloads, one plan through apply and completion, and a linked observational theorem for the document |
+| [Linked transaction](incoming_transaction/README.md) | Exact apply payloads, one plan through apply and completion, and a checked refinement to the abstract admission spec |
 
 ## Remaining composition gap
 
