@@ -6,11 +6,12 @@
 //! withdraw causal support, never invalidate another fragment's proof. Selection
 //! therefore converges in a single exclusion worklist pass.
 
-use std::collections::{HashMap, HashSet};
-
 use crate::{ChangeHash, Fragment};
 
+mod projection;
 mod selection;
+
+pub(crate) use projection::{select as select_mask, FragmentView};
 
 /// Membership in dependency-closed accepted history.
 pub(crate) trait AcceptedHistory {
@@ -45,49 +46,7 @@ pub(crate) fn select_fragments<'a>(
     accepted: &impl AcceptedHistory,
     fragments: &'a [Fragment],
 ) -> Selection<'a> {
-    // Index only hashes mentioned by the candidates, never all of accepted
-    // history. The count includes each supplying member occurrence.
-    let mut hash_ids = HashMap::new();
-    let mut counts = Vec::new();
-    let member_ids: Vec<Vec<_>> = fragments
-        .iter()
-        .map(|fragment| {
-            fragment
-                .members
-                .iter()
-                .map(|&hash| {
-                    let id = *hash_ids.entry(hash).or_insert_with(|| {
-                        counts.push(0);
-                        counts.len() - 1
-                    });
-                    counts[id] += 1;
-                    id
-                })
-                .collect()
-        })
-        .collect();
-
-    let mut required_by = vec![Vec::new(); counts.len()];
-    for (index, fragment) in fragments.iter().enumerate() {
-        let members: HashSet<_> = fragment.members.iter().copied().collect();
-        let dependencies: HashSet<_> = fragment
-            .boundary
-            .iter()
-            .copied()
-            .filter(|hash| !members.contains(hash) && !accepted.contains(hash))
-            .collect();
-        for dependency in dependencies {
-            let id = *hash_ids.entry(dependency).or_insert_with(|| {
-                required_by.push(Vec::new());
-                counts.push(0);
-                counts.len() - 1
-            });
-            required_by[id].push(index);
-        }
-    }
-    drop(hash_ids);
-    let excluded = selection::exclude(&member_ids, &required_by, counts);
-
+    let excluded = exclude_by_view(accepted, fragments, |fragment| fragment);
     let mut selected = Vec::new();
     let mut pending = Vec::new();
     for (index, fragment) in fragments.iter().enumerate() {
@@ -98,6 +57,26 @@ pub(crate) fn select_fragments<'a>(
         }
     }
     Selection { selected, pending }
+}
+
+/// Select directly on the supplied occurrence order; return its exclusion mask.
+/// Callers with attached proofs need not copy descriptors into a second list.
+pub(crate) fn exclude_by_view<'a, C: 'a>(
+    accepted: &impl AcceptedHistory,
+    occurrences: &'a [C],
+    fragment_of: impl Fn(&'a C) -> &'a Fragment,
+) -> Vec<bool> {
+    select_mask(
+        occurrences,
+        |occurrence| {
+            let fragment = fragment_of(occurrence);
+            FragmentView {
+                members: &fragment.members,
+                boundary: &fragment.boundary,
+            }
+        },
+        |hash| accepted.contains(&hash),
+    )
 }
 
 #[cfg(test)]
