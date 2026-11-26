@@ -17,15 +17,17 @@ separate and do not check executable code.
 | [Fragment selection](fragment_selection/README.md) | Exact hash-to-index projection and the greatest boundary-closed subset of verified occurrences |
 | [Incoming plan](incoming_plan/README.md) | One tagged candidate cohort and ancestry view; exact selected proofs, members, pending indices, and a dependency-closed apply schedule |
 | [Actor clocks](actor_clock/README.md) | Conditional theorems: representing a closed past by maxima, preservation of causal closure, and exact accepted-set extension |
-| [Incoming completion](incoming_completion/README.md) | Apply/error gating, selected-proof publication order, exact accepted-clock update, and the post-apply pending policy |
+| [Incoming completion](incoming_completion/README.md) | Publication order, exact accepted-clock update, and the post-apply pending policy |
+| [Linked transaction](incoming_transaction/README.md) | Exact apply payloads, one plan through apply and completion, and a linked observational theorem for the document |
 
 ## Remaining composition gap
 
-There are checked implementations for the principal policies of all five
-stages, but **not a full source-level proof of**
-[`incoming.rs`](../automerge/src/automerge/signing/incoming.rs). The kernels'
-contracts are linked by Rust adapters; Verus does not yet check that every
-adapter establishes the next kernel's preconditions. In particular:
+There is now [one checked observational contract](incoming_transaction/README.md)
+connecting the prepared plan and production completion under explicit
+primitive contracts. This is **not a full source-level proof of**
+[`incoming.rs`](../automerge/src/automerge/signing/incoming.rs): Verus does not
+yet check that every concrete graph/author/document adapter establishes the
+corresponding observation or effect contract. In particular:
 
 - The adapters still have to supply faithful row observations: which changes
   are applied, which provisional authors qualify, which graph/actor-table slots
@@ -47,20 +49,21 @@ adapter establishes the next kernel's preconditions. In particular:
   validated candidates. The checked prepare driver now binds the actual
   selector to one exact member/proof/pending projection and one apply order
   on the same cohort. It relies on faithful group evaluation and aligned
-  graph/rank observations. The proof that applying that owned plan produces
-  exactly the visible and accepted document state is still open.
+  graph/rank observations. The linked transaction theorem now derives exact
+  document effects from that plan and the primitive operations; the remaining
+  work is discharging those explicit alignment and effect premises for the
+  concrete adapters.
 
 Document application, Ed25519, graph/actor queries, and signature
-merge/reclamation, readiness, and draft pruning are external operations; the
-harnesses prove their use only under the listed per-operation contracts. A
-single checked entry-point contract connecting the real adapters would be a
-stronger result than the individual kernel checks passing.
+merge/reclamation, readiness, and draft pruning are external operations. The
+linked contract does not verify their implementations or treat successful
+whole-document admission as one trusted operation.
 
 Run all checks with the [pinned Verus release and Rust toolchain](incoming_topology/README.md),
 from the repository root:
 
 ```sh
-for harness in incoming_intrinsic incoming_topology incoming_walk incoming_authors incoming_ancestry boundary_past incoming_groups fragment_selection incoming_plan actor_clock incoming_completion; do
+for harness in incoming_intrinsic incoming_topology incoming_walk incoming_authors incoming_ancestry boundary_past incoming_groups fragment_selection incoming_plan actor_clock incoming_completion incoming_transaction; do
     verus --edition=2021 --crate-type=lib --cfg automerge_verus --no-cheating \
         "rust/verification/$harness/lib.rs" || exit
 done

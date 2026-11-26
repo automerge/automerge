@@ -2,9 +2,10 @@
 
 ## Transaction and publication order
 
-[publication_spec.rs](publication_spec.rs) specifies the [production driver](../../automerge/src/automerge/signing/incoming/publication.rs).
-A preparation error skips both application and completion. An application
-error skips completion. On success, completion merges exactly the selected
+[publication_spec.rs](publication_spec.rs) specifies the [production publication loop](../../automerge/src/automerge/signing/incoming/publication.rs).
+The [linked transaction driver](../incoming_transaction/README.md) skips both
+application and completion on a preparation error, and skips completion on
+an application error. On success, completion merges exactly the selected
 proof payloads in plan order, then includes the selected member list, then
 reclaims evidence and removes published drafts. Pending is rebuilt afterward
 against the resulting post-apply, post-publication state.
@@ -13,10 +14,10 @@ These are ordering and selection guarantees. The adapter in
 [`signing.rs`](../../automerge/src/automerge/signing.rs) must plan without
 mutating the document and apply the prepared schedule without mutating it on
 error. On successful apply it must supply a fresh, aligned actor/graph view.
-The [completion adapter](../../automerge/src/automerge/signing/incoming.rs)
-supplies the selected member list. The [checked prepare plan](../incoming_plan/README.md)
-keeps exactly those members and proof payloads together in `PreparedAdmission`,
-so completion does not select again or index the verified occurrence list. The
+The [checked prepare plan](../incoming_plan/README.md) keeps exactly the
+selected members and proof payloads together in `PreparedAdmission`. The
+transaction driver passes those actual payloads to publication without
+selecting again or indexing a verified occurrence list. The
 behavior of merging evidence and readiness, reclaiming covered records, and
 pruning drafts is still an external contract; the scheduling proof does not
 verify those implementations.

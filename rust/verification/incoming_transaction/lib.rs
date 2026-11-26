@@ -69,3 +69,15 @@ mod publication;
 #[path = "../incoming_completion/publication_spec.rs"]
 mod publication_spec;
 mod transaction_spec;
+
+mod clock_model;
+#[path = "../incoming_completion/clock_spec.rs"]
+mod clock_spec;
+mod document_spec;
+mod effect_model;
+#[path = "../../automerge/src/clock/seq_slots.rs"]
+mod seq_slots;
+
+mod plan_bridge;
+
+mod linked;

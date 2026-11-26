@@ -49,13 +49,14 @@ bytes or assume that an incoming group is valid.
   missing. Repeated dependencies count separately.
 - [Snapshot index](snapshot_spec.rs): build the exact first/last-occurrence
   maps over the projected delivery rows. Used for provisional authors,
-  unapplied changes by hash, and final apply change lookup; a present `None`
+  unapplied changes by hash, and per-delivery frontier lookup; a present `None`
   payload still occupies its key. The filter and metadata are supplied by the
   caller.
 - [Plan lookup](plan_spec.rs): build exactly the inverse rank map. The
-  apply-list materializer fetches changes in their original planned order.
-  The [incoming plan harness](../incoming_plan/README.md) checks the joint
-  member, proof and blocked occurrence projection from one selection.
+  [incoming plan harness](../incoming_plan/README.md) checks the joint member,
+  proof and blocked occurrence projection from one selection. The
+  [transaction materializer](../incoming_transaction/payload_spec.rs) fetches
+  changes in their original planned order from the owned cohort.
 
 Run with the [pinned Verus toolchain](../incoming_topology/README.md):
 

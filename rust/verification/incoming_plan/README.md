@@ -39,9 +39,9 @@ be canonical and match their exact verified deliveries. The normalized rank
 and slot observations must refer to those same changes and their actual
 dependencies. The native adapter is not itself compiled in Verus, so the proof
 chain does not yet discharge every one of those premises at
-`Incoming::prepare`. Likewise, this checks the prepared plan, not the whole
-transition into a mutated document, which crosses the external apply and
-signing effects described in [incoming completion](../incoming_completion/README.md).
+`Incoming::prepare`. The [linked transaction theorem](../incoming_transaction/README.md)
+uses this plan proof to derive document effects under the primitive apply and
+signing contracts.
 
 Run with the [pinned Verus toolchain](../incoming_topology/README.md):
 
