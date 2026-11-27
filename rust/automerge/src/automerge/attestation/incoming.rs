@@ -1,4 +1,4 @@
-//! Validate, hold, and admit incoming content/proof groups in signing mode.
+//! Validate, hold, and admit incoming content/proof groups in an attested document.
 //!
 //! Incoming admission runs in five stages:
 //! 1. **Intrinsic group validation** (`validate_incoming_batch`): checks single-headed
@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use crate::admission::{select_fragments, PublishedHistory};
 use crate::change_graph::ChangeGraph;
-use crate::signature::error::{InvalidFragment, ProofError, SigningError};
+use crate::signature::error::{AttestationError, InvalidFragment, ProofError};
 use crate::signature::{
     ed25519, verify_frontier_entry, FragmentRequirements, Signature, SignatureStore,
 };
@@ -30,7 +30,7 @@ use crate::storage::load::{LoadedGroup, LoadedGroupBody};
 use crate::storage::signatures::HashEntries;
 use crate::{ActorId, Author, AutomergeError, Change, ChangeHash, Fragment};
 
-use super::{has_signature, SigningDocument};
+use super::{has_signature, AttestedDocument};
 
 /// An intrinsically validated incoming group waiting for missing causal history.
 #[derive(Clone, Debug)]
@@ -146,23 +146,23 @@ struct AdmissionPlan {
 
 struct PublishedGraph<'a> {
     graph: &'a ChangeGraph,
-    signing: &'a super::RequiredSigning,
+    attested: &'a super::AttestedState,
 }
 
 impl PublishedHistory for PublishedGraph<'_> {
     fn contains(&self, hash: &ChangeHash) -> bool {
         self.graph
             .actor_seq_for_hash(hash)
-            .is_some_and(|(actor, seq)| self.signing.published.is_published_actor_seq(actor, seq))
+            .is_some_and(|(actor, seq)| self.attested.published.is_published_actor_seq(actor, seq))
     }
 }
 
-/// Required-mode view for incoming validation and causal planning.
+/// Attested view for incoming validation and causal planning.
 pub(super) struct Incoming<'a> {
     pub(super) graph: &'a ChangeGraph,
     pub(super) ops: &'a crate::op_set2::OpSet,
     pub(super) authors: &'a crate::author::Authors,
-    pub(super) state: &'a super::RequiredSigning,
+    pub(super) state: &'a super::AttestedState,
 }
 
 impl Incoming<'_> {
@@ -238,11 +238,13 @@ impl Incoming<'_> {
         let changes = match group.body {
             // Signed snapshots are expanded into verified canonical groups
             // before admission; a snapshot reaching this point is bare.
-            LoadedGroupBody::Document(_) => return Err(SigningError::UnauthenticatedChanges.into()),
+            LoadedGroupBody::Document(_) => {
+                return Err(AttestationError::UnauthenticatedChanges.into())
+            }
             LoadedGroupBody::Changes(changes) => changes,
         };
         if changes.is_empty() {
-            return Err(SigningError::from(InvalidFragment::Empty).into());
+            return Err(AttestationError::from(InvalidFragment::Empty).into());
         }
 
         let in_group = self.check_group_members(&changes, incoming_actor_seqs)?;
@@ -255,7 +257,7 @@ impl Incoming<'_> {
                     .map(|change| (change.actor_id(), change.seq(), change.hash())),
             );
             let missing = *requirements.hashes().next().unwrap();
-            return Err(SigningError::from(ProofError::MissingSignature(missing)).into());
+            return Err(AttestationError::from(ProofError::MissingSignature(missing)).into());
         };
         let preverified = self.verify_known_author_frontiers(
             &changes,
@@ -290,7 +292,7 @@ impl Incoming<'_> {
             }
             let hash = change.hash();
             if in_group.insert(hash, change).is_some() {
-                return Err(SigningError::from(InvalidFragment::DuplicateMember(hash)).into());
+                return Err(AttestationError::from(InvalidFragment::DuplicateMember(hash)).into());
             }
             if !self.graph.has_change(&hash) && self.has_actor_seq(change) {
                 return Err(AutomergeError::duplicate_seq(change));
@@ -323,7 +325,7 @@ impl Incoming<'_> {
             .iter()
             .filter(|change| !has_dependent.contains(&change.hash()));
         let (Some(head_change), None) = (heads.next(), heads.next()) else {
-            return Err(SigningError::from(InvalidFragment::NotSingleHeaded).into());
+            return Err(AttestationError::from(InvalidFragment::NotSingleHeaded).into());
         };
         let head = head_change.hash();
 
@@ -337,19 +339,21 @@ impl Incoming<'_> {
             }
         }
         if reachable.len() != changes.len() {
-            return Err(SigningError::from(InvalidFragment::NotSingleHeaded).into());
+            return Err(AttestationError::from(InvalidFragment::NotSingleHeaded).into());
         }
 
         let level = head.fragment_level();
         if level == 0 {
             if changes.len() != 1 {
-                return Err(SigningError::from(InvalidFragment::NonSingletonLoose(head)).into());
+                return Err(
+                    AttestationError::from(InvalidFragment::NonSingletonLoose(head)).into(),
+                );
             }
         } else {
             for change in changes {
                 let member = change.hash();
                 if member != head && member.fragment_level() >= level {
-                    return Err(SigningError::from(InvalidFragment::InvalidMemberLevel {
+                    return Err(AttestationError::from(InvalidFragment::InvalidMemberLevel {
                         head,
                         member,
                     })
@@ -375,7 +379,7 @@ impl Incoming<'_> {
             }
             for pair in actor_changes.windows(2) {
                 if pair[1].seq() != pair[0].seq() + 1 || !pair[1].deps().contains(&pair[0].hash()) {
-                    return Err(SigningError::from(InvalidFragment::BrokenActorChain(
+                    return Err(AttestationError::from(InvalidFragment::BrokenActorChain(
                         pair[1].hash(),
                     ))
                     .into());
@@ -408,7 +412,7 @@ impl Incoming<'_> {
                 .next()
                 .is_none()
             {
-                return Err(SigningError::from(ProofError::MissingSignature(*frontier)).into());
+                return Err(AttestationError::from(ProofError::MissingSignature(*frontier)).into());
             }
 
             let known_author: Option<Option<Author<'_>>> =
@@ -425,14 +429,14 @@ impl Incoming<'_> {
 
             if let Some(expected_author) = known_author {
                 let author = expected_author
-                    .ok_or_else(|| SigningError::from(ProofError::MissingAuthor(*frontier)))?
+                    .ok_or_else(|| AttestationError::from(ProofError::MissingAuthor(*frontier)))?
                     .into_owned();
                 let verifier = match prepared_keys.get(&author) {
                     Some(verifier) => verifier,
                     None => {
                         let prepared =
                             ed25519::VerifyingAuthor::new(author.clone()).map_err(|source| {
-                                SigningError::from(ProofError::InvalidAuthorKey {
+                                AttestationError::from(ProofError::InvalidAuthorKey {
                                     hash: *frontier,
                                     source,
                                 })
@@ -444,7 +448,9 @@ impl Incoming<'_> {
                     .for_hash(frontier)
                     .filter_map(Signature::as_ed25519)
                     .find_map(|sig| verifier.verify_hash(frontier, sig).ok())
-                    .ok_or_else(|| SigningError::from(ProofError::MissingSignature(*frontier)))?;
+                    .ok_or_else(|| {
+                        AttestationError::from(ProofError::MissingSignature(*frontier))
+                    })?;
                 preverified
                     .insert_ed25519(witness)
                     .expect("each frontier has one fixed author");
@@ -680,7 +686,7 @@ impl Incoming<'_> {
             .iter()
             .find_map(|c| ancestry.broken_chain_cause.get(&c.hash()))
         {
-            return Err(SigningError::from(InvalidFragment::BrokenActorChain(cause)).into());
+            return Err(AttestationError::from(InvalidFragment::BrokenActorChain(cause)).into());
         }
 
         let all_resolved = group.changes.iter().all(|change| {
@@ -709,7 +715,7 @@ impl Incoming<'_> {
                 .all(|member| group_hashes.contains(member));
         if !matches_canonical {
             return Err(
-                SigningError::from(InvalidFragment::NonCanonicalMembership(group.head)).into(),
+                AttestationError::from(InvalidFragment::NonCanonicalMembership(group.head)).into(),
             );
         }
 
@@ -745,7 +751,7 @@ impl Incoming<'_> {
         } else {
             requirements
                 .verify_entries(&group.signatures, resolve_author)
-                .map_err(SigningError::from)?
+                .map_err(AttestationError::from)?
         };
 
         Ok(GroupEvaluation::Verified {
@@ -932,7 +938,7 @@ impl Incoming<'_> {
         ancestry: &ResolvedAncestry<'_>,
         evaluated: &EvaluatedGroups,
     ) -> Result<AdmissionPlan, AutomergeError> {
-        let signing = self.state;
+        let attested = self.state;
         let fragments: Vec<Fragment> = evaluated
             .verified
             .iter()
@@ -940,7 +946,7 @@ impl Incoming<'_> {
             .collect();
         let published_view = PublishedGraph {
             graph: self.graph,
-            signing,
+            attested,
         };
         let selection = select_fragments(&published_view, &fragments);
         let selected_verified_indices: Vec<usize> = selection.selected_indices().collect();
@@ -993,11 +999,11 @@ impl Incoming<'_> {
     }
 
     fn pending_group_remains_viable(&self, group: &PendingGroup) -> bool {
-        let signing = self.state;
+        let attested = self.state;
         let all_published = group.changes.iter().all(|change| {
             self.graph
                 .actor_seq_for_hash(&change.hash())
-                .is_some_and(|(actor, seq)| signing.published.is_published_actor_seq(actor, seq))
+                .is_some_and(|(actor, seq)| attested.published.is_published_actor_seq(actor, seq))
         });
         if all_published {
             return false;
@@ -1034,7 +1040,7 @@ impl Incoming<'_> {
     }
 }
 
-/// Owned input and plan survive releasing the immutable signing view before apply.
+/// Owned input and plan survive releasing the immutable attested view before apply.
 pub(super) struct PreparedAdmission {
     candidates: Vec<CandidateGroup>,
     verified: Vec<VerifiedGroup>,
@@ -1061,41 +1067,41 @@ impl PreparedAdmission {
             .collect()
     }
 
-    pub(super) fn complete(self, signing: &mut SigningDocument<'_>) {
+    pub(super) fn complete(self, attested: &mut AttestedDocument<'_>) {
         for index in self.plan.selected_verified_indices {
             let proof = &self.verified[index].proof;
             let newly_verified: Vec<_> = proof
                 .verified_hashes()
                 .filter(|hash| {
                     !has_signature(
-                        signing.graph,
-                        signing.authors,
-                        &signing.state.signatures,
+                        attested.graph,
+                        attested.authors,
+                        &attested.state.signatures,
                         hash,
                     )
                 })
                 .copied()
                 .collect();
-            signing
+            attested
                 .state
                 .signatures
                 .merge_verified(proof)
                 .expect("admitted proof must match historical authors");
             for hash in newly_verified {
-                signing.state.fragment_readiness.signature_added(&hash);
+                attested.state.fragment_readiness.signature_added(&hash);
             }
         }
-        signing
+        attested
             .state
             .published
-            .include_hashes(signing.graph, self.plan.published_member_hashes);
-        signing.state.reclaim_covered(signing.graph);
-        signing.state.remove_published_drafts(signing.graph);
+            .include_hashes(attested.graph, self.plan.published_member_hashes);
+        attested.state.reclaim_covered(attested.graph);
+        attested.state.remove_published_drafts(attested.graph);
         let incoming = Incoming {
-            graph: signing.graph,
-            ops: signing.ops,
-            authors: signing.authors,
-            state: signing.state,
+            graph: attested.graph,
+            ops: attested.ops,
+            authors: attested.authors,
+            state: attested.state,
         };
         let mut pending = PendingGroups::default();
         for (index, candidate) in self.candidates.into_iter().enumerate() {
@@ -1105,6 +1111,6 @@ impl PreparedAdmission {
                 pending.push_dedup(candidate.group);
             }
         }
-        signing.state.pending = pending;
+        attested.state.pending = pending;
     }
 }

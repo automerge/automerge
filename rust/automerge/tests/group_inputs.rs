@@ -17,33 +17,34 @@ fn receiver_author() -> Author<'static> {
     author(200)
 }
 
-/// A required-mode receiver that never signs anything itself.
+/// An attested receiver that never signs anything itself.
 fn receiver() -> Automerge {
     Automerge::from_config(
         automerge::Config::default()
-            .signing(receiver_author())
+            .attested(receiver_author())
             .unwrap(),
     )
 }
 
-/// Whether `hash` is published: a required-mode save is the published
-/// projection, so the change is published iff a fresh required-mode load of
+/// Whether `hash` is published: an attested save is the published
+/// projection, so the change is published iff a fresh attested load of
 /// the saved bytes contains it.
 fn is_published(doc: &Automerge, hash: &ChangeHash) -> bool {
     Automerge::load_with_options(
         &doc.save(),
-        LoadOptions::new().signing(receiver_author()).unwrap(),
+        LoadOptions::new().attested(receiver_author()).unwrap(),
     )
-    .expect("a required-mode save reloads in required mode")
+    .expect("an attested save reloads in an attested document")
     .get_change_by_hash(hash)
     .is_some()
 }
 
 fn signed_history() -> (Automerge, Vec<Vec<u8>>, Vec<ChangeHash>) {
     let key = SigningKey::from_bytes(&[91; 32]);
-    let mut doc = Automerge::from_config(automerge::Config::default().signing(author(91)).unwrap())
-        .with_actor(ActorId::from([1]))
-        .unwrap();
+    let mut doc =
+        Automerge::from_config(automerge::Config::default().attested(author(91)).unwrap())
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     let mut hashes = Vec::new();
     // Keep both commits loose, so each needs an independent proof.
     for value in 1..=2_i64 {
@@ -122,7 +123,7 @@ fn apply_changes_accepts_preparsed_changes_from_a_non_clone_iterator() {
 
     let mut target = AutoCommit::from_config(
         automerge::Config::default()
-            .signing(receiver_author())
+            .attested(receiver_author())
             .unwrap(),
     );
     // No Clone bound on the iterator or the inputs is needed.
@@ -135,7 +136,7 @@ fn apply_changes_accepts_preparsed_changes_from_a_non_clone_iterator() {
 }
 
 #[test]
-fn apply_changes_still_accepts_bare_changes_in_unsigned_mode() {
+fn apply_changes_still_accepts_bare_changes_in_an_unattested_document() {
     let (source, _, _) = signed_history();
     let changes = source.get_changes(&[]);
 
@@ -215,7 +216,7 @@ fn snapshots_and_multi_group_byte_blobs_do_not_convert_to_a_loaded_group() {
 }
 
 #[test]
-fn unsigned_apply_changes_converts_the_whole_batch_before_mutating() {
+fn unattested_apply_changes_converts_the_whole_batch_before_mutating() {
     let (_, wire, _) = signed_history();
 
     let mut unsigned = Automerge::new();

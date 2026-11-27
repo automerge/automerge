@@ -268,7 +268,7 @@ pub(crate) enum FailureKind {
     /// A well-framed chunk whose type tag is not recognised.
     ///
     /// Signed streams must never skip such a chunk: it may be a proof format
-    /// the receiver does not understand. Unsigned loaders may still recover
+    /// the receiver does not understand. Unattested loaders may still recover
     /// the preceding groups under a permissive partial-load policy.
     UnknownChunkType,
     /// A body chunk or invalid magic failed after any preceding group closed.

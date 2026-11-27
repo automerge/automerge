@@ -1,6 +1,6 @@
 //! Sync eligibility is checked before acquiring protocol access.
 
-use crate::signature::error::SigningError;
+use crate::signature::error::AttestationError;
 use crate::sync;
 use crate::sync::SyncDoc;
 use crate::{AutoCommit, AutomergeError};
@@ -30,30 +30,30 @@ fn sync_until_quiescent(
 }
 
 #[test]
-fn required_mode_automerge_sync_is_unsupported() {
+fn attested_automerge_sync_is_unsupported() {
     let mut doc =
-        Automerge::from_config(crate::Config::default().signing(author(&key(1))).unwrap());
+        Automerge::from_config(crate::Config::default().attested(author(&key(1))).unwrap());
     assert!(matches!(
         doc.sync(),
-        Err(AutomergeError::Signing(SigningError::SyncNotSupported))
+        Err(AutomergeError::Signing(AttestationError::SyncNotSupported))
     ));
 }
 
 #[test]
-fn required_mode_autocommit_sync_is_unsupported_and_keeps_the_transaction_open() {
+fn attested_autocommit_sync_is_unsupported_and_keeps_the_transaction_open() {
     let mut auto =
-        AutoCommit::from_config(crate::Config::default().signing(author(&key(1))).unwrap());
+        AutoCommit::from_config(crate::Config::default().attested(author(&key(1))).unwrap());
     auto.put(ROOT, "pending", 1).unwrap();
     assert!(matches!(
         auto.sync(),
-        Err(AutomergeError::Signing(SigningError::SyncNotSupported))
+        Err(AutomergeError::Signing(AttestationError::SyncNotSupported))
     ));
     assert_eq!(auto.pending_ops(), 1);
     assert!(!auto.has_unpublished_changes());
 }
 
 #[test]
-fn unsigned_autocommit_sync_closes_the_transaction_and_generates_a_message() {
+fn unattested_autocommit_sync_closes_the_transaction_and_generates_a_message() {
     let mut unsigned = AutoCommit::new();
     unsigned.put(ROOT, "x", 1).unwrap();
     let mut state = sync::State::new();
@@ -66,7 +66,7 @@ fn unsigned_autocommit_sync_closes_the_transaction_and_generates_a_message() {
 }
 
 #[test]
-fn unsigned_sync_messages_and_quiescence_are_unchanged() {
+fn unattested_sync_messages_and_quiescence_are_unchanged() {
     let mut a = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     let mut b = Automerge::new().with_actor(ActorId::from([2])).unwrap();
     let ha = append_at_level(&mut a, None, 1, 0);

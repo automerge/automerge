@@ -298,12 +298,12 @@ mod value;
 mod write_frontier;
 
 pub use crate::anonymize::AnonymizeError;
-pub use crate::automerge::signing::{
+pub use crate::automerge::attestation::{
     PublicationError, SignatureBatchOutcome, SignatureInsertError, SignatureInsertOutcome,
     SignatureRejection, SigningRequest, SigningRequests,
 };
 pub use crate::automerge::{
-    signing, Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration,
+    attestation, Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration,
 };
 pub use author::Author;
 pub use autocommit::AutoCommit;
@@ -317,7 +317,7 @@ pub use config::{Config, ForkOptions};
 pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
-pub use error::{AutomergeError, PatchLogMismatch, SigningAuthorError};
+pub use error::{AttestationAuthorError, AutomergeError, PatchLogMismatch};
 pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use legacy::Change as ExpandedChange;
 pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef, ValueRef};

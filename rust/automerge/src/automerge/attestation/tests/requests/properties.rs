@@ -8,12 +8,12 @@ use proptest::prelude::*;
 
 use super::*;
 
-/// Build a fully local required-mode history from a shape script. Each step
+/// Build a fully local attested history from a shape script. Each step
 /// either extends the newest head or branches from an older head, with a
 /// merge every few steps so hard fragments cover several members.
 fn build(steps: &[u8]) -> (Automerge, SigningKey, Vec<ChangeHash>) {
     let k = key(5);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let mut hashes: Vec<ChangeHash> = Vec::new();
@@ -54,7 +54,7 @@ proptest! {
             prop_assert_eq!(&requested, &sorted, "hash ordered and deduplicated");
             for request in &requests {
                 prop_assert!(hashes.contains(&request.hash()), "only locally committed hashes");
-                prop_assert!(!doc.try_signing().unwrap().is_published(&request.hash()));
+                prop_assert!(!doc.try_attested().unwrap().is_published(&request.hash()));
                 prop_assert_eq!(request.message(), signing_message(&request.hash()));
             }
             if requests.is_empty() {
@@ -63,7 +63,7 @@ proptest! {
             sign_requests(&mut doc, &requests, &k);
             // Every requested hash became published in this batch.
             for hash in &requested {
-                prop_assert!(doc.try_signing().unwrap().is_published(hash));
+                prop_assert!(doc.try_attested().unwrap().is_published(hash));
             }
             rounds += 1;
             prop_assert!(rounds <= hashes.len(), "no unneeded repeats");
@@ -72,7 +72,7 @@ proptest! {
         prop_assert!(!doc.has_unpublished_changes());
         prop_assert!(drafts(&mut doc).is_empty());
         for hash in &hashes {
-            prop_assert!(doc.try_signing().unwrap().is_published(hash));
+            prop_assert!(doc.try_attested().unwrap().is_published(hash));
         }
     }
 }

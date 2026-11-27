@@ -120,15 +120,15 @@ impl AutoCommit {
     /// Verify and insert signatures for applied changes, then complete
     /// publication once. See [`Automerge::insert_signatures`].
     ///
-    /// The required-mode check runs first: an unsigned document returns
+    /// The attested check runs first: an unattested document returns
     /// [`SignatureBatchOutcome::Rejected`] with its pending transaction left
-    /// open. In required mode the pending transaction is committed, then the
+    /// open. In an attested document the pending transaction is committed, then the
     /// batch runs with this document's patch collection.
     pub fn insert_signatures(
         &mut self,
         inputs: impl IntoIterator<Item = (ChangeHash, crate::signature::ed25519::Signature)>,
     ) -> SignatureBatchOutcome {
-        if let Err(error) = self.doc.signing.require() {
+        if let Err(error) = self.doc.attestation.require_attested() {
             return SignatureBatchOutcome::Rejected {
                 error: error.into(),
             };
@@ -142,14 +142,14 @@ impl AutoCommit {
     /// Discover the signatures the fixed local author should produce next.
     /// See [`Automerge::signing_requests`].
     ///
-    /// The required-mode check runs first: an unsigned document fails with its
-    /// pending transaction left open. In required mode the pending
+    /// The attested check runs first: an unattested document fails with its
+    /// pending transaction left open. In an attested document the pending
     /// transaction is committed so its change can be requested, then the
     /// owned snapshot is returned.
     pub fn signing_requests(
         &mut self,
-    ) -> Result<crate::SigningRequests, crate::signing::error::SigningMode> {
-        self.doc.signing.require()?;
+    ) -> Result<crate::SigningRequests, crate::attestation::error::NotAttested> {
+        self.doc.attestation.require_attested()?;
         self.ensure_transaction_closed();
         self.doc.signing_requests()
     }
@@ -166,7 +166,7 @@ impl AutoCommit {
     /// Return a copy of this document with its data anonymized, committing
     /// pending edits first.
     ///
-    /// The copy is always a new unsigned diagnostic document with rewritten
+    /// The copy is always a new unattested diagnostic document with rewritten
     /// hashes and no proofs, drafts or publication state; see
     /// [`Automerge::anonymize`].
     pub fn anonymize(&mut self) -> Result<Self, AnonymizeError> {
@@ -393,7 +393,7 @@ impl AutoCommit {
     /// Eligibility is decided before the open transaction is closed: a
     /// rejected different-author fork leaves pending edits, author and actor
     /// untouched. Uncommitted edits count as unpublished local changes in
-    /// required mode. A permitted fork first commits pending edits into this
+    /// an attested document. A permitted fork first commits pending edits into this
     /// document, as [`Self::fork`] does.
     pub fn fork_with_author(
         &mut self,
@@ -406,7 +406,7 @@ impl AutoCommit {
     ///
     /// # Errors
     /// See [`Automerge::fork_with_options`]. Pending edits also prevent changing
-    /// a signing author or taking their actor under a different identity.
+    /// an attested author or taking their actor under a different identity.
     pub fn fork_with_options(
         &mut self,
         options: crate::ForkOptions,
@@ -423,15 +423,15 @@ impl AutoCommit {
 
     /// Fork this document at the given heads, committing pending edits first.
     ///
-    /// Not supported in required signing mode: the request is rejected with
-    /// [`SigningError::ForkAtNotSupported`] before the open transaction is
+    /// Not supported in an attested document: the request is rejected with
+    /// [`AttestationError::ForkAtNotSupported`] before the open transaction is
     /// closed, so pending edits stay pending.
     ///
-    /// [`SigningError::ForkAtNotSupported`]: crate::signature::error::SigningError::ForkAtNotSupported
+    /// [`AttestationError::ForkAtNotSupported`]: crate::signature::error::AttestationError::ForkAtNotSupported
     pub fn fork_at(&mut self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
         self.doc
-            .signing
-            .with_required(|| Err(crate::signature::error::SigningError::ForkAtNotSupported))?;
+            .attestation
+            .when_attested(|| Err(crate::signature::error::AttestationError::ForkAtNotSupported))?;
         self.ensure_transaction_closed();
         Ok(Self {
             doc: self.doc.fork_at(heads)?,
@@ -659,7 +659,7 @@ impl AutoCommit {
     }
 
     /// Apply changes, encoded chunk groups, or already-decoded groups.
-    /// See [`Automerge::apply_changes`] for accepted inputs and signing rules.
+    /// See [`Automerge::apply_changes`] for accepted inputs and attestation rules.
     pub fn apply_changes<I>(&mut self, changes: I) -> Result<(), AutomergeError>
     where
         I: IntoIterator,
@@ -680,7 +680,7 @@ impl AutoCommit {
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     ///
-    /// See [`Automerge::merge_and_log_patches`] for the signing-mode contract.
+    /// See [`Automerge::merge_and_log_patches`] for the attestation contract.
     /// A mode mismatch is rejected before either document's open transaction
     /// is closed, so pending edits on both sides are left as they were.
     pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeHash>, AutomergeError> {
@@ -694,7 +694,7 @@ impl AutoCommit {
         self.save_with_options(SaveOptions::default())
     }
 
-    /// See [`Automerge::save_with_options`]. In required signing mode the
+    /// See [`Automerge::save_with_options`]. In an attested document the
     /// incremental cursor advances to the published heads actually emitted,
     /// not to the document heads.
     pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
@@ -709,8 +709,8 @@ impl AutoCommit {
 
     /// Save the document and attempt to load it before returning - slow!
     ///
-    /// See [`Automerge::save_and_verify`]: required-mode output is verified
-    /// by a required-mode load of the published projection.
+    /// See [`Automerge::save_and_verify`]: attested output is verified
+    /// by an attested load of the published projection.
     pub fn save_and_verify(&mut self) -> Result<Vec<u8>, AutomergeError> {
         let bytes = self.save();
         self.doc.verify_saved(&bytes)?;
@@ -718,7 +718,7 @@ impl AutoCommit {
     }
 
     /// EXPERIMENTAL: Write the set of changes in `hashes` to a "bundle".
-    /// See [`Automerge::bundle`] for signing-mode rejection.
+    /// See [`Automerge::bundle`] for rejection in an attested document.
     ///
     /// A "bundle" is a compact representation of a set of changes which uses
     /// the same compression tricks as the document encoding we use in
@@ -758,7 +758,7 @@ impl AutoCommit {
     /// and you want to immediately send it somewhere (e.g. you've inserted a single character in a
     /// text object).
     ///
-    /// In required signing mode only published history is emitted (see
+    /// In an attested document only published history is emitted (see
     /// [`Automerge::save_after`]) and the cursor records the published heads
     /// that were actually emitted, so drafts published later are still
     /// included by a subsequent call.
@@ -962,17 +962,17 @@ impl AutoCommit {
     }
 
     /// Acquire borrowed sync access, committing pending edits only after
-    /// checking that this unsigned document can use the protocol.
+    /// checking that this unattested document can use the protocol.
     ///
     /// # Errors
-    /// Required signing mode returns [`SigningError::SyncNotSupported`]
+    /// Required attestation returns [`AttestationError::SyncNotSupported`]
     /// without closing the open transaction.
     ///
-    /// [`SigningError::SyncNotSupported`]: crate::signature::error::SigningError::SyncNotSupported
+    /// [`AttestationError::SyncNotSupported`]: crate::signature::error::AttestationError::SyncNotSupported
     pub fn sync(&mut self) -> Result<impl SyncDoc + '_, AutomergeError> {
         self.doc
-            .signing
-            .with_required(|| Err(crate::signature::error::SigningError::SyncNotSupported))?;
+            .attestation
+            .when_attested(|| Err(crate::signature::error::AttestationError::SyncNotSupported))?;
         self.ensure_transaction_closed();
         Ok(SyncWrapper { inner: self })
     }
@@ -1557,7 +1557,7 @@ struct SyncWrapper<'a> {
 
 impl SyncDoc for SyncWrapper<'_> {
     fn generate_sync_message(&self, sync_state: &mut sync::State) -> Option<sync::Message> {
-        self.inner.doc.generate_unsigned_sync_message(sync_state)
+        self.inner.doc.generate_unattested_sync_message(sync_state)
     }
 
     fn receive_sync_message(

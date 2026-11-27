@@ -3,11 +3,11 @@
 #[cfg(test)]
 mod tests;
 
-use crate::error::SigningAuthorErrorInner;
+use crate::error::AttestationAuthorErrorInner;
 use crate::signature::ed25519::VerifyingAuthor;
-use crate::{ActorId, Author, SigningAuthorError, TextEncoding};
+use crate::{ActorId, AttestationAuthorError, Author, TextEncoding};
 
-/// Construction-time local identity and signing intent.
+/// Construction-time local identity and attestation intent.
 #[derive(Clone, Debug, Default)]
 pub(crate) enum DocumentAuthor<'a> {
     #[default]
@@ -26,19 +26,19 @@ impl<'a> From<Option<Author<'a>>> for DocumentAuthor<'a> {
 }
 
 impl<'a> DocumentAuthor<'a> {
-    pub(crate) fn signing(author: Author<'a>) -> Result<Self, SigningAuthorError> {
+    pub(crate) fn attested(author: Author<'a>) -> Result<Self, AttestationAuthorError> {
         VerifyingAuthor::new(author)
             .map(Self::Verifier)
-            .map_err(|error| SigningAuthorError(SigningAuthorErrorInner::InvalidKey(error)))
+            .map_err(|error| AttestationAuthorError(AttestationAuthorErrorInner::InvalidKey(error)))
     }
 }
 
 /// Configure a new document before passing it to [`crate::Automerge::from_config`]
 /// or [`crate::AutoCommit::from_config`].
 ///
-/// The default is unsigned, with no local author and the platform's text encoding.
-/// [`Self::author`] chooses an ordinary unsigned author; [`Self::signing`] prepares
-/// a usable Ed25519 public key and selects required signing mode. Either method
+/// The default is unattested, with no local author and the platform's text encoding.
+/// [`Self::author`] chooses an ordinary unattested author; [`Self::attested`] prepares
+/// a usable Ed25519 public key and selects an attested document. Either method
 /// replaces the previous identity choice. No private signing key is retained.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -57,7 +57,7 @@ impl Default for Config {
 
 /// Choices for a full writable fork. Omitted values inherit the local author
 /// and generate a fresh actor; explicit `author(None)` chooses anonymous identity
-/// where the document mode permits it. Signing mode is always inherited.
+/// where the document permits it. Attestation is always inherited.
 #[derive(Clone, Debug, Default)]
 pub struct ForkOptions {
     pub(crate) author: Option<Option<Author<'static>>>,
@@ -91,9 +91,9 @@ impl Config {
         }
     }
 
-    /// Select unsigned mode with this optional local author.
+    /// Select an unattested document with this optional local author.
     ///
-    /// Author bytes are arbitrary; key-shaped bytes do not enable signing.
+    /// Author bytes are arbitrary; key-shaped bytes do not enable attestation.
     pub fn author(self, author: Option<Author<'static>>) -> Self {
         Self {
             author: author.into(),
@@ -101,14 +101,14 @@ impl Config {
         }
     }
 
-    /// Select required signing mode and retain the author's prepared verifier.
+    /// Select an attested document and retain the author's prepared verifier.
     ///
     /// # Errors
     ///
-    /// Returns [`SigningAuthorError`] for malformed or weak Ed25519 keys.
-    pub fn signing(self, author: Author<'static>) -> Result<Self, SigningAuthorError> {
+    /// Returns [`AttestationAuthorError`] for malformed or weak Ed25519 keys.
+    pub fn attested(self, author: Author<'static>) -> Result<Self, AttestationAuthorError> {
         Ok(Self {
-            author: DocumentAuthor::signing(author)?,
+            author: DocumentAuthor::attested(author)?,
             ..self
         })
     }

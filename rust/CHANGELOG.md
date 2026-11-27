@@ -33,6 +33,14 @@ This release includes major work on introducing attestation to Automerge to
 allow for changes to be signed and verified by ED25519 cryptographic keys. The
 introduction of this feature means the addition and changes of existing APIs.
 
+An attested document is created with `Config::attested` or loaded with
+`LoadOptions::attested`, each taking the ED25519 public key `Author` that the
+document writes as. Documents without attestation are *unattested*; the
+distinction is fixed at construction and inherited by forks. Operations that
+require attestation return `attestation::error::NotAttested` on an unattested
+document, and `signature::error::AttestationError` covers the import and
+admission failures specific to attested history.
+
 Documents prior to attestation remain compatible with the existing APIs.
 However, they cannot be upgraded to a document that can be attested. This would
 necessarily require the documents to have authors and signatures for the
@@ -43,8 +51,8 @@ Certain methods are affected by a document that is being attested:
   `Autocommit::sync` will return an error if it is an attested document.
 * `Automerge::anonymize` will return an `Automerge` document that is no longer
   attested.
-* `Automerge::merge` requires both documents to be of the same mode, that is
-  either un-attested documents or attested documents.
+* `Automerge::merge` requires both documents to agree on attestation, that is
+  either both unattested or both attested.
 * `Automerge::save` and other saving methods will now persist encoded signature
   data. When loading documents, a `VerificationMode` can be supplied via
   `LoadOptions::verification_mode`. When `VerificationMode::Check` is used, then

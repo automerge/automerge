@@ -22,8 +22,8 @@ fn invalid_authors() -> Vec<Author<'static>> {
 }
 
 #[test]
-fn signing_configuration_reports_the_invalid_or_weak_key_diagnostic_kind() {
-    use crate::error::SigningAuthorErrorInner;
+fn attested_configuration_reports_the_invalid_or_weak_key_diagnostic_kind() {
+    use crate::error::AttestationAuthorErrorInner;
     use ed25519::error::VerifyingAuthorKind;
 
     for (invalid, expected) in invalid_authors().iter().zip([
@@ -31,10 +31,10 @@ fn signing_configuration_reports_the_invalid_or_weak_key_diagnostic_kind() {
         VerifyingAuthorKind::WeakKey,
     ]) {
         let failure = crate::Config::default()
-            .signing(invalid.clone())
+            .attested(invalid.clone())
             .unwrap_err();
         assert!(std::error::Error::source(&failure).is_some());
-        let SigningAuthorErrorInner::InvalidKey(source) = failure.0 else {
+        let AttestationAuthorErrorInner::InvalidKey(source) = failure.0 else {
             panic!("expected an invalid-key diagnostic");
         };
         assert_eq!(source.kind(), expected);
@@ -42,16 +42,16 @@ fn signing_configuration_reports_the_invalid_or_weak_key_diagnostic_kind() {
 }
 
 #[test]
-fn required_construction_requires_a_usable_author_without_creating_history() {
+fn attested_construction_requires_a_usable_author_without_creating_history() {
     let expected = author(7);
     let mut doc =
-        Automerge::from_config(crate::Config::default().signing(expected.clone()).unwrap());
+        Automerge::from_config(crate::Config::default().attested(expected.clone()).unwrap());
     assert_eq!(doc.get_author(), Some(&expected));
     assert!(doc.get_heads().is_empty());
     assert!(doc.staged.is_empty());
     let before = format!("{doc:?}");
     {
-        let signing = doc.try_signing().unwrap();
+        let signing = doc.try_attested().unwrap();
         assert_eq!(signing.state.author.author(), &expected);
         assert!(signing.graph.is_empty());
         assert_eq!(signing.ops.actors.len(), 0);
@@ -61,9 +61,9 @@ fn required_construction_requires_a_usable_author_without_creating_history() {
 }
 
 #[test]
-fn published_required_fork_still_rejects_a_missing_or_invalid_author() {
+fn published_attested_fork_still_rejects_a_missing_or_invalid_author() {
     let key = SigningKey::from_bytes(&[7; 32]);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(7)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(7)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let mut tx = doc.transaction();
@@ -72,7 +72,7 @@ fn published_required_fork_still_rejects_a_missing_or_invalid_author() {
     let hash = hash.unwrap();
     let sig = ed25519::Signature::from_bytes(key.sign(&signing_message(&hash)).to_bytes());
     super::insert_one(&mut doc, hash, &sig).unwrap();
-    assert!(doc.try_signing().unwrap().is_published(&hash));
+    assert!(doc.try_attested().unwrap().is_published(&hash));
     let mut candidates = vec![None];
     candidates.extend(invalid_authors().into_iter().map(Some));
     for candidate in candidates {
@@ -88,7 +88,7 @@ fn published_required_fork_still_rejects_a_missing_or_invalid_author() {
 #[test]
 fn only_the_first_commit_of_an_actor_carries_the_author_footer() {
     let alice = author(7);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(alice.clone()).unwrap());
+    let mut doc = Automerge::from_config(crate::Config::default().attested(alice.clone()).unwrap());
     let mut tx = doc.transaction();
     tx.put(ROOT, "first", 1).unwrap();
     let (first, _) = tx.commit();
@@ -100,13 +100,13 @@ fn only_the_first_commit_of_an_actor_carries_the_author_footer() {
     assert_eq!(first.author().as_ref(), Some(&alice));
     assert!(second.author().is_none());
     assert_eq!(doc.get_author(), Some(&alice));
-    assert_eq!(doc.try_signing().unwrap().state.author.author(), &alice);
+    assert_eq!(doc.try_attested().unwrap().state.author.author(), &alice);
 }
 
 #[test]
 fn same_author_fork_keeps_the_identity_and_the_old_actor_binding() {
     let alice = author(7);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(alice.clone()).unwrap());
+    let mut doc = Automerge::from_config(crate::Config::default().attested(alice.clone()).unwrap());
     let actor = doc.get_actor().clone();
     let mut tx = doc.transaction();
     tx.put(ROOT, "first", 1).unwrap();
@@ -119,7 +119,7 @@ fn same_author_fork_keeps_the_identity_and_the_old_actor_binding() {
     let mut fork = doc.fork_with_author(Some(alice.clone())).unwrap();
     assert_eq!(format!("{doc:?}"), before);
     assert_ne!(fork.get_actor(), &actor);
-    assert_eq!(fork.try_signing().unwrap().state.author.author(), &alice);
+    assert_eq!(fork.try_attested().unwrap().state.author.author(), &alice);
     assert_eq!(fork.get_author_for_actor(&actor).as_ref(), Some(&alice));
     // The inherited draft is still signable with the retained verifier.
     let old_signature = ed25519::Signature::from_bytes(
@@ -136,12 +136,12 @@ fn author_rules_per_mode_across_construction_and_fork() {
         let unsigned = Automerge::from_config(crate::Config::default().author(candidate.clone()));
         assert_eq!(unsigned.get_author(), candidate.as_ref());
         assert!(
-            Automerge::from_config(crate::Config::default().signing(author(7)).unwrap())
+            Automerge::from_config(crate::Config::default().attested(author(7)).unwrap())
                 .fork_with_author(candidate)
                 .is_err()
         );
     }
-    let doc = Automerge::from_config(crate::Config::default().signing(author(7)).unwrap())
+    let doc = Automerge::from_config(crate::Config::default().attested(author(7)).unwrap())
         .fork_with_author(Some(author(8)))
         .unwrap();
     assert_eq!(doc.get_author(), Some(&author(8)));
@@ -155,16 +155,16 @@ fn author_rules_per_mode_across_construction_and_fork() {
 #[test]
 fn handle_borrows_the_retained_verifier_without_changing_the_document() {
     let key = SigningKey::from_bytes(&[7; 32]);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(7)).unwrap());
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(7)).unwrap());
     let before = format!("{doc:?}");
     let hash = ChangeHash([3; 32]);
     let signature = ed25519::Signature::from_bytes(key.sign(&signing_message(&hash)).to_bytes());
     let retained = {
-        let signing = doc.try_signing().unwrap();
+        let signing = doc.try_attested().unwrap();
         std::ptr::from_ref(&signing.state.author)
     };
     for _ in 0..2 {
-        let signing = doc.try_signing().unwrap();
+        let signing = doc.try_attested().unwrap();
         assert_eq!(std::ptr::from_ref(&signing.state.author), retained);
         let witness = signing.state.author.verify_hash(&hash, &signature).unwrap();
         assert_eq!(witness.hash(), &hash);

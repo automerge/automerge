@@ -16,7 +16,7 @@ fn insertions(outcome: &SignatureBatchOutcome) -> &[SignatureInsertOutcome] {
 }
 
 fn local_drafts(doc: &mut Automerge) -> Vec<ChangeHash> {
-    doc.try_signing()
+    doc.try_attested()
         .unwrap()
         .state
         .local_drafts
@@ -26,7 +26,7 @@ fn local_drafts(doc: &mut Automerge) -> Vec<ChangeHash> {
 
 /// Three unsigned loose changes `a -> b -> c` authored locally by `key`.
 fn three_loose_drafts(key: &SigningKey) -> (Automerge, [ChangeHash; 3]) {
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(key)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(key)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -40,7 +40,7 @@ fn three_loose_drafts(key: &SigningKey) -> (Automerge, [ChangeHash; 3]) {
 fn local_a_with_pending_b() -> (Automerge, SigningKey, [ChangeHash; 2]) {
     let k1 = key(1);
     let k2 = key(2);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k1)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -52,7 +52,7 @@ fn local_a_with_pending_b() -> (Automerge, SigningKey, [ChangeHash; 2]) {
         [(b, Signature::ed25519(sig(&k2, &b)))],
     );
     assert_eq!(doc.load_incremental(&b_bytes).unwrap(), 0);
-    assert!(doc.signing.has_pending_groups());
+    assert!(doc.attestation.has_pending_groups());
     assert_eq!(doc.get_heads(), [a]);
     (doc, k1, [a, b])
 }
@@ -64,7 +64,7 @@ fn local_a_with_pending_b_and_unrelated_group(
 ) -> (Automerge, SigningKey, [ChangeHash; 2], [ChangeHash; 2]) {
     let (mut doc, k1, [a, b]) = local_a_with_pending_b();
     let k3 = key(3);
-    let mut other = Automerge::from_config(crate::Config::default().signing(author(&k3)).unwrap())
+    let mut other = Automerge::from_config(crate::Config::default().attested(author(&k3)).unwrap())
         .with_actor(ActorId::from([3]))
         .unwrap();
     let o1 = append_at_level(&mut other, None, 10, 0);
@@ -74,7 +74,7 @@ fn local_a_with_pending_b_and_unrelated_group(
         [(o2, Signature::ed25519(sig(&k3, &o2)))],
     );
     assert_eq!(doc.load_incremental(&o2_bytes).unwrap(), 0);
-    assert_eq!(doc.signing.queued_changes().count(), 2);
+    assert_eq!(doc.attestation.queued_changes().count(), 2);
     (doc, k1, [a, b], [o1, o2])
 }
 
@@ -89,7 +89,7 @@ fn graft_applied_change(receiver: &mut Automerge, source: &Automerge, hash: &Cha
         &mut receiver.authors,
         &receiver.ops.actors,
         &receiver.visibility,
-        &mut receiver.signing,
+        &mut receiver.attestation,
     )
     .update(&change);
 }
@@ -183,7 +183,7 @@ fn wrong_mode_rejects_without_consuming_inputs_or_mutating() {
 #[test]
 fn foreign_patch_log_rejects_before_processing_and_preserves_log() {
     let k = key(7);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -235,12 +235,13 @@ fn autocommit_checks_mode_before_closing_pending_transaction() {
     assert_eq!(unsigned.get_heads().len(), 1);
     assert_ne!(unsigned.get_heads(), [a]);
 
-    // Required mode: the pending transaction is closed, then the batch runs
+    // An attested document: the pending transaction is closed, then the batch runs
     // and patches for incoming completion are collected normally.
     let k = key(7);
-    let mut signed = AutoCommit::from_config(crate::Config::default().signing(author(&k)).unwrap())
-        .with_actor(ActorId::from([1]))
-        .unwrap();
+    let mut signed =
+        AutoCommit::from_config(crate::Config::default().attested(author(&k)).unwrap())
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     signed.put(ROOT, "value", 1).unwrap();
     let a = signed.commit().unwrap();
     signed.put(ROOT, "value", 2).unwrap();
@@ -249,7 +250,7 @@ fn autocommit_checks_mode_before_closing_pending_transaction() {
     assert_eq!(signed.pending_ops(), 0);
     assert_eq!(signed.get_heads().len(), 1);
     assert_ne!(signed.get_heads(), [a]);
-    assert!(signed.doc.try_signing().unwrap().is_published(&a));
+    assert!(signed.doc.try_attested().unwrap().is_published(&a));
 }
 
 #[test]
@@ -272,7 +273,7 @@ fn local_publication_applies_causally_enabled_pending_group_with_patches() {
     );
     // The unrelated group is untouched: still queued, still missing its dep.
     assert_eq!(
-        doc.signing
+        doc.attestation
             .queued_changes()
             .map(Change::hash)
             .collect::<Vec<_>>(),
@@ -299,7 +300,7 @@ fn repeating_a_published_signature_reports_duplicate_without_reapplying() {
     assert_eq!(doc.save_nocompress(), saved);
     let again = doc.make_patches(&mut log);
     assert!(again.is_empty(), "no reapply patches: {again:?}");
-    assert_eq!(doc.signing.queued_changes().count(), 1);
+    assert_eq!(doc.attestation.queued_changes().count(), 1);
 }
 
 #[test]
@@ -319,7 +320,7 @@ fn empty_batch_after_publication_makes_no_further_progress() {
     assert_eq!(doc.save_nocompress(), saved);
     let again = doc.make_patches(&mut log);
     assert!(again.is_empty(), "no reapply patches: {again:?}");
-    assert_eq!(doc.signing.queued_changes().count(), 1);
+    assert_eq!(doc.attestation.queued_changes().count(), 1);
 }
 
 #[test]
@@ -330,7 +331,7 @@ fn empty_batch_still_attempts_completion() {
     // batch call, even empty, completes the enabled group.
     let (mut doc, k1, [a, b]) = local_a_with_pending_b();
     {
-        let mut signing = doc.try_signing().unwrap();
+        let mut signing = doc.try_attested().unwrap();
         signing.receive_signature(&a, &sig(&k1, &a)).unwrap();
         signing.publish_local();
     }
@@ -357,7 +358,7 @@ fn all_error_batch_still_attempts_completion() {
     // Nothing was publishable, so the completion pass changed nothing.
     assert!(!is_published(&mut doc, &a));
     assert!(!is_published(&mut doc, &b));
-    assert!(doc.signing.has_pending_groups());
+    assert!(doc.attestation.has_pending_groups());
     assert_eq!(doc.get_heads(), [a]);
 }
 
@@ -366,7 +367,7 @@ fn all_error_batch_still_attempts_completion() {
 fn historical_author_is_verified_not_current_author() {
     let k1 = key(1);
     let k2 = key(2);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k1)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -408,7 +409,7 @@ fn batch_resolves_initial_and_footerless_changes_under_their_historical_author()
     let alice = key(7);
     let bob = key(8);
     let mut source =
-        Automerge::from_config(crate::Config::default().signing(author(&alice)).unwrap());
+        Automerge::from_config(crate::Config::default().attested(author(&alice)).unwrap());
     let first = append_at_level(&mut source, None, 1, 0);
     let later = append_at_level(&mut source, None, 2, 0);
     assert_eq!(
@@ -455,7 +456,7 @@ fn batch_resolves_initial_and_footerless_changes_under_their_historical_author()
 fn missing_historical_author_is_a_per_entry_error() {
     let k = key(7);
     let mut receiver =
-        Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+        Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
             .with_actor(ActorId::from([1]))
             .unwrap();
     let mine = append_at_level(&mut receiver, None, 1, 0);
@@ -478,7 +479,7 @@ fn missing_historical_author_is_a_per_entry_error() {
 fn invalid_historical_author_is_a_per_entry_error() {
     let k = key(7);
     let mut receiver =
-        Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+        Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
             .with_actor(ActorId::from([1]))
             .unwrap();
 
@@ -503,7 +504,7 @@ fn simultaneously_admissible_pending_equivocation_fails_publication_but_retains_
     // and stays pending until a publishes; then both become admissible at once.
     let k1 = key(1);
     let k2 = key(2);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k1)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -520,7 +521,7 @@ fn simultaneously_admissible_pending_equivocation_fails_publication_but_retains_
     let right = branch(3);
     assert_eq!(doc.load_incremental(&left).unwrap(), 0);
     assert_eq!(doc.load_incremental(&right).unwrap(), 0);
-    assert_eq!(doc.signing.queued_changes().count(), 2);
+    assert_eq!(doc.attestation.queued_changes().count(), 2);
 
     let mut log = PatchLog::active();
     let outcome = doc.insert_signatures_log_patches([(a, sig(&k1, &a))], &mut log);
@@ -533,7 +534,7 @@ fn simultaneously_admissible_pending_equivocation_fails_publication_but_retains_
     // Evidence and local publication retained; no half-application; pending kept.
     assert!(is_published(&mut doc, &a));
     assert_eq!(doc.get_heads(), [a]);
-    assert_eq!(doc.signing.queued_changes().count(), 2);
+    assert_eq!(doc.attestation.queued_changes().count(), 2);
     assert!(doc.make_patches(&mut log).is_empty());
     assert!(requested_hashes(&mut doc).is_empty());
 
@@ -544,7 +545,7 @@ fn simultaneously_admissible_pending_equivocation_fails_publication_but_retains_
         SignatureBatchOutcome::PublicationFailed { .. }
     ));
     assert_eq!(doc.get_heads(), [a]);
-    assert_eq!(doc.signing.queued_changes().count(), 2);
+    assert_eq!(doc.attestation.queued_changes().count(), 2);
 }
 
 #[test]
@@ -557,7 +558,7 @@ fn published_frontier_with_reclaimed_signature_does_not_prove_a_new_candidate() 
     // the exact sig(a) is supplied, even though every frontier is applied and
     // a is published.
     let ka = key(7);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&ka)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&ka)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -608,7 +609,7 @@ fn completion_continues_after_publication_only_progress_of_pending_group() {
     // appending any graph node, which in turn enables c: all of this must
     // happen in one call.
     let k1 = key(1);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k1)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let l = append_at_level(&mut doc, None, 1, 0);
@@ -623,7 +624,7 @@ fn completion_continues_after_publication_only_progress_of_pending_group() {
     );
     assert_eq!(doc.load_incremental(&a_bytes).unwrap(), 0);
     assert_eq!(
-        doc.signing
+        doc.attestation
             .queued_changes()
             .map(Change::hash)
             .collect::<Vec<_>>(),
@@ -647,7 +648,7 @@ fn completion_continues_after_publication_only_progress_of_pending_group() {
         "c is enabled by a's publication within the same call"
     );
     assert_eq!(doc.change_graph.len(), graph_len, "no new history applied");
-    assert!(!doc.signing.has_pending_groups());
+    assert!(!doc.attestation.has_pending_groups());
     assert!(
         local_drafts(&mut doc).is_empty(),
         "published local tracking retired in the same call"

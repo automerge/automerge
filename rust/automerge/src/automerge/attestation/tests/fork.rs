@@ -1,6 +1,6 @@
 //! Immutable construction-time authors and the guarded new-author fork.
 
-use crate::signature::error::SigningError;
+use crate::signature::error::AttestationError;
 use crate::{AutoCommit, AutomergeError, LoadOptions, Signature};
 
 use super::*;
@@ -15,16 +15,16 @@ fn invalid_authors() -> Vec<Author<'static>> {
     vec![Author::from(vec![1, 2, 3]), weak_author()]
 }
 
-fn unsigned_doc(author: Author<'static>) -> Automerge {
+fn unattested_doc(author: Author<'static>) -> Automerge {
     Automerge::from_config(crate::Config::default().author(Some(author)))
         .with_actor(ActorId::from([1]))
         .unwrap()
 }
 
 #[test]
-fn unsigned_commits_carry_the_configured_author() {
+fn unattested_commits_carry_the_configured_author() {
     let arbitrary = Author::from(vec![1, 2, 3]);
-    let mut doc = unsigned_doc(arbitrary.clone());
+    let mut doc = unattested_doc(arbitrary.clone());
     let first = append_at_level(&mut doc, None, 1, 0);
     assert_eq!(
         doc.get_change_by_hash(&first).unwrap().author(),
@@ -34,7 +34,7 @@ fn unsigned_commits_carry_the_configured_author() {
 
 #[test]
 fn load_options_author_overrides_the_saved_author() {
-    let mut doc = unsigned_doc(Author::from(vec![1, 2, 3]));
+    let mut doc = unattested_doc(Author::from(vec![1, 2, 3]));
     append_at_level(&mut doc, None, 1, 0);
     let bytes = doc.save();
 
@@ -57,7 +57,7 @@ fn fork_inherits_the_author_with_a_fresh_actor() {
     let fork = doc.fork();
     assert_eq!(fork.get_author(), Some(&author(&k)));
     assert_ne!(fork.get_actor(), doc.get_actor());
-    assert!(fork.signing.is_required());
+    assert!(fork.attestation.is_attested());
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn different_author_fork_is_rejected_while_an_unsigned_draft_remains() {
     assert!(matches!(
         doc.fork_with_author(Some(author(&key(8)))),
         Err(AutomergeError::Signing(
-            SigningError::UnpublishedLocalChanges
+            AttestationError::UnpublishedLocalChanges
         ))
     ));
     assert_eq!(format!("{doc:?}"), before);
@@ -120,14 +120,14 @@ fn different_author_fork_is_rejected_while_a_signed_but_unpublished_draft_remain
     assert!(matches!(
         doc.fork_with_author(Some(author(&key(8)))),
         Err(AutomergeError::Signing(
-            SigningError::UnpublishedLocalChanges
+            AttestationError::UnpublishedLocalChanges
         ))
     ));
     assert_eq!(format!("{doc:?}"), before);
 }
 
 #[test]
-fn required_mode_fork_never_removes_the_author() {
+fn attested_fork_never_removes_the_author() {
     let k = key(7);
     let mut doc = signing_doc(&k, 1);
     append_at_level(&mut doc, None, 1, 0);
@@ -168,7 +168,7 @@ fn fully_published_fork_with_a_new_author_keeps_the_old_proofs() {
     let mut fork = doc.fork_with_author(Some(author(&k2))).unwrap();
     assert_eq!(fork.get_author(), Some(&author(&k2)));
     assert_eq!(doc.get_author(), Some(&author(&k)));
-    assert!(fork.signing.is_required());
+    assert!(fork.attestation.is_attested());
     assert!(is_published(&mut fork, &a));
     assert_eq!(
         fork.get_change_by_hash(&a).unwrap().author(),
@@ -226,7 +226,7 @@ fn both_authors_proofs_verify_on_reload_of_the_published_fork() {
     let bytes = fork.bundle_fragments(fork.fragments(..)).concat();
     let mut reloaded = Automerge::load_with_options(
         &bytes,
-        LoadOptions::new().signing(author(&key(200))).unwrap(),
+        LoadOptions::new().attested(author(&key(200))).unwrap(),
     )
     .unwrap();
     assert_eq!(reloaded.get_heads(), fork.get_heads());
@@ -255,19 +255,19 @@ fn the_source_admits_the_new_authors_work_when_it_is_delivered_later() {
 }
 
 #[test]
-fn unsigned_fork_removes_the_author_freely() {
-    let mut doc = unsigned_doc(Author::from(vec![1, 2, 3]));
+fn unattested_fork_removes_the_author_freely() {
+    let mut doc = unattested_doc(Author::from(vec![1, 2, 3]));
     append_at_level(&mut doc, None, 1, 0);
 
     let removed = doc.fork_with_author(None).unwrap();
     assert!(removed.get_author().is_none());
-    assert!(!removed.signing.is_required());
+    assert!(!removed.attestation.is_attested());
 }
 
 #[test]
-fn unsigned_fork_replaces_the_author_freely() {
+fn unattested_fork_replaces_the_author_freely() {
     let arbitrary = Author::from(vec![1, 2, 3]);
-    let mut doc = unsigned_doc(arbitrary.clone());
+    let mut doc = unattested_doc(arbitrary.clone());
     append_at_level(&mut doc, None, 1, 0);
 
     let replaced = doc.fork_with_author(Some(weak_author())).unwrap();
@@ -299,13 +299,13 @@ fn incoming_pending_groups_do_not_block_a_new_author_fork() {
         [(c, Signature::ed25519(sig(&k2, &c)))],
     );
     assert_eq!(doc.load_incremental(&c_bytes).unwrap(), 0);
-    assert!(doc.signing.has_pending_groups());
+    assert!(doc.attestation.has_pending_groups());
     assert!(drafts(&mut doc).is_empty());
 
     let k3 = key(9);
     let mut fork = doc.fork_with_author(Some(author(&k3))).unwrap();
     assert_eq!(fork.get_author(), Some(&author(&k3)));
-    assert!(fork.signing.has_pending_groups());
+    assert!(fork.attestation.has_pending_groups());
     // The retained group still completes once `b` arrives.
     let b_bytes = attach(
         remote.get_change_by_hash(&b).unwrap().raw_bytes(),
@@ -317,32 +317,36 @@ fn incoming_pending_groups_do_not_block_a_new_author_fork() {
 }
 
 #[test]
-fn required_mode_automerge_fork_at_is_unsupported() {
+fn attested_automerge_fork_at_is_unsupported() {
     let k = key(7);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap());
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap());
     let a = append_at_level(&mut doc, None, 1, 0);
     doc.insert_signatures([(a, sig(&k, &a))]);
     assert!(matches!(
         doc.fork_at(&[a]),
-        Err(AutomergeError::Signing(SigningError::ForkAtNotSupported))
+        Err(AutomergeError::Signing(
+            AttestationError::ForkAtNotSupported
+        ))
     ));
 }
 
 #[test]
-fn required_mode_autocommit_fork_at_is_unsupported_and_keeps_the_transaction_open() {
+fn attested_autocommit_fork_at_is_unsupported_and_keeps_the_transaction_open() {
     let k = key(7);
-    let mut auto = AutoCommit::from_config(crate::Config::default().signing(author(&k)).unwrap());
+    let mut auto = AutoCommit::from_config(crate::Config::default().attested(author(&k)).unwrap());
     auto.put(ROOT, "pending", 1).unwrap();
     assert!(matches!(
         auto.fork_at(&[]),
-        Err(AutomergeError::Signing(SigningError::ForkAtNotSupported))
+        Err(AutomergeError::Signing(
+            AttestationError::ForkAtNotSupported
+        ))
     ));
     assert_eq!(auto.pending_ops(), 1, "transaction stays open");
     assert!(!auto.has_unpublished_changes(), "nothing was committed");
 }
 
 #[test]
-fn unsigned_autocommit_fork_at_commits_pending_edits_first() {
+fn unattested_autocommit_fork_at_commits_pending_edits_first() {
     let mut unsigned = AutoCommit::new();
     unsigned.put(ROOT, "pending", 1).unwrap();
     let mut fork = unsigned.fork_at(&[]).unwrap();

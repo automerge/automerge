@@ -1,4 +1,4 @@
-//! Signing readiness tracking and outgoing fragment cover selection.
+//! Signature readiness tracking and outgoing fragment cover selection.
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};

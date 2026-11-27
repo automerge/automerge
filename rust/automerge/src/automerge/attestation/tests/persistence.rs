@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::signature::error::SigningError;
+use crate::signature::error::AttestationError;
 use crate::storage::parse::Input;
 use crate::storage::signatures::{HashEntries, SignaturesChunk};
 use crate::storage::{Chunk, ChunkType};
@@ -11,7 +11,7 @@ use crate::{AutoCommit, AutomergeError, LoadOptions, OnPartialLoad, Signature};
 use super::*;
 
 fn load_opts(seed: u8) -> LoadOptions<'static> {
-    LoadOptions::new().signing(author(&key(seed))).unwrap()
+    LoadOptions::new().attested(author(&key(seed))).unwrap()
 }
 
 /// Split a byte stream into its chunk types in order.
@@ -45,9 +45,9 @@ fn framed_raw(tag: u8, body: &[u8]) -> Vec<u8> {
     bytes
 }
 
-/// A signing document holding one published change and one unsigned draft.
+/// An attested document holding one published change and one unsigned draft.
 fn one_published_one_draft(k: &SigningKey) -> (Automerge, [ChangeHash; 2]) {
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(k)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -61,7 +61,7 @@ fn one_published_one_draft(k: &SigningKey) -> (Automerge, [ChangeHash; 2]) {
 /// The document chunk of a signed save holding one published change, with its
 /// signatures chunk stripped off.
 fn published_snapshot_split(k: &SigningKey) -> (ChangeHash, Vec<u8>) {
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(k)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -109,7 +109,7 @@ fn a_signed_save_reloads_as_fully_published_history_without_drafts() {
     assert!(is_published(&mut loaded, &a));
     assert!(!loaded.has_unpublished_changes());
     assert!(loaded.signing_requests().unwrap().is_empty());
-    assert!(loaded.try_signing().unwrap().state.local_drafts.is_empty());
+    assert!(loaded.try_attested().unwrap().state.local_drafts.is_empty());
     assert_eq!(loaded.get(ROOT, "value").unwrap().unwrap().0, 1.into());
 
     // Re-export from the reloaded copy yields a snapshot a third peer accepts.
@@ -118,7 +118,7 @@ fn a_signed_save_reloads_as_fully_published_history_without_drafts() {
 }
 
 #[test]
-fn unsigned_loaders_reject_a_signed_save() {
+fn unattested_loaders_reject_a_signed_save() {
     let (doc, _) = one_published_one_draft(&key(1));
     let bytes = doc.save();
 
@@ -130,7 +130,7 @@ fn unsigned_loaders_reject_a_signed_save() {
 
 #[test]
 fn empty_signed_save_round_trips() {
-    let doc = Automerge::from_config(crate::Config::default().signing(author(&key(1))).unwrap());
+    let doc = Automerge::from_config(crate::Config::default().attested(author(&key(1))).unwrap());
     let bytes = doc.save();
     assert_eq!(
         chunk_types(&bytes),
@@ -138,24 +138,24 @@ fn empty_signed_save_round_trips() {
     );
     let loaded = Automerge::load_with_options(&bytes, load_opts(200)).unwrap();
     assert!(loaded.get_heads().is_empty());
-    assert!(loaded.signing.is_required());
+    assert!(loaded.attestation.is_attested());
     assert!(!loaded.has_unpublished_changes());
 }
 
 #[test]
-fn unsigned_loader_rejects_an_empty_signed_save() {
-    let doc = Automerge::from_config(crate::Config::default().signing(author(&key(1))).unwrap());
+fn unattested_loader_rejects_an_empty_signed_save() {
+    let doc = Automerge::from_config(crate::Config::default().attested(author(&key(1))).unwrap());
     assert!(Automerge::load(&doc.save()).is_err());
 }
 
 #[test]
-fn signed_loader_rejects_a_bare_unsigned_snapshot() {
+fn attested_loader_rejects_a_bare_unsigned_snapshot() {
     let unsigned = Automerge::new().save();
     assert_eq!(chunk_types(&unsigned), [ChunkType::Document]);
     assert!(matches!(
         Automerge::load_with_options(&unsigned, load_opts(200)),
         Err(AutomergeError::Signing(
-            SigningError::UnauthenticatedChanges
+            AttestationError::UnauthenticatedChanges
         ))
     ));
     // Unsigned fixtures unchanged.
@@ -164,23 +164,23 @@ fn signed_loader_rejects_a_bare_unsigned_snapshot() {
 }
 
 #[test]
-fn required_receiver_accepts_a_signed_empty_snapshot_incrementally() {
+fn attested_receiver_accepts_a_signed_empty_snapshot_incrementally() {
     let bytes =
-        Automerge::from_config(crate::Config::default().signing(author(&key(1))).unwrap()).save();
+        Automerge::from_config(crate::Config::default().attested(author(&key(1))).unwrap()).save();
     let mut receiver =
-        Automerge::from_config(crate::Config::default().signing(author(&key(3))).unwrap());
+        Automerge::from_config(crate::Config::default().attested(author(&key(3))).unwrap());
     assert_eq!(receiver.load_incremental(&bytes).unwrap(), 0);
 }
 
 #[test]
-fn required_receiver_rejects_a_bare_snapshot_incrementally() {
+fn attested_receiver_rejects_a_bare_snapshot_incrementally() {
     let unsigned = Automerge::new().save();
     let mut receiver =
-        Automerge::from_config(crate::Config::default().signing(author(&key(3))).unwrap());
+        Automerge::from_config(crate::Config::default().attested(author(&key(3))).unwrap());
     assert!(matches!(
         receiver.load_incremental(&unsigned),
         Err(AutomergeError::Signing(
-            SigningError::UnauthenticatedChanges
+            AttestationError::UnauthenticatedChanges
         ))
     ));
 }
@@ -189,7 +189,7 @@ fn required_receiver_rejects_a_bare_snapshot_incrementally() {
 #[allow(deprecated)]
 fn ready_unpublished_cover_does_not_hide_published_fallback_in_snapshot() {
     let k = key(1);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     // F = loose a (published); G = hard fragment {a? no: c} over boundary b (unpublished).
@@ -377,14 +377,17 @@ fn chain_incomplete_snapshot_signed_at_frontier_is_rejected_even_with_dont_check
         assert!(
             matches!(
                 error,
-                AutomergeError::Signing(SigningError::InvalidFragment(
+                AutomergeError::Signing(AttestationError::InvalidFragment(
                     crate::signature::error::InvalidFragment::BrokenActorChain(h)
                 )) if h == lx2
             ),
             "{mode:?}: {error:?}"
         );
-        let mut receiver =
-            Automerge::from_config(crate::Config::default().signing(author(&key(200))).unwrap());
+        let mut receiver = Automerge::from_config(
+            crate::Config::default()
+                .attested(author(&key(200)))
+                .unwrap(),
+        );
         assert!(receiver.load_incremental(&bytes).is_err());
         assert!(receiver.get_heads().is_empty());
     }
@@ -393,7 +396,7 @@ fn chain_incomplete_snapshot_signed_at_frontier_is_rejected_even_with_dont_check
 /// Two published changes by one author, with the signed save and its leading
 /// document chunk in isolation.
 fn two_published_with_document(k: &SigningKey) -> (Automerge, [ChangeHash; 2], Vec<u8>, Vec<u8>) {
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(k)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -482,7 +485,7 @@ fn swapped_seq_one_author_footer_is_rejected() {
     expanded.extra_bytes = crate::change::encode_author_footer(&Some(author(&mallory))).to_vec();
     expanded.hash = None;
     let forged_a = Change::from(expanded);
-    let mut single = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut single = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let only = append_at_level(&mut single, None, 1, 0);
@@ -530,9 +533,9 @@ fn author_footer_on_seq_two_is_rejected() {
 /// loaded history stays published and saves omit the migration until signed.
 #[test]
 #[allow(deprecated)]
-fn string_migration_under_signing_load_is_new_local_unpublished_work() {
+fn string_migration_under_attested_load_is_new_local_unpublished_work() {
     let k = key(1);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let mut tx = doc.transaction();
@@ -589,7 +592,7 @@ fn string_migration_under_signing_load_is_new_local_unpublished_work() {
 #[allow(deprecated)]
 fn autocommit_incremental_cursor_tracks_published_emission_only() {
     let k = key(1);
-    let mut doc = AutoCommit::from_config(crate::Config::default().signing(author(&k)).unwrap());
+    let mut doc = AutoCommit::from_config(crate::Config::default().attested(author(&k)).unwrap());
     doc.set_actor(ActorId::from([1])).unwrap();
     doc.put(ROOT, "v", 1).unwrap();
     let a = doc.commit().unwrap();
@@ -632,7 +635,7 @@ fn autocommit_incremental_cursor_tracks_published_emission_only() {
     let _ = doc.save();
     assert!(doc.save_incremental().is_empty());
 
-    // save_and_verify validates the published projection in required mode.
+    // save_and_verify validates the published projection in an attested document.
     doc.put(ROOT, "v", 4).unwrap();
     doc.commit().unwrap();
     assert!(doc.save_and_verify().is_ok());
@@ -644,7 +647,7 @@ fn autocommit_incremental_cursor_tracks_published_emission_only() {
 fn fully_published_multi_actor_history() -> (Automerge, SigningKey, [ChangeHash; 6]) {
     let ka = key(1);
     let kb = key(2);
-    let mut alice = Automerge::from_config(crate::Config::default().signing(author(&ka)).unwrap())
+    let mut alice = Automerge::from_config(crate::Config::default().attested(author(&ka)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a1 = append_at_level(&mut alice, None, 1, 0);
@@ -746,7 +749,7 @@ fn write_frontier_mask_hides_only_changes_above_the_frontier() {
 fn speculative_pending_groups_are_not_persisted() {
     let k = key(1);
     let other = key(2);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -764,29 +767,29 @@ fn speculative_pending_groups_are_not_persisted() {
     ]
     .concat();
     assert_eq!(doc.load_incremental(&r2_bytes).unwrap(), 0);
-    assert!(doc.signing.has_pending_groups());
+    assert!(doc.attestation.has_pending_groups());
 
     let bytes = doc.save();
     let loaded = Automerge::load_with_options(&bytes, load_opts(200)).unwrap();
     assert_eq!(loaded.get_heads(), [a]);
-    assert!(!loaded.signing.has_pending_groups());
+    assert!(!loaded.attestation.has_pending_groups());
     assert!(loaded.get_missing_deps(&[]).is_empty());
     assert!(doc.save_after(&[]).len() < bytes.len() + r2_bytes.len());
     assert!(
-        doc.signing.has_pending_groups(),
+        doc.attestation.has_pending_groups(),
         "save did not disturb pending"
     );
 }
 
 /// Published history without resident proof is an internal inconsistency.
 /// Save must fail loudly in every build instead of emitting a snapshot whose
-/// attached proof cannot cover it (bytes no required-mode loader accepts).
+/// attached proof cannot cover it (bytes no attested loader accepts).
 #[test]
 fn save_panics_in_all_builds_when_published_history_lacks_resident_proof() {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     let k = key(1);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -798,8 +801,9 @@ fn save_panics_in_all_builds_when_published_history_lacks_resident_proof() {
     let honest_groups = doc.published_groups(&[]).len();
 
     // Corrupt internal state: forget b's proof while b stays published.
-    let crate::automerge::signing::SigningState::Required(signing) = &mut doc.signing else {
-        panic!("required mode");
+    let crate::automerge::attestation::AttestationState::Attested(signing) = &mut doc.attestation
+    else {
+        panic!("an attested document");
     };
     signing.signatures.retain_hashes(|hash| *hash != b);
     assert!(is_published(&mut doc, &b));
@@ -839,7 +843,7 @@ fn save_panics_in_all_builds_when_published_history_lacks_resident_proof() {
 fn overlapping_source_and_receiver(
     k: &SigningKey,
 ) -> (Automerge, Automerge, [ChangeHash; 3], ChangeHash) {
-    let mut source = Automerge::from_config(crate::Config::default().signing(author(k)).unwrap())
+    let mut source = Automerge::from_config(crate::Config::default().attested(author(k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut source, None, 1, 0);
@@ -847,7 +851,7 @@ fn overlapping_source_and_receiver(
 
     let mut receiver = Automerge::load_with_options(
         &source.save(),
-        LoadOptions::new().signing(author(&key(2))).unwrap(),
+        LoadOptions::new().attested(author(&key(2))).unwrap(),
     )
     .unwrap();
     receiver.set_actor(ActorId::from([9])).unwrap();
@@ -935,7 +939,7 @@ fn incremental_save_after_a_known_cut_applies_once() {
 
 /// A signed snapshot and a signed incremental group over the same history.
 fn snapshot_and_group(k: &SigningKey) -> (Vec<u8>, Vec<u8>, ChangeHash) {
-    let mut source = Automerge::from_config(crate::Config::default().signing(author(k)).unwrap())
+    let mut source = Automerge::from_config(crate::Config::default().attested(author(k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut source, None, 1, 0);
@@ -965,7 +969,7 @@ fn assert_damaged_stream_rejected(
     let mut receiver = Automerge::load_with_options(snapshot, load_opts(200)).unwrap();
     assert!(receiver.load_incremental(bytes).is_err());
     assert_eq!(receiver.get_heads(), [head]);
-    assert!(!receiver.signing.has_pending_groups());
+    assert!(!receiver.attestation.has_pending_groups());
 }
 
 #[test]
@@ -1091,7 +1095,7 @@ mod properties {
             "reload re-derives publication"
         );
         assert!(!loaded.has_unpublished_changes());
-        assert!(loaded.try_signing().unwrap().state.local_drafts.is_empty());
+        assert!(loaded.try_attested().unwrap().state.local_drafts.is_empty());
         assert!(loaded.signing_requests().unwrap().is_empty());
         for hash in &published {
             assert_eq!(
@@ -1113,7 +1117,7 @@ mod properties {
         #[allow(deprecated)]
         fn signed_persistence_tracks_publication(steps in prop::collection::vec(step(), 1..24)) {
             let k = key(1);
-            let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap()).with_actor(ActorId::from([1])).unwrap();
+            let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap()).with_actor(ActorId::from([1])).unwrap();
             let mut value = 0i64;
             // Stale copy from the last full save plus the cursor at that time.
             let mut stale: Option<(Automerge, Vec<ChangeHash>)> = None;
@@ -1134,8 +1138,8 @@ mod properties {
                             if is_published(&mut doc, &h) {
                                 continue;
                             }
-                            let signing = doc.try_signing().unwrap();
-                            if !crate::automerge::signing::has_signature(
+                            let signing = doc.try_attested().unwrap();
+                            if !crate::automerge::attestation::has_signature(
                                 signing.graph,
                                 signing.authors,
                                 &signing.state.signatures,

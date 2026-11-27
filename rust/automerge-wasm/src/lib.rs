@@ -531,7 +531,7 @@ impl Automerge {
     ) -> Result<Automerge, error::Create> {
         let config = am::Config::default().text_encoding(TextEncoding::Utf16CodeUnit);
         let config = match author {
-            DocumentAuthor::Signing(author) => config.signing(author)?,
+            DocumentAuthor::Signing(author) => config.attested(author)?,
             DocumentAuthor::Unsigned(author) => config.author(author),
         };
         let mut doc = AutoCommit::from_config(config);
@@ -2149,7 +2149,7 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
         .text_encoding(TextEncoding::Utf16CodeUnit);
     load_options = match author {
         DocumentAuthor::Signing(author) => load_options
-            .signing(author)
+            .attested(author)
             .map_err(error::SigningAuthor::from)?,
         DocumentAuthor::Unsigned(Some(author)) => load_options.author(author),
         DocumentAuthor::Unsigned(None) => load_options,
@@ -2650,7 +2650,7 @@ pub mod error {
         #[error("signing documents require an author option")]
         Missing,
         #[error(transparent)]
-        Invalid(#[from] automerge::SigningAuthorError),
+        Invalid(#[from] automerge::AttestationAuthorError),
     }
 
     impl From<SigningAuthor> for JsValue {
@@ -2676,8 +2676,8 @@ pub mod error {
         Actor(#[from] AutomergeError),
     }
 
-    impl From<automerge::SigningAuthorError> for Create {
-        fn from(e: automerge::SigningAuthorError) -> Self {
+    impl From<automerge::AttestationAuthorError> for Create {
+        fn from(e: automerge::AttestationAuthorError) -> Self {
             Self::SigningAuthor(SigningAuthor::Invalid(e))
         }
     }
@@ -2690,7 +2690,7 @@ pub mod error {
 
     #[derive(Debug, thiserror::Error)]
     #[error(transparent)]
-    pub struct SigningMode(#[from] automerge::signing::error::SigningMode);
+    pub struct SigningMode(#[from] automerge::attestation::error::NotAttested);
 
     impl From<SigningMode> for JsValue {
         fn from(e: SigningMode) -> Self {

@@ -41,13 +41,13 @@ fn inject_applied_change(doc: &mut Automerge, change: &Change, actor: ActorId) {
         &mut doc.authors,
         &doc.ops.actors,
         &doc.visibility,
-        &mut doc.signing,
+        &mut doc.attestation,
     )
     .update(change);
 }
 
 #[test]
-fn unsigned_documents_never_report_unpublished_changes() {
+fn unattested_documents_never_report_unpublished_changes() {
     let mut doc = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     append_at_level(&mut doc, None, 1, 0);
     assert!(!doc.has_unpublished_changes());
@@ -82,7 +82,7 @@ fn pending_incoming_groups_do_not_count_as_unpublished_changes() {
         [(c, Signature::ed25519(sig(&k2, &c)))],
     );
     assert_eq!(doc.load_incremental(&c_bytes).unwrap(), 0);
-    assert!(doc.signing.has_pending_groups());
+    assert!(doc.attestation.has_pending_groups());
     assert!(
         !doc.has_unpublished_changes(),
         "pending groups are not applied"
@@ -114,7 +114,7 @@ fn an_injected_non_local_change_is_neither_a_draft_nor_requested() {
 }
 
 #[test]
-fn unsigned_autocommit_status_is_false_with_pending_ops() {
+fn unattested_autocommit_status_is_false_with_pending_ops() {
     let mut doc = AutoCommit::new();
     doc.put(ROOT, "v", 1).unwrap();
     assert!(!doc.has_unpublished_changes());
@@ -124,7 +124,7 @@ fn unsigned_autocommit_status_is_false_with_pending_ops() {
 #[test]
 fn autocommit_status_does_not_close_the_open_transaction() {
     let k = key(7);
-    let mut doc = AutoCommit::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut doc = AutoCommit::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     doc.put(ROOT, "v", 1).unwrap();
@@ -141,7 +141,7 @@ fn autocommit_status_does_not_close_the_open_transaction() {
 }
 
 #[test]
-fn unsigned_autocommit_signing_requests_is_an_error_and_keeps_pending_ops() {
+fn unattested_autocommit_signing_requests_is_an_error_and_keeps_pending_ops() {
     let mut doc = AutoCommit::new();
     doc.put(ROOT, "v", 1).unwrap();
     assert!(doc.signing_requests().is_err());
@@ -151,7 +151,7 @@ fn unsigned_autocommit_signing_requests_is_an_error_and_keeps_pending_ops() {
 #[test]
 fn autocommit_signing_requests_commits_the_open_transaction_first() {
     let k = key(7);
-    let mut doc = AutoCommit::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut doc = AutoCommit::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     doc.put(ROOT, "v", 1).unwrap();
@@ -247,7 +247,7 @@ fn loading_signed_history_creates_no_drafts() {
     // Same author as the source, but imported: nothing to sign locally.
     let mut peer = Automerge::load_with_options(
         &wire,
-        crate::LoadOptions::new().signing(author(&k)).unwrap(),
+        crate::LoadOptions::new().attested(author(&k)).unwrap(),
     )
     .unwrap();
     assert!(drafts(&mut peer).is_empty());

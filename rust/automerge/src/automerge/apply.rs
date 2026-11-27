@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::op_set2::change::batch::BatchApply;
-use crate::signature::error::SigningError;
+use crate::signature::error::AttestationError;
 use crate::staging::{ChangeBatch, StagedChanges};
 use crate::{ActorId, AutomergeError, Change, ChangeHash, Fragment, PatchLog, PatchLogMismatch};
 
@@ -52,13 +52,13 @@ impl Automerge {
             .into_iter()
             .map(|item| item.try_into().map_err(AutomergeError::from))
             .collect::<Result<_, _>>()?;
-        if self.signing.is_required() {
+        if self.attestation.is_attested() {
             if groups.iter().any(|group| group.signatures.is_none()) {
-                return Err(SigningError::UnauthenticatedChanges.into());
+                return Err(AttestationError::UnauthenticatedChanges.into());
             }
             self.admit_loaded_groups(groups, log)
         } else {
-            // Unsigned mode never strips a proof: decoded, parsed and encoded
+            // Unattested documents never strips a proof: decoded, parsed and encoded
             // inputs alike are rejected whole before any member is applied.
             if groups.iter().any(|group| group.signatures.is_some()) {
                 return Err(crate::storage::load::Error::SignedContent.into());
@@ -96,9 +96,9 @@ impl Automerge {
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         // Unclassified or bundle-grouped contents carry no proofs, so required
-        // mode rejects them outright; unsigned mode skips the check.
-        self.signing
-            .with_required(|| Err(SigningError::UnauthenticatedChanges))?;
+        // mode rejects them outright; unattested documents skips the check.
+        self.attestation
+            .when_attested(|| Err(AttestationError::UnauthenticatedChanges))?;
         // Validate the observer before staging or applying incoming changes.
         // A rejected log leaves existing staged history and recorded events
         // available for retry. Once validation passes, actor-table growth during
@@ -222,7 +222,7 @@ impl Automerge {
                 &mut self.actor,
                 &mut self.authors,
                 &mut self.visibility,
-                &mut self.signing,
+                &mut self.attestation,
             );
             // Insert every new actor first: a later insertion would shift the
             // indices collected for the earlier ones. The second pass is pure
@@ -266,7 +266,7 @@ impl Automerge {
                 &mut self.authors,
                 &self.ops.actors,
                 &self.visibility,
-                &mut self.signing,
+                &mut self.attestation,
             );
             let mut resolved = false;
             for change in batch.changes() {
@@ -285,7 +285,7 @@ impl Automerge {
             &mut self.actor,
             &mut self.authors,
             &mut self.visibility,
-            &mut self.signing,
+            &mut self.attestation,
         )
         .remove_unused();
 

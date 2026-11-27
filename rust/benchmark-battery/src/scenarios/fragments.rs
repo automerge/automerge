@@ -1,8 +1,8 @@
-//! Matched unsigned vs. required-signing benchmarks over identical fragment histories.
+//! Matched unattested vs. attested benchmarks over identical fragment histories.
 //!
 //! Both modes use the exact same deterministic `ActorId`s, `Author` public keys,
 //! operations, and commit timestamps so every `ChangeHash` and canonical
-//! `Fragment` boundary is identical between the unsigned and signed runs.
+//! `Fragment` boundary is identical between the unattested and attested runs.
 //! External Ed25519 key-signing is precomputed during setup so timed loops
 //! measure Automerge's own readiness, verification, admission, and GC work.
 
@@ -163,7 +163,7 @@ pub fn benchmarks() -> Vec<Benchmark> {
         );
     }
 
-    // 3. Full stream load: snapshot vs unsigned fragments vs signed in-order vs signed reversed.
+    // 3. Full stream load: snapshot vs unattested fragments vs signed in-order vs signed reversed.
     out.push(
         SampledBenchmark::no_setup(
             "fragments",
@@ -375,13 +375,13 @@ fn receiver_author() -> Author<'static> {
 
 fn signing_doc(author: &Author<'static>) -> Automerge {
     automerge::Config::default()
-        .signing(author.clone())
+        .attested(author.clone())
         .map(Automerge::from_config)
         .expect("benchmark author is a valid Ed25519 key")
 }
 
 fn signing_load() -> LoadOptions<'static> {
-    LoadOptions::new().signing(receiver_author()).unwrap()
+    LoadOptions::new().attested(receiver_author()).unwrap()
 }
 
 fn actor_credentials(index: usize) -> (SigningKey, Author<'static>) {

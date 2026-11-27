@@ -28,7 +28,7 @@ fn rejected_fork_options_keep_the_source_transaction_open() {
 #[test]
 fn same_author_pending_fork_keeps_newly_committed_draft_state() {
     let local = author(1);
-    let mut source = AutoCommit::from_config(Config::default().signing(local.clone()).unwrap());
+    let mut source = AutoCommit::from_config(Config::default().attested(local.clone()).unwrap());
     source.put(ROOT, "pending", 1).unwrap();
     let mut fork = source
         .fork_with_options(ForkOptions::default().author(Some(local)))
@@ -43,7 +43,7 @@ fn same_author_pending_fork_keeps_newly_committed_draft_state() {
 }
 
 #[test]
-fn changed_unsigned_author_cannot_take_the_actor_of_pending_source_edits() {
+fn changed_unattested_author_cannot_take_the_actor_of_pending_source_edits() {
     let mut source = AutoCommit::from_config(Config::default().author(Some(author(1))));
     let actor = source.get_actor().clone();
     source.put(ROOT, "pending", 1).unwrap();
@@ -60,7 +60,7 @@ fn changed_author_fork_after_empty_transaction_keeps_aligned_publication() {
     use automerge::LoadOptions;
     use ed25519_dalek::Signer;
     let key = SigningKey::from_bytes(&[1; 32]);
-    let mut peer = AutoCommit::from_config(Config::default().signing(author(1)).unwrap());
+    let mut peer = AutoCommit::from_config(Config::default().attested(author(1)).unwrap());
     peer.set_actor(ActorId::from([0xff; 16])).unwrap();
     peer.put(ROOT, "peer", 1).unwrap();
     let requests = peer.signing_requests().unwrap();
@@ -71,7 +71,7 @@ fn changed_author_fork_after_empty_transaction_keeps_aligned_publication() {
         )
     }));
     let bytes = peer.save();
-    let mut source = AutoCommit::from_config(Config::default().signing(author(2)).unwrap());
+    let mut source = AutoCommit::from_config(Config::default().attested(author(2)).unwrap());
     source.set_actor(ActorId::from([0; 16])).unwrap();
     source.load_incremental(&bytes).unwrap();
     let _ = source.delete(ROOT, "missing");
@@ -79,9 +79,11 @@ fn changed_author_fork_after_empty_transaction_keeps_aligned_publication() {
     let mut fork = source
         .fork_with_options(ForkOptions::default().author(Some(author(3))))
         .unwrap();
-    let loaded =
-        Automerge::load_with_options(&fork.save(), LoadOptions::new().signing(author(4)).unwrap())
-            .unwrap();
+    let loaded = Automerge::load_with_options(
+        &fork.save(),
+        LoadOptions::new().attested(author(4)).unwrap(),
+    )
+    .unwrap();
     assert_eq!(
         loaded.get_changes(&[]).len(),
         1,

@@ -17,7 +17,7 @@
 use crate::signature::{ed25519, Insert};
 use crate::{AutomergeError, ChangeHash, PatchLogMismatch};
 
-use super::error::{InsertSignature, SigningMode};
+use super::error::{InsertSignature, NotAttested};
 
 /// Failure to verify and insert one signature for an applied change.
 pub type SignatureInsertError = InsertSignature;
@@ -36,9 +36,9 @@ pub struct SignatureInsertOutcome {
 /// A batch was refused before any entry was processed.
 #[derive(Debug, thiserror::Error)]
 pub enum SignatureRejection {
-    /// The document is not in required signing mode.
+    /// The document is not attested.
     #[error(transparent)]
-    Mode(#[from] SigningMode),
+    Mode(#[from] NotAttested),
     /// The supplied patch log belongs to a different document lineage.
     #[error(transparent)]
     PatchLog(#[from] PatchLogMismatch),

@@ -94,12 +94,12 @@ pub use state::{Have, State};
 /// A document which can take part in the sync protocol
 ///
 /// Obtain this interface through [`Automerge::sync`] or [`crate::AutoCommit::sync`].
-/// Signing documents cannot acquire it; transfer their published history with
+/// Attested documents cannot acquire it; transfer their published history with
 /// save/load or merge instead.
 ///
 /// See the [module level documentation](crate::sync) for more details.
 ///
-/// [`SigningError::SyncNotSupported`]: crate::signature::error::SigningError::SyncNotSupported
+/// [`AttestationError::SyncNotSupported`]: crate::signature::error::AttestationError::SyncNotSupported
 pub trait SyncDoc {
     /// Generate a sync message for the remote peer represented by `sync_state`
     ///
@@ -109,7 +109,7 @@ pub trait SyncDoc {
     ///
     /// * `sync_state` - The [`State`] for this document and the remote peer
     ///
-    /// [`SigningError::SyncNotSupported`]: crate::signature::error::SigningError::SyncNotSupported
+    /// [`AttestationError::SyncNotSupported`]: crate::signature::error::AttestationError::SyncNotSupported
     fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message>;
 
     /// Apply a received sync message to this document and `sync_state`
@@ -176,7 +176,7 @@ struct SyncDocument<'a> {
 
 impl SyncDoc for SyncDocument<'_> {
     fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message> {
-        self.doc.generate_unsigned_sync_message(sync_state)
+        self.doc.generate_unattested_sync_message(sync_state)
     }
 
     fn receive_sync_message(
@@ -204,17 +204,20 @@ impl Automerge {
     /// Acquire borrowed access to the unsigned sync protocol.
     ///
     /// # Errors
-    /// Signing documents return [`SigningError::SyncNotSupported`] before mutation.
+    /// Attested documents return [`AttestationError::SyncNotSupported`] before mutation.
     ///
-    /// [`SigningError::SyncNotSupported`]: crate::signature::error::SigningError::SyncNotSupported
+    /// [`AttestationError::SyncNotSupported`]: crate::signature::error::AttestationError::SyncNotSupported
     pub fn sync(&mut self) -> Result<impl SyncDoc + '_, AutomergeError> {
-        self.signing
-            .with_required(|| Err(crate::signature::error::SigningError::SyncNotSupported))?;
+        self.attestation
+            .when_attested(|| Err(crate::signature::error::AttestationError::SyncNotSupported))?;
         Ok(SyncDocument { doc: self })
     }
 
     /// The unsigned sync protocol step; callers have already checked the mode.
-    pub(crate) fn generate_unsigned_sync_message(&self, sync_state: &mut State) -> Option<Message> {
+    pub(crate) fn generate_unattested_sync_message(
+        &self,
+        sync_state: &mut State,
+    ) -> Option<Message> {
         let our_heads = self.get_heads();
 
         let our_need = if sync_state.read_only {

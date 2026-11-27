@@ -5,7 +5,7 @@ use automerge::{ActorId, Author, AutoCommit, Automerge, Config, ROOT};
 
 #[test]
 #[allow(deprecated)]
-fn unsigned_actor_reuse_checks_named_and_anonymous_identity() {
+fn unattested_actor_reuse_checks_named_and_anonymous_identity() {
     for original in [None, Some(Author::from(vec![1]))] {
         let actor = ActorId::from([1]);
         let mut source = Automerge::from_config(Config::default().author(original.clone()));
@@ -30,7 +30,7 @@ fn unsigned_actor_reuse_checks_named_and_anonymous_identity() {
 
 #[test]
 #[allow(deprecated)]
-fn imported_identity_blocks_an_unsigned_actor_chosen_while_unbound() {
+fn imported_identity_blocks_an_unattested_actor_chosen_while_unbound() {
     let actor = ActorId::from([1]);
     let mut source = AutoCommit::from_config(Config::default().author(Some(Author::from(vec![1]))));
     source.set_actor(actor.clone()).unwrap();

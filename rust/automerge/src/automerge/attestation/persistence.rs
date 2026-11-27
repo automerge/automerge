@@ -1,13 +1,13 @@
-//! Published-only persistence for required-mode documents.
+//! Published-only persistence for attested documents.
 //!
-//! Saving a signed document emits only *published* history: a document
+//! Saving an attested document emits only *published* history: a document
 //! snapshot of the published projection followed by one signatures chunk that
 //! carries the complete proof of a selected published cover. Local drafts and
 //! speculative pending groups stay in the live document. Nothing about the
-//! published clock or the signing mode is serialized; a loader re-derives
+//! published clock or attestation itself is serialized; a loader re-derives
 //! publication from the snapshot's history and its attached proof.
 //!
-//! Loading a snapshot in required mode reconstructs the snapshot into an
+//! Loading a snapshot in an attested document reconstructs the snapshot into an
 //! untrusted scratch document, derives the canonical groups of that history,
 //! verifies each group's complete proof against the attached entries, and runs
 //! causal selection from an empty published clock. Only when every change of
@@ -22,7 +22,7 @@ use std::collections::HashSet;
 
 use crate::admission::{select_fragments, PublishedHistory};
 use crate::change_graph::ChangeGraph;
-use crate::signature::error::{ProofError, SigningError};
+use crate::signature::error::{AttestationError, ProofError};
 use crate::signature::{FragmentRequirements, Signature, SignatureStore};
 use crate::storage::document::ReconstructError;
 use crate::storage::load::{LoadedGroup, LoadedGroupBody};
@@ -30,7 +30,7 @@ use crate::storage::signatures::HashEntries;
 use crate::storage::Document;
 use crate::{Author, AutomergeError, Change, ChangeHash, Fragment, VerificationMode};
 
-use super::{has_signature, RequiredSigning};
+use super::{has_signature, AttestedState};
 
 /// A complete canonical group of published history with its own proof.
 ///
@@ -39,7 +39,7 @@ use super::{has_signature, RequiredSigning};
 /// group carries complete proof of its own members; verifying it may still
 /// need causal context (author bindings established by earlier groups), so
 /// the *collection* of published groups, delivered oldest first, transfers to
-/// an empty required peer.
+/// an empty attested peer.
 #[derive(Clone, Debug)]
 pub(crate) struct PublishedGroup {
     pub(crate) fragment: Fragment,
@@ -86,17 +86,17 @@ fn published_candidates(graph: &ChangeGraph, published: &HashSet<ChangeHash>) ->
 pub(super) fn published_cover(
     graph: &ChangeGraph,
     authors: &crate::author::Authors,
-    signing: &RequiredSigning,
+    attested: &AttestedState,
 ) -> Vec<Fragment> {
-    let cover = super::readiness::OutgoingSelection::new(graph, &signing.fragment_readiness)
+    let cover = super::readiness::OutgoingSelection::new(graph, &attested.fragment_readiness)
         .collect_from(
-            graph.heads_at_clock(&signing.published.clock),
+            graph.heads_at_clock(&attested.published.clock),
             |hash| {
                 graph.actor_seq_for_hash(hash).is_some_and(|(actor, seq)| {
-                    signing.published.is_published_actor_seq(actor, seq)
+                    attested.published.is_published_actor_seq(actor, seq)
                 })
             },
-            |hash| has_signature(graph, authors, &signing.signatures, hash),
+            |hash| has_signature(graph, authors, &attested.signatures, hash),
         );
     let represented: HashSet<_> = cover
         .iter()
@@ -105,7 +105,7 @@ pub(super) fn published_cover(
     let expected: usize = graph
         .all_actor_ids()
         .map(|actor| {
-            signing
+            attested
                 .published
                 .clock
                 .get_for_actor(&actor)
@@ -163,12 +163,12 @@ pub(super) fn verify_snapshot(
             let predecessor = graph
                 .get_hash_for_actor_seq(actor, u64::from(seq) - 1)
                 .map_err(|_| {
-                    SigningError::from(crate::signature::error::InvalidFragment::BrokenActorChain(
-                        *hash,
-                    ))
+                    AttestationError::from(
+                        crate::signature::error::InvalidFragment::BrokenActorChain(*hash),
+                    )
                 })?;
             if !graph.deps(hash).any(|dep| dep == predecessor) {
-                return Err(SigningError::from(
+                return Err(AttestationError::from(
                     crate::signature::error::InvalidFragment::BrokenActorChain(*hash),
                 )
                 .into());
@@ -206,7 +206,7 @@ pub(super) fn verify_snapshot(
         .collect();
     if let Some(missing) = all.iter().find(|hash| !published.contains(hash)) {
         let error = first_failure.unwrap_or(ProofError::MissingSignature(*missing));
-        return Err(SigningError::from(error).into());
+        return Err(AttestationError::from(error).into());
     }
 
     let selected: Vec<usize> = selection.selected_indices().collect();
