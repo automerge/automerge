@@ -14,23 +14,27 @@ impl Serialize for Op {
     where
         S: Serializer,
     {
-        let mut fields = 4;
-
-        if self.insert {
-            fields += 1
-        }
-
+        // A bare number doesn't say which numeric `ScalarValue` it was, so numeric `Put` and
+        // `MarkBegin` values get a `datatype` field the deserializer uses to restore it.
         let numerical_datatype = match &self.action {
-            OpType::Put(value) => value.as_numerical_datatype(),
+            OpType::Put(value) | OpType::MarkBegin(MarkData { value, .. }) => {
+                value.as_numerical_datatype()
+            }
             _ => None,
         };
 
-        if numerical_datatype.is_some() {
-            fields += 2
-        } else if !matches!(&self.action, OpType::Make(..)) {
-            fields += 1
+        let action_fields = match &self.action {
+            OpType::Make(_) | OpType::Delete => 0,
+            OpType::Increment(_) | OpType::Put(_) | OpType::MarkEnd(_) => 1,
+            OpType::MarkBegin(_) => 3,
         };
+        let fields = 4 // action, obj, key/elemId, pred
+            + usize::from(self.insert)
+            + usize::from(numerical_datatype.is_some())
+            + action_fields;
 
+        // `fields` must equal the number of fields serialized below: length-prefixed formats
+        // such as CBOR write it as the map length.
         let mut op = serializer.serialize_struct("Operation", fields)?;
         op.serialize_field("action", &self.action)?;
         op.serialize_field("obj", &self.obj)?;
@@ -58,7 +62,10 @@ impl Serialize for Op {
                 expand,
             }) => {
                 op.serialize_field("name", &name)?;
-                op.serialize_field("value", &value)?;
+                match value {
+                    ScalarValue::Counter(c) => op.serialize_field("value", &c.start)?,
+                    value => op.serialize_field("value", &value)?,
+                }
                 op.serialize_field("expand", &expand)?
             }
             OpType::MarkEnd(expand) => op.serialize_field("expand", &expand)?,
@@ -666,93 +673,65 @@ mod tests {
         }
     }
 
-    #[test]
-    fn cbor_del_op_round_trip_fails() {
-        let del = Op {
-            action: OpType::Delete,
+    fn root_op(action: OpType) -> Op {
+        Op {
+            action,
             obj: ObjectId::Root,
             key: "foo".into(),
             insert: false,
             pred: SortedVec::new(),
-        };
-        let set = Op {
-            action: OpType::Put("bar".into()),
-            obj: ObjectId::Root,
-            key: "foo".into(),
-            insert: false,
-            pred: SortedVec::new(),
-        };
+        }
+    }
 
-        let json = serde_json::to_vec(&del).expect("del json encode");
-        let _: Op = serde_json::from_slice(&json).expect("del json decode");
-
-        let mut set_cbor = Vec::new();
-        ciborium::into_writer(&set, &mut set_cbor).expect("set cbor encode");
-        assert_eq!(set_cbor[0], 0xa5, "set map length 5");
-        let _: Op = ciborium::from_reader(set_cbor.as_slice()).expect("set cbor decode");
-
-        let mut del_cbor = Vec::new();
-        ciborium::into_writer(&del, &mut del_cbor).expect("del cbor encode");
-        // Correct length is 4 (`0xa4`). The serializer declares 5 (`0xa5`).
-        assert_eq!(del_cbor[0], 0xa5, "del map length wrongly 5");
-
-        // Deserialization fails due to incorrect length
-        ciborium::from_reader::<Op, _>(del_cbor.as_slice())
-            .expect_err("del declares five CBOR map fields and writes four");
+    /// Checks that `op` encodes to a CBOR map of `fields` entries and decodes back unchanged.
+    fn assert_cbor_round_trip(op: &Op, fields: u8) {
+        let mut cbor = Vec::new();
+        ciborium::into_writer(op, &mut cbor).expect("cbor encode");
+        // A map with fewer than 24 entries stores its length in the first byte: 0xa0 + length.
+        assert_eq!(cbor[0], 0xa0 + fields, "cbor map length of {op:?}");
+        let decoded: Op = ciborium::from_reader(cbor.as_slice()).expect("cbor decode");
+        assert_eq!(*op, decoded);
     }
 
     #[test]
-    fn cbor_mark_begin_op_round_trip_fails() {
-        let mark_begin = Op {
-            action: OpType::MarkBegin(MarkData {
-                name: "bold".into(),
-                value: ScalarValue::Boolean(true),
+    fn cbor_del_op_round_trip() {
+        // action, obj, key, pred
+        assert_cbor_round_trip(&root_op(OpType::Delete), 4);
+    }
+
+    #[test]
+    fn cbor_mark_begin_op_round_trip() {
+        let mark_begin = root_op(OpType::MarkBegin(MarkData {
+            name: "bold".into(),
+            value: ScalarValue::Boolean(true),
+            expand: false,
+        }));
+        // action, obj, key, name, value, expand, pred
+        assert_cbor_round_trip(&mark_begin, 7);
+    }
+
+    #[test]
+    fn mark_begin_numeric_value_round_trip() {
+        // Without `datatype`, each of these decodes as a plain `Uint`.
+        for (value, datatype) in [
+            (ScalarValue::Counter(3.into()), "counter"),
+            (ScalarValue::Timestamp(3), "timestamp"),
+            (ScalarValue::Int(3), "int"),
+        ] {
+            let op = root_op(OpType::MarkBegin(MarkData {
+                name: "score".into(),
+                value,
                 expand: false,
-            }),
-            obj: ObjectId::Root,
-            key: "foo".into(),
-            insert: false,
-            pred: SortedVec::new(),
-        };
-        let mark_end = Op {
-            action: OpType::MarkEnd(false),
-            obj: ObjectId::Root,
-            key: "foo".into(),
-            insert: false,
-            pred: SortedVec::new(),
-        };
+            }));
 
-        let json = serde_json::to_vec(&mark_begin).expect("markBegin json encode");
-        let _: Op = serde_json::from_slice(&json).expect("markBegin json decode");
-        assert_eq!(
-            serde_json::to_value(&mark_begin)
-                .expect("markBegin json value")
-                .as_object()
-                .expect("object")
-                .len(),
-            7,
-            "markBegin JSON writes seven fields"
-        );
+            let json = serde_json::to_value(&op).expect("json encode");
+            assert_eq!(json["datatype"], datatype);
+            let decoded: Op = serde_json::from_value(json).expect("json decode");
+            assert_eq!(op, decoded, "json {datatype}");
 
-        let mut end_cbor = Vec::new();
-        ciborium::into_writer(&mark_end, &mut end_cbor).expect("markEnd cbor encode");
-        assert_eq!(end_cbor[0], 0xa5, "markEnd map length 5");
-        let _: Op = ciborium::from_reader(end_cbor.as_slice()).expect("markEnd cbor decode");
-
-        let mut begin_cbor = Vec::new();
-        ciborium::into_writer(&mark_begin, &mut begin_cbor).expect("markBegin cbor encode");
-        // Correct length is 7 (`0xa7`). The serializer declares 5 (`0xa5`), then still
-        // writes `expand` and `pred` as trailing bytes after the map.
-        assert_eq!(begin_cbor[0], 0xa5, "markBegin map length wrongly 5");
-        let mut trailing = begin_cbor.as_slice();
-        let _: ciborium::value::Value =
-            ciborium::from_reader(&mut trailing).expect("markBegin map value");
-        assert!(
-            !trailing.is_empty(),
-            "expand and pred must trail after the undersized map"
-        );
-        ciborium::from_reader::<Op, _>(begin_cbor.as_slice())
-            .expect_err("markBegin declares five CBOR map fields and writes seven");
+            // action, obj, key, datatype, name, value, expand, pred
+            assert_cbor_round_trip(&op, 8);
+        }
     }
 
     mod properties {
@@ -780,13 +759,13 @@ mod tests {
             ]
         }
 
-        /// Every `ScalarValue` that the legacy encoding can carry. Two kinds are left out
-        /// because no encoding of them can be decoded, whatever the format:
+        /// Every `ScalarValue` that the legacy encoding can round-trip:
         ///
-        /// * `Bytes` and `Unknown` serialize as a sequence and a map, and the
-        ///   `ScalarValue` deserializer only accepts numbers, strings, bools and null.
-        /// * Non-finite `F64`: JSON can't represent NaN or infinity (serde_json writes
-        ///   `null`), and NaN is never equal to itself anyway.
+        /// * `Bytes` and `Unknown` are left out. They serialize as a sequence and a map, and
+        ///   the `ScalarValue` deserializer only accepts numbers, strings, bools and null, so
+        ///   neither JSON nor CBOR can decode them.
+        /// * `any::<f64>()` only generates finite values, which JSON needs: it can't represent
+        ///   NaN or infinity (serde_json writes `null`).
         fn scalar_value() -> impl Strategy<Value = ScalarValue> {
             prop_oneof![
                 Just(ScalarValue::Null),
@@ -794,9 +773,7 @@ mod tests {
                 any::<String>().prop_map(|s| ScalarValue::Str(s.into())),
                 any::<i64>().prop_map(ScalarValue::Int),
                 any::<u64>().prop_map(ScalarValue::Uint),
-                any::<f64>()
-                    .prop_filter("finite", |f| f.is_finite())
-                    .prop_map(ScalarValue::F64),
+                any::<f64>().prop_map(ScalarValue::F64),
                 any::<i64>().prop_map(|n| ScalarValue::Counter(n.into())),
                 any::<i64>().prop_map(ScalarValue::Timestamp),
             ]
