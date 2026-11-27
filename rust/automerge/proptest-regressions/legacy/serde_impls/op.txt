@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc fa36fa96b5489ba2bf6c649b002fd910bdbd53cf89a43eb5e6ad3669b7b2f9d4 # shrinks to op = Op { action: MarkBegin(MarkData { name: "", value: Counter(Counter { start: 0, current: 0 }), expand: false }), obj: Root, key: Map(""), pred: SortedVec([]), insert: false }
+cc 6971b32f96794ac2052a9bed0880f1ee2c2f9574754f9a2bb15957b85bb6840e # shrinks to op = Op { action: Delete, obj: Root, key: Map(""), pred: SortedVec([]), insert: false }
