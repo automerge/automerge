@@ -1,4 +1,4 @@
-//! Independent end-to-end lifecycle coverage for required signing mode.
+//! Independent end-to-end lifecycle coverage for an attested document.
 //!
 //! These tests drive only the public API and judge outcomes against
 //! externally observable contracts rather than the planner or admission
@@ -61,11 +61,11 @@ fn hashes(doc: &Automerge) -> BTreeSet<ChangeHash> {
 }
 
 fn observer() -> LoadOptions<'static> {
-    LoadOptions::new().signing(author(&key(250))).unwrap()
+    LoadOptions::new().attested(author(&key(250))).unwrap()
 }
 
 /// The published projection of `doc`, checked for the properties every
-/// signed save must have: it loads only in required mode, is fully
+/// signed save must have: it loads only in an attested document, is fully
 /// published, has no drafts or requests, and round-trips to another empty
 /// peer with identical bytes per change.
 fn published(doc: &Automerge) -> Automerge {
@@ -89,7 +89,7 @@ fn published(doc: &Automerge) -> Automerge {
     // Cross-surface consistency only; callers provide expected-state oracles.
     let mut merged = Automerge::from_config(
         automerge::Config::default()
-            .signing(author(&key(251)))
+            .attested(author(&key(251)))
             .unwrap(),
     );
     merged.merge(&mut doc.clone()).unwrap();
@@ -138,7 +138,7 @@ fn commit_at_level(doc: &mut Automerge, heads: Option<&[ChangeHash]>, level: usi
     panic!("level search exhausted")
 }
 
-/// Invariants that must hold for any required-mode document at any time.
+/// Invariants that must hold for any attested documents at any time.
 fn check_invariants(doc: &mut Automerge, locally_committed: &BTreeSet<ChangeHash>) {
     let applied = hashes(doc);
     let projection = published(doc);
@@ -172,9 +172,10 @@ fn check_invariants(doc: &mut Automerge, locally_committed: &BTreeSet<ChangeHash
 #[test]
 fn owned_request_snapshot_answers_late_with_mixed_entries() {
     let k = key(1);
-    let mut doc = Automerge::from_config(automerge::Config::default().signing(author(&k)).unwrap())
-        .with_actor(ActorId::from([1]))
-        .unwrap();
+    let mut doc =
+        Automerge::from_config(automerge::Config::default().attested(author(&k)).unwrap())
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     let a = commit(&mut doc, None, "a", 1);
     let b = commit(&mut doc, None, "b", 2);
     let early = doc.signing_requests().unwrap();
@@ -214,9 +215,10 @@ fn equivalent_histories_yield_identical_requests_and_projections() {
     // different current actor (and a same-author fork in between) must ask
     // for the same signatures and publish to the same projection.
     let k = key(1);
-    let mut one = Automerge::from_config(automerge::Config::default().signing(author(&k)).unwrap())
-        .with_actor(ActorId::from([1]))
-        .unwrap();
+    let mut one =
+        Automerge::from_config(automerge::Config::default().attested(author(&k)).unwrap())
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     let a = commit(&mut one, None, "a", 1);
     let right = commit(&mut one, None, "r", 2);
     one.set_actor(ActorId::from([2])).unwrap();
@@ -259,7 +261,7 @@ proptest! {
     ) {
         let k = key(42);
         let wrong_key = key(99);
-        let mut doc = Automerge::from_config(automerge::Config::default().signing(author(&k)).unwrap())
+        let mut doc = Automerge::from_config(automerge::Config::default().attested(author(&k)).unwrap())
             .with_actor(ActorId::from([1])).unwrap();
         let chain: Vec<_> = (0..length).map(|_| commit_at_level(&mut doc, None, 0)).collect();
         let mut signed = vec![false; length];
@@ -296,7 +298,7 @@ proptest! {
         steps in prop::collection::vec(0u8..10, 1..14)
     ) {
         let k = key(1);
-        let mut doc = Automerge::from_config(automerge::Config::default().signing(author(&k)).unwrap()).with_actor(ActorId::from([1])).unwrap();
+        let mut doc = Automerge::from_config(automerge::Config::default().attested(author(&k)).unwrap()).with_actor(ActorId::from([1])).unwrap();
         let mut local = BTreeSet::new();
         let mut stale: Vec<ChangeHash> = Vec::new();
         for (i, step) in steps.iter().enumerate() {
@@ -333,7 +335,7 @@ proptest! {
                     // no eligibility, nothing to request.
                     let mut reloaded = Automerge::load_with_options(
                         &doc.save(),
-                        LoadOptions::new().signing(author(&k)).unwrap(),
+                        LoadOptions::new().attested(author(&k)).unwrap(),
                     ).unwrap();
                     prop_assert!(requested(&mut reloaded).is_empty());
                     prop_assert!(!reloaded.has_unpublished_changes());

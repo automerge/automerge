@@ -1,6 +1,6 @@
 //! The fixed local author may only write through actors it owns.
 //!
-//! In required mode an actor whose recorded author differs from the document's
+//! In an attested document an actor whose recorded author differs from the document's
 //! fixed author must never be selected for local commits: that would continue
 //! another author's chain with a draft nobody can sign.
 
@@ -8,13 +8,13 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use crate::{AutoCommit, AutomergeError, LoadOptions};
 
-use super::super::{RequiredSigning, SigningState};
+use super::super::{AttestationState, AttestedState};
 use super::*;
 
 /// Author A publishes `a` under actor `[1]`.
 fn published_source() -> (Automerge, SigningKey, ChangeHash) {
     let k = key(7);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -92,7 +92,7 @@ fn same_author_fork_may_reuse_the_actor() {
 
 #[test]
 #[allow(deprecated)]
-fn unsigned_documents_enforce_the_same_actor_author_binding() {
+fn unattested_documents_enforce_the_same_actor_author_binding() {
     let mut unsigned =
         Automerge::from_config(crate::Config::default().author(Some(Author::from(vec![1]))))
             .with_actor(ActorId::from([1]))
@@ -112,7 +112,7 @@ fn autocommit_checked_setter_rejects_before_closing_the_transaction() {
     let (source, _k, _a) = published_source();
     let mut fork = AutoCommit::load_with_options(
         &source.save(),
-        LoadOptions::new().signing(author(&key(8))).unwrap(),
+        LoadOptions::new().attested(author(&key(8))).unwrap(),
     )
     .unwrap();
     fork.put(ROOT, "v", 1).unwrap();
@@ -137,7 +137,7 @@ fn imported_collision_on_an_unused_configured_actor_fails_before_any_mutation() 
     // B configures actor [1] while it is still unused, then imports A's
     // published chain, which binds [1] to A.
     let k2 = key(8);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k2)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k2)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     doc.load_incremental(&wire).unwrap();
@@ -168,7 +168,7 @@ fn imported_collision_on_an_unused_configured_actor_fails_before_any_mutation() 
     let b = append_at_level(&mut doc, None, 2, 0);
     assert_eq!(drafts(&mut doc), [b]);
     assert!(matches!(
-        Automerge::load_with_options(&wire, LoadOptions::new().signing(author(&k2)).unwrap())
+        Automerge::load_with_options(&wire, LoadOptions::new().attested(author(&k2)).unwrap())
             .unwrap()
             .set_actor(ActorId::from([1])),
         Err(AutomergeError::ActorAuthorMismatch { .. })
@@ -178,13 +178,13 @@ fn imported_collision_on_an_unused_configured_actor_fails_before_any_mutation() 
 #[test]
 #[allow(deprecated)]
 fn authorless_applied_history_is_not_the_fixed_authors_to_continue() {
-    // Valid required-mode ingress always records an author, so reach this
+    // Valid attested ingress always records an author, so reach this
     // state by injection: unsigned history under actors [1] and [2] with no
-    // recorded author, then the document is switched to required mode.
+    // recorded author, then the document is switched to an attested document.
     let mut doc = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     append_at_level(&mut doc, None, 1, 0);
     doc.set_actor(ActorId::from([2])).unwrap();
-    doc.signing = SigningState::Required(Box::new(RequiredSigning::new(
+    doc.attestation = AttestationState::Attested(Box::new(AttestedState::new(
         doc.actors(),
         ed25519::VerifyingAuthor::new(author(&key(7))).unwrap(),
     )));

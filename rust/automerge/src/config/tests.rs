@@ -18,7 +18,7 @@ fn intent_is_explicit_and_builders_replace_it() {
     assert_eq!(defaults.text_encoding, TextEncoding::platform_default());
     let ordinary = Config::default().author(Some(author()));
     assert!(matches!(ordinary.author, DocumentAuthor::Set(_)));
-    let signed = ordinary.signing(author()).unwrap();
+    let signed = ordinary.attested(author()).unwrap();
     let DocumentAuthor::Verifier(verifier) = &signed.author else {
         panic!("prepared key")
     };
@@ -41,6 +41,6 @@ fn invalid_and_weak_keys_fail_during_configuration() {
     let mut weak = vec![0; 32];
     weak[0] = 1;
     for bytes in [vec![1, 2, 3], weak] {
-        assert!(Config::default().signing(Author::from(bytes)).is_err());
+        assert!(Config::default().attested(Author::from(bytes)).is_err());
     }
 }

@@ -14,7 +14,7 @@ use crate::Fragment;
 
 fn document() -> (Automerge, SigningKey) {
     let k = key(7);
-    let doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let doc = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     (doc, k)
@@ -48,7 +48,7 @@ fn canonical_fragments(doc: &Automerge) -> Vec<Fragment> {
 }
 
 fn assert_readiness_matches_graph(doc: &mut Automerge) {
-    let signing = doc.try_signing().unwrap();
+    let signing = doc.try_attested().unwrap();
     let mut expected = FragmentReadiness::from_graph(signing.graph, |hash| {
         has_signature(
             signing.graph,
@@ -68,7 +68,7 @@ fn assert_readiness_matches_graph(doc: &mut Automerge) {
 }
 
 fn is_candidate(doc: &mut Automerge, head: &ChangeHash) -> bool {
-    doc.try_signing()
+    doc.try_attested()
         .unwrap()
         .state
         .fragment_readiness
@@ -82,7 +82,7 @@ fn is_candidate(doc: &mut Automerge, head: &ChangeHash) -> bool {
 #[allow(deprecated)]
 fn fallback_and_blocked_cover() -> (Automerge, SigningKey, [ChangeHash; 3]) {
     let ka = key(7);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&ka)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&ka)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -159,7 +159,7 @@ fn candidate_subscriptions_survive_until_replacement_publishes() {
     // while G is only ready, and publication-only progress on b must clean up
     // both the tracker and the store.
     let ka = key(7);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&ka)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&ka)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a1 = append_at_level(&mut doc, None, 1, 1);
@@ -396,7 +396,7 @@ fn supersession_reclaims_the_covered_candidate_and_its_signature_bytes() {
     assert!(doc.get_fragment(old).is_none());
     assert!(doc.bundle_fragments([before[0].clone()]).is_empty());
     assert_eq!(
-        doc.try_signing()
+        doc.try_attested()
             .unwrap()
             .state
             .signatures
@@ -414,7 +414,7 @@ fn shared_frontier_signature_is_retained_until_every_branch_is_covered() {
     let k2 = k1.clone();
     let k3 = k1.clone();
     let mut branched =
-        Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
+        Automerge::from_config(crate::Config::default().attested(author(&k1)).unwrap())
             .with_actor(ActorId::from([1]))
             .unwrap();
     let a1 = append_at_level(&mut branched, None, 1, 0);
@@ -435,7 +435,7 @@ fn shared_frontier_signature_is_retained_until_every_branch_is_covered() {
 
     assert_eq!(
         branched
-            .try_signing()
+            .try_attested()
             .unwrap()
             .state
             .signatures
@@ -455,7 +455,7 @@ fn shared_frontier_signature_is_retained_until_every_branch_is_covered() {
     sign_doc(&mut branched, c2, &k3);
     assert_eq!(
         branched
-            .try_signing()
+            .try_attested()
             .unwrap()
             .state
             .signatures
@@ -512,7 +512,7 @@ fn bundle_fragments_withholds_malformed_descriptors_but_accepts_reordered_member
 }
 
 #[test]
-fn bundle_fragments_of_an_unsigned_document_emits_bare_content_chunks() {
+fn bundle_fragments_of_an_unattested_document_emits_bare_content_chunks() {
     let (mut doc, k, other, fragment) = fragment_with_two_members();
     sign_doc(&mut doc, fragment.head, &k);
     sign_doc(&mut doc, other, &k);

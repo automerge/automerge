@@ -14,7 +14,7 @@ fn author() -> Author<'static> {
 }
 
 #[test]
-fn defaults_are_unsigned_and_use_platform_encoding() {
+fn defaults_are_unattested_and_use_platform_encoding() {
     let mut doc = Automerge::from_config(Config::default());
     assert!(doc.get_author().is_none());
     assert_eq!(doc.text_encoding(), TextEncoding::platform_default());
@@ -29,7 +29,7 @@ fn defaults_are_unsigned_and_use_platform_encoding() {
 }
 
 #[test]
-fn unsigned_author_configuration_does_not_infer_signing_from_key_bytes() {
+fn unattested_author_configuration_does_not_infer_attestation_from_key_bytes() {
     for author in [None, Some(Author::from(vec![1, 2, 3])), Some(author())] {
         let mut doc = Automerge::from_config(
             Config::default()
@@ -47,9 +47,9 @@ fn unsigned_author_configuration_does_not_infer_signing_from_key_bytes() {
 }
 
 #[test]
-fn signing_configuration_validates_once_and_constructs_without_an_error_channel() {
+fn attested_configuration_validates_once_and_constructs_without_an_error_channel() {
     let author = author();
-    let config = Config::default().signing(author.clone()).unwrap();
+    let config = Config::default().attested(author.clone()).unwrap();
     let mut doc: Automerge = Automerge::from_config(config);
     assert_eq!(doc.get_author(), Some(&author));
     assert!(doc.signing_requests().unwrap().is_empty());
@@ -58,7 +58,7 @@ fn signing_configuration_validates_once_and_constructs_without_an_error_channel(
     let mut auto = AutoCommit::from_config(
         Config::default()
             .text_encoding(TextEncoding::Utf8CodeUnit)
-            .signing(author.clone())
+            .attested(author.clone())
             .unwrap(),
     );
     assert_eq!(auto.get_author(), Some(&author));
@@ -68,21 +68,21 @@ fn signing_configuration_validates_once_and_constructs_without_an_error_channel(
 }
 
 #[test]
-fn load_options_establish_signing_without_a_separate_mode_flag() {
+fn load_options_establish_attestation_without_a_separate_flag() {
     let local = author();
     let mut doc =
-        Automerge::load_with_options(&[], LoadOptions::default().signing(local.clone()).unwrap())
+        Automerge::load_with_options(&[], LoadOptions::default().attested(local.clone()).unwrap())
             .unwrap();
     assert_eq!(doc.get_author(), Some(&local));
     assert!(doc.signing_requests().unwrap().is_empty());
     assert!(LoadOptions::default()
-        .signing(Author::from(vec![1, 2, 3]))
+        .attested(Author::from(vec![1, 2, 3]))
         .is_err());
 
     let mut unsigned = Automerge::load_with_options(
         &[],
         LoadOptions::default()
-            .signing(local.clone())
+            .attested(local.clone())
             .unwrap()
             .author(local.clone()),
     )
@@ -93,7 +93,7 @@ fn load_options_establish_signing_without_a_separate_mode_flag() {
 
 #[test]
 #[allow(deprecated)]
-fn unsigned_load_migration_uses_the_configured_identity_before_creating_history() {
+fn unattested_load_migration_uses_the_configured_identity_before_creating_history() {
     let mut source = AutoCommit::new();
     source.put(ROOT, "legacy", "text").unwrap();
     let bytes = source.save();
@@ -127,7 +127,7 @@ fn unsigned_load_migration_uses_the_configured_identity_before_creating_history(
 #[test]
 fn author_builders_replace_configuration_intent() {
     let mut unsigned =
-        Automerge::from_config(Config::default().signing(author()).unwrap().author(None));
+        Automerge::from_config(Config::default().attested(author()).unwrap().author(None));
     assert!(unsigned.get_author().is_none());
     assert!(unsigned.signing_requests().is_err());
 
@@ -135,7 +135,7 @@ fn author_builders_replace_configuration_intent() {
     let mut signed = Automerge::from_config(
         Config::default()
             .author(Some(Author::from(vec![1])))
-            .signing(author.clone())
+            .attested(author.clone())
             .unwrap(),
     );
     assert_eq!(signed.get_author(), Some(&author));

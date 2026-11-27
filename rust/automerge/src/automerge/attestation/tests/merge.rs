@@ -1,6 +1,6 @@
 //! Signed merge: published source history only, through receiver admission.
 
-use crate::signature::error::SigningError;
+use crate::signature::error::AttestationError;
 use crate::storage::signatures::{HashEntries, SignaturesChunk};
 use crate::{AutoCommit, AutomergeError, LoadOptions, Signature, SigningRequest};
 
@@ -15,7 +15,7 @@ fn requests(doc: &mut Automerge) -> Vec<ChangeHash> {
 }
 
 fn verified_signature_count(doc: &mut Automerge) -> usize {
-    doc.try_signing()
+    doc.try_attested()
         .unwrap()
         .state
         .signatures
@@ -61,7 +61,7 @@ fn source_with_published_draft_and_pending(
     ]
     .concat();
     assert_eq!(source.load_incremental(&orphan).unwrap(), 0);
-    assert!(source.signing.has_pending_groups());
+    assert!(source.attestation.has_pending_groups());
 
     (source, a, b)
 }
@@ -74,11 +74,11 @@ fn empty_documents_of_different_modes_cannot_merge() {
 
     assert!(matches!(
         signed.merge(&mut unsigned),
-        Err(AutomergeError::Signing(SigningError::MergeModeMismatch))
+        Err(AutomergeError::Signing(AttestationError::MergeModeMismatch))
     ));
     assert!(matches!(
         unsigned.merge(&mut signed),
-        Err(AutomergeError::Signing(SigningError::MergeModeMismatch))
+        Err(AutomergeError::Signing(AttestationError::MergeModeMismatch))
     ));
 }
 
@@ -96,13 +96,13 @@ fn mode_mismatch_merge_leaves_both_documents_and_patch_logs_untouched() {
     let mut log = PatchLog::active();
     assert!(matches!(
         signed.merge_and_log_patches(&mut unsigned, &mut log),
-        Err(AutomergeError::Signing(SigningError::MergeModeMismatch))
+        Err(AutomergeError::Signing(AttestationError::MergeModeMismatch))
     ));
     assert!(signed.make_patches(&mut log).is_empty());
     let mut log = PatchLog::active();
     assert!(matches!(
         unsigned.merge_and_log_patches(&mut signed, &mut log),
-        Err(AutomergeError::Signing(SigningError::MergeModeMismatch))
+        Err(AutomergeError::Signing(AttestationError::MergeModeMismatch))
     ));
     assert!(unsigned.make_patches(&mut log).is_empty());
 
@@ -110,25 +110,25 @@ fn mode_mismatch_merge_leaves_both_documents_and_patch_logs_untouched() {
     assert_eq!(unsigned.get_heads(), [u]);
     assert!(is_published(&mut signed, &s));
     assert_eq!(drafts(&mut signed), [d]);
-    assert!(!signed.signing.has_pending_groups());
+    assert!(!signed.attestation.has_pending_groups());
 }
 
 #[test]
 fn autocommit_mode_mismatch_is_decided_before_either_transaction_closes() {
     let k = key(1);
     let mut auto_signed =
-        AutoCommit::from_config(crate::Config::default().signing(author(&k)).unwrap());
+        AutoCommit::from_config(crate::Config::default().attested(author(&k)).unwrap());
     auto_signed.put(ROOT, "x", 1).unwrap();
     let mut auto_unsigned = AutoCommit::new();
     auto_unsigned.put(ROOT, "y", 2).unwrap();
 
     assert!(matches!(
         auto_signed.merge(&mut auto_unsigned),
-        Err(AutomergeError::Signing(SigningError::MergeModeMismatch))
+        Err(AutomergeError::Signing(AttestationError::MergeModeMismatch))
     ));
     assert!(matches!(
         auto_unsigned.merge(&mut auto_signed),
-        Err(AutomergeError::Signing(SigningError::MergeModeMismatch))
+        Err(AutomergeError::Signing(AttestationError::MergeModeMismatch))
     ));
     // Pending edits are still open: nothing was committed by the rejection.
     assert_eq!(auto_signed.pending_ops(), 1);
@@ -182,8 +182,8 @@ fn merge_does_not_transfer_the_source_pending_group() {
 
     receiver.merge(&mut source).unwrap();
 
-    assert!(!receiver.signing.has_pending_groups());
-    assert!(source.signing.has_pending_groups());
+    assert!(!receiver.attestation.has_pending_groups());
+    assert!(source.attestation.has_pending_groups());
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn loading_the_sources_save_matches_what_a_merge_transfers() {
 
     let mut loaded = Automerge::load_with_options(
         &source.save(),
-        LoadOptions::new().signing(author(&rk)).unwrap(),
+        LoadOptions::new().attested(author(&rk)).unwrap(),
     )
     .unwrap();
 
@@ -251,7 +251,7 @@ fn proof_only_merge_publishes_a_shared_draft_without_new_hashes() {
 fn full_canonical_group_with_receiver_known_members_applies_and_patches_once() {
     let k = key(1);
     let rk = key(2);
-    let mut source = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap());
+    let mut source = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap());
     let (a, b, c) = container_shape(&mut source);
     sign_doc(&mut source, a, &k);
 
@@ -300,7 +300,7 @@ fn full_canonical_group_with_receiver_known_members_applies_and_patches_once() {
     // from either the source or the merged receiver.
     for peer_source in [&mut source, &mut receiver] {
         let mut empty =
-            Automerge::from_config(crate::Config::default().signing(author(&key(3))).unwrap());
+            Automerge::from_config(crate::Config::default().attested(author(&key(3))).unwrap());
         empty.merge(peer_source).unwrap();
         for hash in [a, b, c] {
             assert!(is_published(&mut empty, &hash));
@@ -310,7 +310,7 @@ fn full_canonical_group_with_receiver_known_members_applies_and_patches_once() {
 }
 
 #[test]
-fn unsigned_merge_is_unchanged() {
+fn unattested_merge_is_unchanged() {
     let mut a = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     let mut b = Automerge::new().with_actor(ActorId::from([2])).unwrap();
     let ha = append_at_level(&mut a, None, 1, 0);
@@ -322,5 +322,5 @@ fn unsigned_merge_is_unchanged() {
     assert!(!a.make_patches(&mut log).is_empty());
     assert_eq!(a.merge(&mut b).unwrap(), expected);
     assert_eq!(b.merge(&mut a).unwrap(), expected);
-    assert!(!a.signing.is_required());
+    assert!(!a.attestation.is_attested());
 }

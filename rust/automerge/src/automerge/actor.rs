@@ -10,7 +10,7 @@ use crate::change_graph::ChangeGraph;
 use crate::op_set2::OpSet;
 use crate::ActorId;
 
-use super::signing::SigningState;
+use super::attestation::AttestationState;
 use super::visibility::FrontierVisibility;
 use super::Actor;
 
@@ -24,7 +24,7 @@ pub(super) struct ActorMaintenance<'a> {
     local_actor: &'a mut Actor,
     authors: &'a mut Authors,
     visibility: &'a mut FrontierVisibility,
-    signing: &'a mut SigningState,
+    attestation: &'a mut AttestationState,
 }
 
 impl<'a> ActorMaintenance<'a> {
@@ -35,7 +35,7 @@ impl<'a> ActorMaintenance<'a> {
         local_actor: &'a mut Actor,
         authors: &'a mut Authors,
         visibility: &'a mut FrontierVisibility,
-        signing: &'a mut SigningState,
+        attestation: &'a mut AttestationState,
     ) -> Self {
         Self {
             ops,
@@ -43,7 +43,7 @@ impl<'a> ActorMaintenance<'a> {
             local_actor,
             authors,
             visibility,
-            signing,
+            attestation,
         }
     }
 
@@ -56,7 +56,7 @@ impl<'a> ActorMaintenance<'a> {
                 self.local_actor.shift(&shift);
                 self.authors.insert_actor(&shift);
                 self.visibility.insert_actor(&shift);
-                self.signing.insert_actor(&shift);
+                self.attestation.insert_actor(&shift);
                 shift.index()
             }
         }
@@ -69,7 +69,7 @@ impl<'a> ActorMaintenance<'a> {
         self.graph.remove_actor(&removal);
         self.authors.remove_actor(&removal);
         self.visibility.remove_actor(&removal);
-        self.signing.remove_actor(&removal);
+        self.attestation.remove_actor(&removal);
     }
 
     /// Find all unused actors, according to the change graph, and remove them

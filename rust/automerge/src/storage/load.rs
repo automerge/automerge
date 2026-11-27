@@ -53,7 +53,7 @@ pub enum Error {
     OrphanSignatures,
     #[error("a change, bundle, or document must only have one attached signatures chunk")]
     DuplicateSignatures,
-    #[error("attached signatures require loading in signing mode")]
+    #[error("attached signatures require loading as an attested document")]
     SignedContent,
 }
 
@@ -74,7 +74,7 @@ pub(crate) enum LoadedChanges<'a> {
 
 /// Content of a decoded chunk group prior to authentication or staging.
 ///
-/// A snapshot keeps its storage representation so that required-mode loading
+/// A snapshot keeps its storage representation so that attested loading
 /// can reconstruct and validate its history before adopting it.
 #[derive(Clone, Debug)]
 pub(crate) enum LoadedGroupBody {
@@ -88,7 +88,7 @@ pub(crate) enum LoadedGroupBody {
 /// Convert a [`Change`] into an unsigned group, or parse one encoded group with
 /// [`TryFrom<&[u8]>`] or [`TryFrom<Vec<u8>>`]. Use [`crate::Automerge::apply_changes`]
 /// to apply groups without decoding them again. Parsing checks framing and
-/// checksums; cryptographic proofs are checked when applying in signing mode.
+/// checksums; cryptographic proofs are checked when applying to an attested document.
 #[derive(Clone, Debug)]
 pub struct LoadedGroup {
     pub(crate) body: LoadedGroupBody,
@@ -219,7 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn unsigned_load_rejects_a_signed_snapshot_instead_of_discarding_its_proof() {
+    fn unattested_load_rejects_a_signed_snapshot_instead_of_discarding_its_proof() {
         let mut doc = Automerge::new().with_actor(ActorId::from(vec![1])).unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "snapshot", 1).unwrap();
@@ -264,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn signed_bundle_and_compressed_change_are_decoded_as_groups_but_not_loaded_unsigned() {
+    fn signed_bundle_and_compressed_change_are_decoded_as_groups_but_not_loaded_unattested() {
         let first = change(1);
         let second = change(2);
         let mut doc = Automerge::new();
@@ -391,7 +391,7 @@ mod tests {
     /// Unsigned `apply_changes` never strips an attached proof, whatever the
     /// input form, and converts the whole batch before applying anything.
     #[test]
-    fn unsigned_apply_rejects_decoded_groups_carrying_signatures() {
+    fn unattested_apply_rejects_decoded_groups_carrying_signatures() {
         let plain = change(1);
         let signed = change(2);
         let bytes = [
@@ -451,7 +451,7 @@ mod tests {
         );
 
         // A signed snapshot with an invalid tail is rejected under both
-        // policies by the unsigned loader: the proof is not stripped.
+        // policies by the unattested loader: the proof is not stripped.
         let mut signed = doc.save();
         signed.extend(framed(ChunkType::Signatures, &[0]));
         signed.extend_from_slice(&[1, 2, 3, 4]);
@@ -587,7 +587,7 @@ mod tests {
     }
 
     #[test]
-    fn trailing_signatures_after_change_are_rejected_by_unsigned_initial_load() {
+    fn trailing_signatures_after_change_are_rejected_by_an_unattested_initial_load() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         tx.put(ROOT, "a", 1).unwrap();

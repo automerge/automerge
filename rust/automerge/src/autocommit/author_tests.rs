@@ -2,7 +2,7 @@
 
 use ed25519_dalek::SigningKey;
 
-use crate::signature::error::SigningError;
+use crate::signature::error::AttestationError;
 use crate::signature::{ed25519, signing_message};
 use crate::transaction::Transactable;
 use crate::{Author, AutomergeError, ChangeHash, ReadDoc, ROOT};
@@ -37,7 +37,8 @@ fn rejected_author_fork_does_not_close_an_open_transaction() {
         Some(Author::from(weak)),
         Some(author(8)),
     ] {
-        let mut doc = AutoCommit::from_config(crate::Config::default().signing(author(7)).unwrap());
+        let mut doc =
+            AutoCommit::from_config(crate::Config::default().attested(author(7)).unwrap());
         doc.put(ROOT, "pending", 1).unwrap();
         assert!(doc.transaction.is_some());
         assert!(doc.doc.get_heads().is_empty());
@@ -46,7 +47,7 @@ fn rejected_author_fork_does_not_close_an_open_transaction() {
         match proposed {
             Some(candidate) if candidate == author(8) => assert!(matches!(
                 error,
-                AutomergeError::Signing(SigningError::UnpublishedLocalChanges)
+                AutomergeError::Signing(AttestationError::UnpublishedLocalChanges)
             )),
             _ => assert!(matches!(error, AutomergeError::SigningAuthor(_))),
         }
@@ -59,7 +60,7 @@ fn rejected_author_fork_does_not_close_an_open_transaction() {
 
 #[test]
 fn rolled_back_transaction_permits_a_different_author_fork_of_published_work() {
-    let mut doc = AutoCommit::from_config(crate::Config::default().signing(author(7)).unwrap());
+    let mut doc = AutoCommit::from_config(crate::Config::default().attested(author(7)).unwrap());
     doc.put(ROOT, "x", 1).unwrap();
     let hash = doc.commit().unwrap();
     doc.insert_signatures([(hash, signature(7, &hash))]);
@@ -77,7 +78,7 @@ fn rolled_back_transaction_permits_a_different_author_fork_of_published_work() {
 
 #[test]
 fn same_author_fork_commits_pending_work_and_rotates_only_the_fork_actor() {
-    let mut doc = AutoCommit::from_config(crate::Config::default().signing(author(7)).unwrap());
+    let mut doc = AutoCommit::from_config(crate::Config::default().attested(author(7)).unwrap());
     doc.put(ROOT, "pending", 1).unwrap();
     let actor = doc.doc.get_actor().clone();
     let mut fork = doc.fork_with_author(Some(author(7))).unwrap();
@@ -96,7 +97,7 @@ fn same_author_fork_commits_pending_work_and_rotates_only_the_fork_actor() {
 }
 
 #[test]
-fn unsigned_constructors_and_forks_remain_permissive() {
+fn unattested_constructors_and_forks_remain_permissive() {
     let arbitrary = Author::from(vec![1, 2, 3]);
     let mut doc = AutoCommit::from_config(crate::Config::default().author(Some(arbitrary.clone())));
     doc.put(ROOT, "pending", 1).unwrap();

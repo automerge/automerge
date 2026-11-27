@@ -1,5 +1,5 @@
 use crate::author::Author;
-use crate::signature::error::SigningError;
+use crate::signature::error::AttestationError;
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
@@ -10,21 +10,22 @@ use thiserror::Error;
 #[error("patch logs cannot be shared between documents; this probably means a PatchLog created for one document was reused with another")]
 pub struct PatchLogMismatch;
 
-/// A signing-mode current author is absent or cannot supply a usable Ed25519 key.
+/// An attested document's current author is absent or cannot supply a usable
+/// Ed25519 key.
 ///
-/// Returned by signing-mode construction, loading and [`Automerge::fork_with_author`].
+/// Returned by attested construction, loading and [`Automerge::fork_with_author`].
 /// Rejection leaves the source document unchanged. No signing key is required.
 ///
 /// [`Automerge::fork_with_author`]: crate::Automerge::fork_with_author
 #[derive(Error, Debug)]
 #[error("{0}")]
-pub struct SigningAuthorError(#[source] pub(crate) SigningAuthorErrorInner);
+pub struct AttestationAuthorError(#[source] pub(crate) AttestationAuthorErrorInner);
 
 #[derive(Error, Debug)]
-pub(crate) enum SigningAuthorErrorInner {
-    #[error("signing mode needs an author")]
+pub(crate) enum AttestationAuthorErrorInner {
+    #[error("an attested document needs an author")]
     MissingAuthor,
-    #[error("signing author is unusable: {0}")]
+    #[error("attested author is unusable: {0}")]
     InvalidKey(#[source] crate::signature::ed25519::error::VerifyingAuthor),
 }
 
@@ -96,13 +97,13 @@ pub enum AutomergeError {
     #[error(transparent)]
     PatchLogMismatch(#[from] PatchLogMismatch),
     #[error(transparent)]
-    SigningAuthor(#[from] SigningAuthorError),
+    SigningAuthor(#[from] AttestationAuthorError),
     #[error("{0}")]
     EncodingError(String),
     #[error("failed to unbundle: {0}")]
     Unbundle(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error(transparent)]
-    Signing(#[from] SigningError),
+    Signing(#[from] AttestationError),
 }
 
 impl From<std::convert::Infallible> for AutomergeError {

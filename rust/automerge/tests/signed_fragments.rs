@@ -1,6 +1,6 @@
-//! Public API integration tests for required-mode fragment signing and admission.
+//! Public API integration tests for attested fragment signing and admission.
 
-use automerge::signature::error::SigningError;
+use automerge::signature::error::AttestationError;
 use automerge::signature::error::SigningMessage;
 use automerge::signature::{ed25519, parse_signing_message, signing_message, Insert};
 use automerge::transaction::{CommitOptions, Transactable};
@@ -22,8 +22,8 @@ fn receiver_author() -> Author<'static> {
     key_and_author(200).1
 }
 
-fn signing_load() -> LoadOptions<'static> {
-    LoadOptions::new().signing(receiver_author()).unwrap()
+fn attested_load() -> LoadOptions<'static> {
+    LoadOptions::new().attested(receiver_author()).unwrap()
 }
 
 fn sign(key: &SigningKey, hash: &ChangeHash) -> ed25519::Signature {
@@ -58,8 +58,8 @@ fn requested(doc: &mut AutoCommit) -> Vec<ChangeHash> {
         .collect()
 }
 
-/// Whether `hash` is *published*: a required-mode save is the published
-/// projection, so the change is published iff a fresh required-mode load of
+/// Whether `hash` is *published*: an attested save is the published
+/// projection, so the change is published iff a fresh attested load of
 /// the saved bytes contains it. Interior members of a published cover count
 /// even when they no longer export on their own.
 fn is_published<D: Batch>(doc: &mut D, hash: &ChangeHash) -> bool {
@@ -69,8 +69,8 @@ fn is_published<D: Batch>(doc: &mut D, hash: &ChangeHash) -> bool {
 /// The published projection of `doc`, reloaded once from its saved bytes.
 /// Use for bulk checks instead of calling [`is_published`] per hash.
 fn loaded_publication<D: Batch>(doc: &mut D) -> Automerge {
-    Automerge::load_with_options(&doc.saved(), signing_load())
-        .expect("a required-mode save reloads in required mode")
+    Automerge::load_with_options(&doc.saved(), attested_load())
+        .expect("an attested save reloads in an attested document")
 }
 
 /// Whether `hash` is *exportable*: its canonical fragment currently bundles
@@ -118,7 +118,7 @@ impl Batch for AutoCommit {
 #[test]
 fn automerge_withholds_fragments_until_the_commit_is_signed() {
     let (key, author) = key_and_author(11);
-    let mut doc = Automerge::from_config(automerge::Config::default().signing(author).unwrap())
+    let mut doc = Automerge::from_config(automerge::Config::default().attested(author).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let mut tx = doc.transaction();
@@ -141,7 +141,7 @@ fn automerge_withholds_fragments_until_the_commit_is_signed() {
 #[test]
 fn autocommit_withholds_fragments_until_the_commit_is_signed() {
     let (key, author) = key_and_author(11);
-    let mut doc = AutoCommit::from_config(automerge::Config::default().signing(author).unwrap())
+    let mut doc = AutoCommit::from_config(automerge::Config::default().attested(author).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     doc.put(ROOT, "title", "fragments").unwrap();
@@ -163,7 +163,7 @@ fn autocommit_withholds_fragments_until_the_commit_is_signed() {
 /// Alice's single published commit, as exported fragment bytes.
 fn published_wire() -> (SigningKey, ChangeHash, Vec<u8>) {
     let (key, author) = key_and_author(11);
-    let mut alice = AutoCommit::from_config(automerge::Config::default().signing(author).unwrap())
+    let mut alice = AutoCommit::from_config(automerge::Config::default().attested(author).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     alice.put(ROOT, "title", "fragments").unwrap();
@@ -174,12 +174,12 @@ fn published_wire() -> (SigningKey, ChangeHash, Vec<u8>) {
 }
 
 #[test]
-fn signed_fragments_load_into_another_signing_document() {
+fn signed_fragments_load_into_another_attested_document() {
     let (_alice_key, a1, wire) = published_wire();
     let (_bob_key, bob_author) = key_and_author(22);
 
     let mut bob =
-        AutoCommit::load_with_options(&wire, LoadOptions::new().signing(bob_author).unwrap())
+        AutoCommit::load_with_options(&wire, LoadOptions::new().attested(bob_author).unwrap())
             .unwrap();
     assert!(is_published(&mut bob, &a1));
     assert_eq!(
@@ -196,7 +196,7 @@ fn a_receiver_signs_its_reply_back_into_the_original_author() {
     let (bob_key, bob_author) = key_and_author(22);
 
     let mut bob =
-        AutoCommit::load_with_options(&wire, LoadOptions::new().signing(bob_author).unwrap())
+        AutoCommit::load_with_options(&wire, LoadOptions::new().attested(bob_author).unwrap())
             .unwrap();
     bob.set_actor(ActorId::from([2])).unwrap();
     bob.put(ROOT, "count", 2_i64).unwrap();
@@ -206,7 +206,7 @@ fn a_receiver_signs_its_reply_back_into_the_original_author() {
 
     // Alice, rebuilt from her own published history, admits Bob's reply.
     let mut alice =
-        AutoCommit::load_with_options(&wire, LoadOptions::new().signing(alice_author).unwrap())
+        AutoCommit::load_with_options(&wire, LoadOptions::new().attested(alice_author).unwrap())
             .unwrap();
     assert!(is_published(&mut alice, &a1));
     alice.load_incremental(&full_wire).unwrap();
@@ -219,13 +219,13 @@ fn a_receiver_signs_its_reply_back_into_the_original_author() {
 }
 
 #[test]
-fn unsigned_documents_have_no_signing_surface() {
+fn unattested_documents_have_no_attestation_surface() {
     let (key, _author) = key_and_author(11);
     let hash = ChangeHash([3; 32]);
     let mut unsigned = Automerge::new();
     assert!(matches!(
         unsigned.signing_requests().unwrap_err(),
-        automerge::signing::error::SigningMode::Required
+        automerge::attestation::error::NotAttested
     ));
     assert!(matches!(
         unsigned.insert_signatures([(hash, sign(&key, &hash))]),
@@ -234,9 +234,9 @@ fn unsigned_documents_have_no_signing_surface() {
 }
 
 #[test]
-fn required_mode_load_rejects_a_bare_snapshot_of_signed_history() {
+fn attested_load_rejects_a_bare_snapshot_of_signed_history() {
     let (key, author) = key_and_author(33);
-    let mut source = Automerge::from_config(automerge::Config::default().signing(author).unwrap())
+    let mut source = Automerge::from_config(automerge::Config::default().attested(author).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let mut tx = source.transaction();
@@ -244,10 +244,11 @@ fn required_mode_load_rejects_a_bare_snapshot_of_signed_history() {
     let hash = tx.commit().0.unwrap();
     insert_one(&mut source, hash, sign(&key, &hash)).unwrap();
 
-    // A required-mode save is a signed snapshot that reloads in required mode;
+    // An attested save is a signed snapshot that reloads in an attested document;
     // a bare snapshot of the same history is rejected without silent adoption.
     let signed_snapshot = source.save();
-    let mut from_snapshot = Automerge::load_with_options(&signed_snapshot, signing_load()).unwrap();
+    let mut from_snapshot =
+        Automerge::load_with_options(&signed_snapshot, attested_load()).unwrap();
     assert_eq!(from_snapshot.get_heads(), vec![hash]);
     assert!(is_published(&mut from_snapshot, &hash));
     assert!(Automerge::load(&signed_snapshot).is_err());
@@ -258,9 +259,9 @@ fn required_mode_load_rejects_a_bare_snapshot_of_signed_history() {
         .unwrap();
     let bare_snapshot = unsigned_copy.save();
     assert!(matches!(
-        Automerge::load_with_options(&bare_snapshot, signing_load()),
+        Automerge::load_with_options(&bare_snapshot, attested_load()),
         Err(AutomergeError::Signing(
-            SigningError::UnauthenticatedChanges
+            AttestationError::UnauthenticatedChanges
         ))
     ));
 }
@@ -268,7 +269,7 @@ fn required_mode_load_rejects_a_bare_snapshot_of_signed_history() {
 #[test]
 fn signing_every_required_hash_publishes_the_whole_local_history() {
     let (key, author) = key_and_author(44);
-    let mut doc = AutoCommit::from_config(automerge::Config::default().signing(author).unwrap())
+    let mut doc = AutoCommit::from_config(automerge::Config::default().attested(author).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let mut all_hashes = Vec::new();
@@ -333,7 +334,7 @@ fn receiver_with_a_draft() -> (SigningKey, Author<'static>, AutoCommit, ChangeHa
     let (bob_key, bob_author) = key_and_author(55);
     let mut bob = AutoCommit::load_with_options(
         &wire,
-        LoadOptions::new().signing(bob_author.clone()).unwrap(),
+        LoadOptions::new().attested(bob_author.clone()).unwrap(),
     )
     .unwrap();
     assert!(requested(&mut bob).is_empty());
@@ -360,12 +361,12 @@ fn an_unpublished_draft_blocks_changing_or_removing_the_fixed_author() {
     let (_, alice_author) = key_and_author(11);
 
     // The author is fixed per instance: while Bob's draft is unpublished no
-    // other author may take over this history, and a signing document always
+    // other author may take over this history, and an attested document always
     // needs a current author.
     assert!(matches!(
         bob.fork_with_author(Some(alice_author)),
         Err(AutomergeError::Signing(
-            SigningError::UnpublishedLocalChanges
+            AttestationError::UnpublishedLocalChanges
         ))
     ));
     assert!(matches!(
@@ -379,7 +380,7 @@ fn an_unpublished_draft_blocks_changing_or_removing_the_fixed_author() {
 #[test]
 fn signed_change_behind_unpublished_dependency_is_exportable_but_not_published() {
     let (key, author) = key_and_author(66);
-    let mut doc = AutoCommit::from_config(automerge::Config::default().signing(author).unwrap())
+    let mut doc = AutoCommit::from_config(automerge::Config::default().attested(author).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     doc.put(ROOT, "a", 1_i64).unwrap();
@@ -408,7 +409,7 @@ fn signed_change_behind_unpublished_dependency_is_exportable_but_not_published()
 /// 1..) plus one loose level-0 commit on top (index 0..=0).
 fn published_cover_and_loose_commit() -> (AutoCommit, ChangeHash) {
     let (key, author) = key_and_author(77);
-    let mut doc = AutoCommit::from_config(automerge::Config::default().signing(author).unwrap())
+    let mut doc = AutoCommit::from_config(automerge::Config::default().attested(author).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let mut step = 0_i64;
@@ -531,7 +532,7 @@ fn fragment_parse_with_signatures_rejects_bad_framing_and_boundary() {
 }
 
 #[test]
-fn already_parsed_groups_apply_into_a_signing_document_with_their_proofs() {
+fn already_parsed_groups_apply_into_a_attested_document_with_their_proofs() {
     let (mut doc, loose_hash) = published_cover_and_loose_commit();
     let loose_meta = doc.fragments(0..=0).pop().unwrap();
     let signed_commit = doc.bundle_fragments([loose_meta]).pop().unwrap();
@@ -544,7 +545,7 @@ fn already_parsed_groups_apply_into_a_signing_document_with_their_proofs() {
     // without re-parsing raw bytes.
     let mut target = AutoCommit::from_config(
         automerge::Config::default()
-            .signing(receiver_author())
+            .attested(receiver_author())
             .unwrap(),
     );
     target
@@ -564,7 +565,7 @@ fn publication_failed_when_local_publication_enables_two_equivocating_groups() {
     let (key, author) = key_and_author(88);
     let mut source = AutoCommit::from_config(
         automerge::Config::default()
-            .signing(author.clone())
+            .attested(author.clone())
             .unwrap(),
     )
     .with_actor(ActorId::from([1]))

@@ -304,7 +304,7 @@ pub trait ReadDoc {
     /// Get a change by its hash.
     ///
     /// An inspector over applied history (drafts included in required
-    /// signing mode); the returned change carries no proof and is not
+    /// attestation); the returned change carries no proof and is not
     /// authenticated transport.
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<Change>;
 

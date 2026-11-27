@@ -1,4 +1,4 @@
-//! Signing handle, signature insertion, and automatic local publication tests.
+//! Attested handle, signature insertion, and automatic local publication tests.
 
 use ed25519_dalek::{Signer, SigningKey};
 
@@ -59,12 +59,12 @@ pub(super) fn requested_hashes(doc: &mut Automerge) -> Vec<ChangeHash> {
 
 /// Whether `doc` has locally published `hash`.
 pub(super) fn is_published(doc: &mut Automerge, hash: &ChangeHash) -> bool {
-    doc.try_signing().unwrap().is_published(hash)
+    doc.try_attested().unwrap().is_published(hash)
 }
 
 /// The unpublished local drafts `doc` is tracking, in commit order.
 pub(super) fn drafts(doc: &mut Automerge) -> Vec<ChangeHash> {
-    doc.try_signing()
+    doc.try_attested()
         .unwrap()
         .state
         .local_drafts
@@ -72,16 +72,16 @@ pub(super) fn drafts(doc: &mut Automerge) -> Vec<ChangeHash> {
         .collect()
 }
 
-/// A required-mode document authored by `key` with deterministic `actor`.
+/// An attested document authored by `key` with deterministic `actor`.
 pub(super) fn signing_doc(key: &SigningKey, actor: u8) -> Automerge {
-    Automerge::from_config(crate::Config::default().signing(author(key)).unwrap())
+    Automerge::from_config(crate::Config::default().attested(author(key)).unwrap())
         .with_actor(ActorId::from([actor]))
         .unwrap()
 }
 
 /// How many Ed25519 signatures `doc` retains for `hash`.
 pub(super) fn signature_count(doc: &mut Automerge, hash: &ChangeHash) -> usize {
-    doc.try_signing()
+    doc.try_attested()
         .unwrap()
         .state
         .signatures
@@ -163,9 +163,9 @@ pub(super) fn append_at_level(
     panic!("fixture level search exhausted for level {level}");
 }
 
-/// A required-mode document authored by `key`, plus its first level-0 change.
+/// An attested document authored by `key`, plus its first level-0 change.
 fn signed_by(key: &SigningKey) -> (Automerge, ChangeHash) {
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(key)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(key)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let first = append_at_level(&mut doc, None, 1, 0);
@@ -173,16 +173,13 @@ fn signed_by(key: &SigningKey) -> (Automerge, ChangeHash) {
 }
 
 #[test]
-fn unsigned_document_rejects_try_signing_without_converting_mode() {
+fn unattested_document_rejects_try_attested_without_converting() {
     let mut doc = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     let mut tx = doc.transaction();
     tx.put(ROOT, "value", 1).unwrap();
     tx.commit();
     let heads = doc.get_heads();
-    assert!(matches!(
-        doc.try_signing(),
-        Err(error::SigningMode::Required)
-    ));
+    assert!(matches!(doc.try_attested(), Err(error::NotAttested)));
     assert_eq!(doc.get_heads(), heads);
 }
 
@@ -260,9 +257,10 @@ fn pending_group_from_bob(
 fn signature_for_a_pending_incoming_change_is_unknown_change() {
     let alice = key(7);
     let bob = key(8);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&alice)).unwrap())
-        .with_actor(ActorId::from([1]))
-        .unwrap();
+    let mut doc =
+        Automerge::from_config(crate::Config::default().attested(author(&alice)).unwrap())
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     let a1 = append_at_level(&mut doc, None, 1, 0);
     let (b1, _) = pending_group_from_bob(&mut doc, a1, &bob);
 
@@ -276,17 +274,18 @@ fn signature_for_a_pending_incoming_change_is_unknown_change() {
 fn publishing_the_dependency_admits_the_pending_group_under_its_recorded_author() {
     let alice = key(7);
     let bob = key(8);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&alice)).unwrap())
-        .with_actor(ActorId::from([1]))
-        .unwrap();
+    let mut doc =
+        Automerge::from_config(crate::Config::default().attested(author(&alice)).unwrap())
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     let a1 = append_at_level(&mut doc, None, 1, 0);
     let (b1, b1_bytes) = pending_group_from_bob(&mut doc, a1, &bob);
 
     // Publish `a1`, then retry delivery (batch retry is introduced later).
     sign_doc(&mut doc, a1, &alice);
     doc.load_incremental(&b1_bytes).unwrap();
-    assert!(doc.try_signing().unwrap().is_published(&a1));
-    assert!(doc.try_signing().unwrap().is_published(&b1));
+    assert!(doc.try_attested().unwrap().is_published(&a1));
+    assert!(doc.try_attested().unwrap().is_published(&b1));
     assert_eq!(
         doc.get_author_for_actor(&ActorId::from([2])),
         Some(author(&bob))
@@ -302,7 +301,7 @@ fn publishing_the_dependency_admits_the_pending_group_under_its_recorded_author(
 #[allow(deprecated)]
 fn publication_survives_actor_shift_and_rolled_back_transaction() {
     let k = key(7);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([2]))
         .unwrap();
     let first = append_at_level(&mut doc, None, 1, 0);
@@ -338,7 +337,7 @@ fn clone_copies_publication_and_later_signatures_do_not_leak_between_copies() {
 #[test]
 fn publication_waits_for_the_gap_in_a_partially_signed_chain() {
     let k1 = key(1);
-    let mut chain = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
+    let mut chain = Automerge::from_config(crate::Config::default().attested(author(&k1)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let c0 = append_at_level(&mut chain, None, 1, 0);
@@ -362,7 +361,7 @@ fn local_fallback_is_published_while_its_container_waits_on_an_unpublished_bound
     let k1 = key(1);
 
     // `c` contains {a, c} but depends on boundary `b` from another actor.
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k1)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -388,7 +387,7 @@ fn local_fallback_is_published_while_its_container_waits_on_an_unpublished_bound
     assert!(is_published(&mut doc, &b));
     assert!(is_published(&mut doc, &c));
     assert_eq!(
-        doc.try_signing()
+        doc.try_attested()
             .unwrap()
             .state
             .signatures
@@ -399,7 +398,7 @@ fn local_fallback_is_published_while_its_container_waits_on_an_unpublished_bound
 }
 
 #[test]
-fn required_signatures_omits_an_injected_non_local_change_with_the_local_author() {
+fn signing_requests_omit_an_injected_non_local_change_with_the_local_author() {
     let k1 = key(1);
     let alice = author(&k1);
 
@@ -415,7 +414,7 @@ fn required_signatures_omits_an_injected_non_local_change_with_the_local_author(
     // Even if an unverified non-local change bearing `alice`'s author somehow
     // entered `ChangeGraph` directly via `History::update`, it was not locally
     // authored in `doc` and must never be returned by `required_signatures`.
-    let mut doc = Automerge::from_config(crate::Config::default().signing(alice).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(alice).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     doc.put_actor(ActorId::from([9]));
@@ -425,7 +424,7 @@ fn required_signatures_omits_an_injected_non_local_change_with_the_local_author(
         &mut doc.authors,
         &doc.ops.actors,
         &doc.visibility,
-        &mut doc.signing,
+        &mut doc.attestation,
     )
     .update(&remote_change);
 
@@ -434,9 +433,9 @@ fn required_signatures_omits_an_injected_non_local_change_with_the_local_author(
 }
 
 #[test]
-fn required_signatures_tracks_a_local_commit_until_it_is_signed() {
+fn signing_requests_track_a_local_commit_until_it_is_signed() {
     let k1 = key(1);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k1)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
 
@@ -459,7 +458,7 @@ fn a_local_commit_depending_on_injected_history_is_requested_but_never_publishes
     tx.put(ROOT, "sneaky", "forged").unwrap();
     let remote_hash = tx.commit().0.unwrap();
     let remote_change = remote.get_change_by_hash(&remote_hash).unwrap();
-    let mut doc = Automerge::from_config(crate::Config::default().signing(alice).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(alice).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     doc.put_actor(ActorId::from([9]));
@@ -469,7 +468,7 @@ fn a_local_commit_depending_on_injected_history_is_requested_but_never_publishes
         &mut doc.authors,
         &doc.ops.actors,
         &doc.visibility,
-        &mut doc.signing,
+        &mut doc.attestation,
     )
     .update(&remote_change);
 
@@ -493,22 +492,22 @@ fn a_local_commit_depending_on_injected_history_is_requested_but_never_publishes
 }
 
 #[test]
-fn with_signing_skips_the_callback_on_an_unsigned_document() {
+fn with_attestation_skips_the_callback_on_an_unattested_document() {
     let mut unsigned = Automerge::new();
-    assert!(!unsigned.with_signing::<bool>(|_| panic!("unsigned callback")));
+    assert!(!unsigned.with_attestation::<bool>(|_| panic!("unsigned callback")));
     assert!(matches!(
-        unsigned.try_with_signing::<()>(|_| panic!("unsigned callback")),
-        Err(error::SigningMode::Required)
+        unsigned.try_with_attestation::<()>(|_| panic!("unsigned callback")),
+        Err(error::NotAttested)
     ));
 }
 
 #[test]
-fn with_signing_runs_the_callback_with_required_access() {
+fn with_attestation_runs_the_callback_with_attested_access() {
     let mut doc =
-        Automerge::from_config(crate::Config::default().signing(author(&key(7))).unwrap());
+        Automerge::from_config(crate::Config::default().attested(author(&key(7))).unwrap());
     let hash = append_at_level(&mut doc, None, 1, 0);
     let value = doc
-        .try_with_signing(|signing| {
+        .try_with_attestation(|signing| {
             assert!(!signing.is_published(&hash));
             signing
                 .signing_requests()
@@ -517,16 +516,16 @@ fn with_signing_runs_the_callback_with_required_access() {
         })
         .unwrap();
     assert!(value);
-    assert_eq!(doc.with_signing(|_| 7usize), 7);
+    assert_eq!(doc.with_attestation(|_| 7usize), 7);
 }
 
 #[test]
-fn with_required_skips_the_closure_on_unsigned() {
+fn when_attested_skips_the_closure_on_an_unattested_document() {
     use std::cell::Cell;
     let unsigned = Automerge::new();
     let calls = Cell::new(0);
     assert_eq!(
-        unsigned.signing.with_required(|| {
+        unsigned.attestation.when_attested(|| {
             calls.set(calls.get() + 1);
             Err::<(), &str>("never evaluated")
         }),
@@ -536,13 +535,13 @@ fn with_required_skips_the_closure_on_unsigned() {
 }
 
 #[test]
-fn with_required_propagates_ok_and_err_from_the_closure() {
+fn when_attested_propagates_ok_and_err_from_the_closure() {
     use std::cell::Cell;
     let required =
-        Automerge::from_config(crate::Config::default().signing(author(&key(7))).unwrap());
+        Automerge::from_config(crate::Config::default().attested(author(&key(7))).unwrap());
     let calls = Cell::new(0);
     assert_eq!(
-        required.signing.with_required(|| {
+        required.attestation.when_attested(|| {
             calls.set(calls.get() + 1);
             Ok::<(), &str>(())
         }),
@@ -550,7 +549,7 @@ fn with_required_propagates_ok_and_err_from_the_closure() {
     );
     assert_eq!(calls.get(), 1);
     assert_eq!(
-        required.signing.with_required(|| {
+        required.attestation.when_attested(|| {
             calls.set(calls.get() + 1);
             Err::<(), &str>("rejected")
         }),

@@ -1,7 +1,7 @@
-//! Alternate native entry points cannot bypass required-mode admission, and
+//! Alternate native entry points cannot bypass attested admission, and
 //! unsigned entry points never swallow signed content.
 
-use crate::signature::error::SigningError;
+use crate::signature::error::AttestationError;
 use crate::storage::signatures::{HashEntries, SignaturesChunk};
 use crate::{AutoCommit, AutomergeError, LoadOptions, LoadedGroup, Signature};
 
@@ -28,7 +28,7 @@ fn fixture() -> (
     LoadedGroup,
 ) {
     let k = key(1);
-    let mut source = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut source = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut source, None, 1, 0);
@@ -41,15 +41,15 @@ fn fixture() -> (
 }
 
 fn receiver() -> Automerge {
-    Automerge::from_config(crate::Config::default().signing(author(&key(2))).unwrap())
+    Automerge::from_config(crate::Config::default().attested(author(&key(2))).unwrap())
 }
 
 #[test]
-fn apply_changes_rejects_unproved_content_in_required_mode() {
+fn apply_changes_rejects_unproved_content_in_an_attested_document() {
     let (_a, raw, _signed, _parsed, _group) = fixture();
     let mut required = receiver();
     let mut auto_required =
-        AutoCommit::from_config(crate::Config::default().signing(author(&key(2))).unwrap());
+        AutoCommit::from_config(crate::Config::default().attested(author(&key(2))).unwrap());
     let bare_group = LoadedGroup::from(raw.clone());
     for result in [
         required.apply_changes([raw.clone()]),
@@ -62,7 +62,7 @@ fn apply_changes_rejects_unproved_content_in_required_mode() {
         assert!(matches!(
             result,
             Err(AutomergeError::Signing(
-                SigningError::UnauthenticatedChanges
+                AttestationError::UnauthenticatedChanges
             ))
         ));
     }
@@ -81,12 +81,12 @@ fn apply_changes_admits_proved_content_in_every_input_form() {
     by_group.apply_changes_batch([group]).unwrap();
     for doc in [&mut by_bytes, &mut by_parsed, &mut by_group] {
         assert_eq!(doc.get_heads(), [a]);
-        assert!(doc.try_signing().unwrap().is_published(&a));
+        assert!(doc.try_attested().unwrap().is_published(&a));
     }
 }
 
 #[test]
-fn apply_changes_rejects_signed_content_in_unsigned_mode() {
+fn apply_changes_rejects_signed_content_in_an_unattested_document() {
     let (_a, _raw, signed, parsed, group) = fixture();
     let mut unsigned = Automerge::new();
     let mut auto_unsigned = AutoCommit::new();
@@ -109,7 +109,7 @@ fn apply_changes_rejects_signed_content_in_unsigned_mode() {
 }
 
 #[test]
-fn load_rejects_signed_content_in_unsigned_mode() {
+fn load_rejects_signed_content_in_an_unattested_document() {
     let (_a, _raw, signed, _parsed, _group) = fixture();
     let mut unsigned = Automerge::new();
     let mut auto_unsigned = AutoCommit::new();
@@ -135,7 +135,7 @@ fn load_rejects_signed_content_in_unsigned_mode() {
 }
 
 #[test]
-fn apply_changes_still_admits_raw_changes_in_unsigned_mode() {
+fn apply_changes_still_admits_raw_changes_in_an_unattested_document() {
     let (a, raw, _signed, _parsed, _group) = fixture();
     let mut unsigned = Automerge::new();
     unsigned.apply_changes([raw]).unwrap();
@@ -145,7 +145,7 @@ fn apply_changes_still_admits_raw_changes_in_unsigned_mode() {
 #[test]
 fn rescue_refuses_signed_bytes_rather_than_dropping_their_guarantees() {
     let k = key(1);
-    let mut source = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut source = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut source, None, 1, 0);
@@ -158,7 +158,9 @@ fn rescue_refuses_signed_bytes_rather_than_dropping_their_guarantees() {
     for bytes in [signed_snapshot.as_slice(), signed_group.as_slice()] {
         assert!(matches!(
             Automerge::rescue(bytes),
-            Err(AutomergeError::Signing(SigningError::RescueNotSupported))
+            Err(AutomergeError::Signing(
+                AttestationError::RescueNotSupported
+            ))
         ));
     }
     // Unsigned snapshots still rescue.
@@ -169,9 +171,9 @@ fn rescue_refuses_signed_bytes_rather_than_dropping_their_guarantees() {
 }
 
 #[test]
-fn bundle_of_arbitrary_hashes_is_unsupported_in_signing_mode() {
+fn bundle_of_arbitrary_hashes_is_unsupported_in_an_attested_document() {
     let k = key(1);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
@@ -179,14 +181,18 @@ fn bundle_of_arbitrary_hashes_is_unsupported_in_signing_mode() {
     for hashes in [vec![], vec![a], vec![a, b]] {
         assert!(matches!(
             doc.bundle(hashes),
-            Err(AutomergeError::Signing(SigningError::BundleNotSupported))
+            Err(AutomergeError::Signing(
+                AttestationError::BundleNotSupported
+            ))
         ));
     }
     // Still unsupported once the history is published.
     sign_doc(&mut doc, b, &k);
     assert!(matches!(
         doc.bundle([a, b]),
-        Err(AutomergeError::Signing(SigningError::BundleNotSupported))
+        Err(AutomergeError::Signing(
+            AttestationError::BundleNotSupported
+        ))
     ));
 
     // The same history bundles freely for an unsigned copy.
@@ -200,9 +206,9 @@ fn bundle_of_arbitrary_hashes_is_unsupported_in_signing_mode() {
 }
 
 #[test]
-fn bundle_fragments_still_exports_in_signing_mode() {
+fn bundle_fragments_still_exports_in_an_attested_document() {
     let k = key(1);
-    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut doc = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     append_at_level(&mut doc, None, 1, 0);
@@ -219,7 +225,7 @@ fn bundle_fragments_still_exports_in_signing_mode() {
 /// Signed published `a` plus a live unsigned draft `d` on top of it.
 fn published_with_draft() -> (Automerge, ChangeHash, ChangeHash) {
     let k = key(1);
-    let mut source = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut source = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut source, None, 1, 0);
@@ -243,7 +249,7 @@ fn transfers_omit_applied_drafts() {
     assert_eq!(peer.get_heads(), [a]);
     let loaded = Automerge::load_with_options(
         &source.save(),
-        LoadOptions::new().signing(author(&key(3))).unwrap(),
+        LoadOptions::new().attested(author(&key(3))).unwrap(),
     )
     .unwrap();
     assert_eq!(loaded.get_heads(), [a]);
@@ -255,9 +261,9 @@ fn transfers_omit_applied_drafts() {
 }
 
 #[test]
-fn anonymize_yields_a_new_unsigned_diagnostic_history_without_proofs_or_drafts() {
+fn anonymize_yields_a_new_unattested_diagnostic_history_without_proofs_or_drafts() {
     let k = key(1);
-    let mut source = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
+    let mut source = Automerge::from_config(crate::Config::default().attested(author(&k)).unwrap())
         .with_actor(ActorId::from([1]))
         .unwrap();
     let a = append_at_level(&mut source, None, 1, 0);
@@ -266,9 +272,9 @@ fn anonymize_yields_a_new_unsigned_diagnostic_history_without_proofs_or_drafts()
     let before = source.save();
 
     let mut anonymous = source.anonymize().unwrap();
-    // Diagnostic copy: rewritten hashes, unsigned mode, no author identity,
+    // Diagnostic copy: rewritten hashes, unattested documents, no author identity,
     // no signatures, no local drafts. Structural shape (two changes) kept.
-    assert!(!anonymous.signing.is_required());
+    assert!(!anonymous.attestation.is_attested());
     assert_eq!(anonymous.get_changes(&[]).len(), 2);
     assert!(anonymous.get_change_by_hash(&a).is_none());
     assert!(anonymous.get_change_by_hash(&d).is_none());
@@ -290,15 +296,15 @@ fn anonymize_yields_a_new_unsigned_diagnostic_history_without_proofs_or_drafts()
         );
     }
     assert!(Automerge::load(&anonymous.save()).is_ok());
-    // It cannot flow back into required-mode documents, and the source is
+    // It cannot flow back into attested documents, and the source is
     // unchanged (still signed, draft still live).
     assert!(matches!(
         source.merge(&mut anonymous),
-        Err(AutomergeError::Signing(SigningError::MergeModeMismatch))
+        Err(AutomergeError::Signing(AttestationError::MergeModeMismatch))
     ));
     assert!(Automerge::load_with_options(
         &anonymous.save(),
-        LoadOptions::new().signing(author(&key(3))).unwrap(),
+        LoadOptions::new().attested(author(&key(3))).unwrap(),
     )
     .is_err());
     assert_eq!(source.save(), before);

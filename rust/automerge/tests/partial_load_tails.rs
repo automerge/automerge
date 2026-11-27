@@ -43,7 +43,7 @@ fn framed(tag: u8, body: &[u8]) -> Vec<u8> {
 
 /// Each tail preceded by an empty signatures chunk attached to the content.
 ///
-/// Unsigned loaders reject signed content rather than discarding its proof,
+/// Unattested loaders reject signed content rather than discarding its proof,
 /// so these variants probe that the rejection holds under both policies.
 fn with_signatures(tails: &[(String, Vec<u8>)]) -> Vec<(String, Vec<u8>)> {
     let signatures = framed(4, &[0]);
@@ -63,7 +63,7 @@ fn is_signed_content(error: &automerge::AutomergeError) -> bool {
     matches!(error, automerge::AutomergeError::Load(_))
         && error
             .to_string()
-            .contains("attached signatures require loading in signing mode")
+            .contains("attached signatures require loading as an attested document")
 }
 
 fn signature_chunk(hash: automerge::ChangeHash) -> Vec<u8> {
@@ -170,7 +170,7 @@ fn identified_truncated_signatures_invalidate_snapshot_under_both_policies() {
     let snapshot = doc.save();
     let signatures = signature_chunk(doc.get_heads()[0]);
     // Pin that the complete fixture is structurally valid before truncating
-    // it: the unsigned loader reaches the signed-content policy rather than
+    // it: the unattested loader reaches the signed-content policy rather than
     // a parse error.
     let complete = [snapshot.as_slice(), signatures.as_slice()].concat();
     assert!(is_signed_content(&Automerge::load(&complete).unwrap_err()));

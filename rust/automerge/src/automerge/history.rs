@@ -11,7 +11,7 @@ use crate::author::Authors;
 use crate::change_graph::ChangeGraph;
 use crate::{Change, ChangeHash};
 
-use super::signing::SigningState;
+use super::attestation::AttestationState;
 use super::visibility::FrontierVisibility;
 use super::HistoryUpdate;
 
@@ -26,7 +26,7 @@ pub(super) struct History<'a> {
     authors: &'a mut Authors,
     actors: &'a ActorTable,
     visibility: &'a FrontierVisibility,
-    signing: &'a mut SigningState,
+    attestation: &'a mut AttestationState,
 }
 
 impl<'a> History<'a> {
@@ -37,7 +37,7 @@ impl<'a> History<'a> {
         authors: &'a mut Authors,
         actors: &'a ActorTable,
         visibility: &'a FrontierVisibility,
-        signing: &'a mut SigningState,
+        attestation: &'a mut AttestationState,
     ) -> Self {
         Self {
             graph,
@@ -45,7 +45,7 @@ impl<'a> History<'a> {
             authors,
             actors,
             visibility,
-            signing,
+            attestation,
         }
     }
 
@@ -65,7 +65,8 @@ impl<'a> History<'a> {
             .add_change(change, actor_index, self.authors)
             .expect("Change's deps should already be in the document");
 
-        self.signing.change_added(self.graph, self.authors, &hash);
+        self.attestation
+            .change_added(self.graph, self.authors, &hash);
 
         // Report the boundary without publishing visibility before operations
         // have reached a consistent state.

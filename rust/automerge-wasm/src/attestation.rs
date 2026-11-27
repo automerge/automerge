@@ -1,4 +1,4 @@
-//! JS conversions for the required-mode signing surface.
+//! JS conversions for the attested signing surface.
 //!
 //! `insertSignatures` parses the complete input batch into owned
 //! [`SignatureInput`]s before the document is touched, so a malformed entry

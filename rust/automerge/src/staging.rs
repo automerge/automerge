@@ -53,7 +53,7 @@ impl ChangeBatch {
 /// Unapplied change contents held for possible application.
 ///
 /// Owns each staged change once, with indexes for its hash and actor/sequence.
-/// Staging alone does not establish causal readiness or signing requirements.
+/// Staging alone does not establish causal readiness or attestation requirements.
 #[derive(Debug, Clone)]
 pub(crate) struct StagedChanges {
     changes: Vec<Change>,

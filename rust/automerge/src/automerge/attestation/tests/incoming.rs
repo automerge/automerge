@@ -2,7 +2,7 @@
 
 use ed25519_dalek::{Signer, SigningKey};
 
-use crate::signature::error::{InvalidFragment, ProofError, SigningError};
+use crate::signature::error::{AttestationError, InvalidFragment, ProofError};
 use crate::signature::{ed25519, signing_message, Signature, SignatureBytes, SignatureTag};
 use crate::storage::signatures::{HashEntries, SignaturesChunk};
 use crate::storage::ChunkType;
@@ -46,11 +46,15 @@ fn append_at_level(
 
 /// A receiving replica with its own (never signing) author.
 fn new_receiver() -> Automerge {
-    Automerge::from_config(crate::Config::default().signing(author(&key(200))).unwrap())
+    Automerge::from_config(
+        crate::Config::default()
+            .attested(author(&key(200)))
+            .unwrap(),
+    )
 }
 
-fn signing_load() -> LoadOptions<'static> {
-    LoadOptions::new().signing(author(&key(200))).unwrap()
+fn attested_load() -> LoadOptions<'static> {
+    LoadOptions::new().attested(author(&key(200))).unwrap()
 }
 
 fn attach_signatures(
@@ -61,7 +65,7 @@ fn attach_signatures(
     [content, chunk.bytes()].concat()
 }
 
-/// A bare (unauthenticated) bundle of `hashes` from `doc`'s history. A required-mode
+/// A bare (unauthenticated) bundle of `hashes` from `doc`'s history. An attested
 /// document never emits one, so it is produced from an unsigned replica.
 fn bare_bundle(doc: &Automerge, hashes: impl IntoIterator<Item = ChangeHash>) -> Vec<u8> {
     let mut unsigned = Automerge::new();
@@ -70,7 +74,7 @@ fn bare_bundle(doc: &Automerge, hashes: impl IntoIterator<Item = ChangeHash>) ->
 }
 
 fn verified_count(doc: &mut Automerge) -> usize {
-    doc.try_signing()
+    doc.try_attested()
         .unwrap()
         .state
         .signatures
@@ -78,7 +82,7 @@ fn verified_count(doc: &mut Automerge) -> usize {
         .count()
 }
 
-/// Deliver `stream` to a fresh signing document and assert that the rejection
+/// Deliver `stream` to a fresh attested document and assert that the rejection
 /// left no trace: no heads, no missing deps, no pending groups, no evidence.
 fn rejected_without_state_change(stream: &[u8]) -> AutomergeError {
     let mut receiver = new_receiver();
@@ -87,7 +91,7 @@ fn rejected_without_state_change(stream: &[u8]) -> AutomergeError {
         .expect_err("stream must be rejected");
     assert!(receiver.get_heads().is_empty());
     assert!(receiver.get_missing_deps(&[]).is_empty());
-    assert!(!receiver.signing.has_pending_groups());
+    assert!(!receiver.attestation.has_pending_groups());
     assert_eq!(verified_count(&mut receiver), 0);
     error
 }
@@ -97,9 +101,10 @@ fn rejected_without_state_change(stream: &[u8]) -> AutomergeError {
 #[allow(deprecated)]
 fn mixed_author_source() -> (Automerge, [ChangeHash; 3]) {
     let k1 = key(1);
-    let mut sender = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]))
-        .unwrap();
+    let mut sender =
+        Automerge::from_config(crate::Config::default().attested(author(&k1)).unwrap())
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
     sender.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
@@ -120,14 +125,14 @@ fn signed_fragment_stream_loads_the_whole_history_with_published_proofs() {
 
     let mut log = PatchLog::active();
     let mut loaded =
-        Automerge::load_with_options(&encoded.concat(), signing_load().patch_log(&mut log))
+        Automerge::load_with_options(&encoded.concat(), attested_load().patch_log(&mut log))
             .unwrap();
 
     assert_eq!(loaded.get_heads(), sender.get_heads());
     assert_eq!(loaded.hydrate(None), sender.hydrate(None));
     assert!(!loaded.make_patches(&mut log).is_empty());
     for hash in [a1, b1, a2] {
-        assert!(loaded.try_signing().unwrap().is_published(&hash));
+        assert!(loaded.try_attested().unwrap().is_published(&hash));
     }
 }
 
@@ -137,7 +142,7 @@ fn loading_a_signed_stream_reexports_byte_identical_fragments() {
     let fragments = sender.fragments(..);
     let encoded = sender.bundle_fragments(fragments.clone());
 
-    let loaded = Automerge::load_with_options(&encoded.concat(), signing_load()).unwrap();
+    let loaded = Automerge::load_with_options(&encoded.concat(), attested_load()).unwrap();
 
     assert_eq!(loaded.fragments(..), fragments);
     assert_eq!(loaded.bundle_fragments(loaded.fragments(..)), encoded);
@@ -166,7 +171,7 @@ fn superseding_delivery_reclaims_resident_signatures_it_covers() {
     assert_eq!(incremental.get_heads(), sender.get_heads());
     assert_eq!(
         incremental
-            .try_signing()
+            .try_attested()
             .unwrap()
             .state
             .signatures
@@ -181,9 +186,10 @@ fn superseding_delivery_reclaims_resident_signatures_it_covers() {
 #[allow(deprecated)]
 fn two_group_source() -> (Automerge, Vec<u8>, Vec<u8>, ChangeHash, ChangeHash) {
     let k1 = key(1);
-    let mut sender = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]))
-        .unwrap();
+    let mut sender =
+        Automerge::from_config(crate::Config::default().attested(author(&k1)).unwrap())
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
     sender.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
@@ -204,7 +210,7 @@ fn a_group_whose_dependency_is_absent_reports_missing_deps() {
     let (_, _, g_bytes, b1, _) = two_group_source();
 
     assert!(matches!(
-        Automerge::load_with_options(&g_bytes, signing_load()),
+        Automerge::load_with_options(&g_bytes, attested_load()),
         Err(AutomergeError::MissingDeps)
     ));
 
@@ -223,7 +229,7 @@ fn a_pending_group_applies_once_its_dependency_group_arrives() {
     assert_eq!(receiver.load_incremental(&f_bytes).unwrap(), 3);
 
     assert_eq!(receiver.get_heads(), [b2]);
-    assert!(receiver.try_signing().unwrap().is_published(&b2));
+    assert!(receiver.try_attested().unwrap().is_published(&b2));
 }
 
 #[test]
@@ -232,7 +238,7 @@ fn a_partially_loaded_document_can_complete_from_a_later_dependency_group() {
 
     let mut from_ignore = Automerge::load_with_options(
         &g_bytes,
-        signing_load().on_partial_load(OnPartialLoad::Ignore),
+        attested_load().on_partial_load(OnPartialLoad::Ignore),
     )
     .unwrap();
     assert!(from_ignore.get_heads().is_empty());
@@ -240,7 +246,7 @@ fn a_partially_loaded_document_can_complete_from_a_later_dependency_group() {
 
     assert_eq!(from_ignore.load_incremental(&f_bytes).unwrap(), 3);
     assert_eq!(from_ignore.get_heads(), [b2]);
-    assert!(from_ignore.try_signing().unwrap().is_published(&b2));
+    assert!(from_ignore.try_attested().unwrap().is_published(&b2));
 }
 
 #[test]
@@ -248,19 +254,20 @@ fn out_of_order_groups_in_one_stream_are_admitted_in_a_single_call() {
     let (_, f_bytes, g_bytes, _, b2) = two_group_source();
     let reversed = [g_bytes.as_slice(), f_bytes.as_slice()].concat();
 
-    let mut single_call = Automerge::load_with_options(&reversed, signing_load()).unwrap();
+    let mut single_call = Automerge::load_with_options(&reversed, attested_load()).unwrap();
 
     assert_eq!(single_call.get_heads(), [b2]);
-    assert!(single_call.try_signing().unwrap().is_published(&b2));
+    assert!(single_call.try_attested().unwrap().is_published(&b2));
 }
 
 /// A valid level-1 group `f` plus the raw material needed to forge a second
 /// group for `a2`. Returns `(sender, f_bytes, a1, a2)`.
 fn one_valid_group_and_a_detached_commit() -> (Automerge, Vec<u8>, ChangeHash, ChangeHash) {
     let k1 = key(1);
-    let mut sender = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]))
-        .unwrap();
+    let mut sender =
+        Automerge::from_config(crate::Config::default().attested(author(&k1)).unwrap())
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     let a1 = append_at_level(&mut sender, None, "a", 1, 1);
     let a2 = append_at_level(&mut sender, None, "b", 2, 1);
     sign_doc(&mut sender, a1, &k1);
@@ -277,10 +284,10 @@ fn a_group_with_no_attached_proof_is_rejected_without_mutating_state() {
 
     assert!(matches!(
         rejected_without_state_change(&stream),
-        AutomergeError::Signing(SigningError::InvalidProof(ProofError::MissingSignature(h)))
+        AutomergeError::Signing(AttestationError::InvalidProof(ProofError::MissingSignature(h)))
             if h == a2
     ));
-    assert!(Automerge::load_with_options(&stream, signing_load()).is_err());
+    assert!(Automerge::load_with_options(&stream, attested_load()).is_err());
 }
 
 #[test]
@@ -295,10 +302,10 @@ fn a_group_signed_by_the_wrong_key_is_rejected_without_mutating_state() {
 
     assert!(matches!(
         rejected_without_state_change(&stream),
-        AutomergeError::Signing(SigningError::InvalidProof(ProofError::MissingSignature(h)))
+        AutomergeError::Signing(AttestationError::InvalidProof(ProofError::MissingSignature(h)))
             if h == a2
     ));
-    assert!(Automerge::load_with_options(&stream, signing_load()).is_err());
+    assert!(Automerge::load_with_options(&stream, attested_load()).is_err());
 }
 
 #[test]
@@ -316,10 +323,10 @@ fn a_group_proved_with_an_unsupported_signature_tag_is_rejected_without_mutating
 
     assert!(matches!(
         rejected_without_state_change(&stream),
-        AutomergeError::Signing(SigningError::InvalidProof(ProofError::MissingSignature(h)))
+        AutomergeError::Signing(AttestationError::InvalidProof(ProofError::MissingSignature(h)))
             if h == a2
     ));
-    assert!(Automerge::load_with_options(&stream, signing_load()).is_err());
+    assert!(Automerge::load_with_options(&stream, attested_load()).is_err());
 }
 
 #[test]
@@ -336,7 +343,7 @@ fn a_truncated_signature_chunk_is_rejected_without_mutating_state() {
         rejected_without_state_change(&stream),
         AutomergeError::Load(_)
     ));
-    assert!(Automerge::load_with_options(&stream, signing_load()).is_err());
+    assert!(Automerge::load_with_options(&stream, attested_load()).is_err());
 }
 
 #[test]
@@ -349,7 +356,7 @@ fn a_signed_change_without_any_author_is_rejected_as_missing_author() {
 
     assert!(matches!(
         rejected_without_state_change(&stream),
-        AutomergeError::Signing(SigningError::InvalidProof(ProofError::MissingAuthor(h)))
+        AutomergeError::Signing(AttestationError::InvalidProof(ProofError::MissingAuthor(h)))
             if h == hash
     ));
 }
@@ -367,7 +374,7 @@ fn a_signed_change_whose_author_is_not_a_public_key_is_rejected() {
 
     assert!(matches!(
         rejected_without_state_change(&stream),
-        AutomergeError::Signing(SigningError::InvalidProof(ProofError::InvalidAuthorKey {
+        AutomergeError::Signing(AttestationError::InvalidProof(ProofError::InvalidAuthorKey {
             hash: h,
             ..
         })) if h == hash
@@ -379,9 +386,10 @@ fn a_signed_change_whose_author_is_not_a_public_key_is_rejected() {
 #[allow(deprecated)]
 fn incomplete_group_and_donor_group() -> (Automerge, Vec<u8>, Vec<u8>, ChangeHash) {
     let k1 = key(1);
-    let mut sender = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]))
-        .unwrap();
+    let mut sender =
+        Automerge::from_config(crate::Config::default().attested(author(&k1)).unwrap())
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
     sender.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
@@ -405,8 +413,8 @@ fn a_sibling_groups_extra_signature_does_not_repair_an_incomplete_proof() {
         [g_with_extra.as_slice(), f_incomplete.as_slice()].concat(),
     ] {
         assert!(matches!(
-            Automerge::load_with_options(&stream, signing_load()),
-            Err(AutomergeError::Signing(SigningError::InvalidProof(
+            Automerge::load_with_options(&stream, attested_load()),
+            Err(AutomergeError::Signing(AttestationError::InvalidProof(
                 ProofError::MissingSignature(h)
             ))) if h == a1
         ));
@@ -416,7 +424,7 @@ fn a_sibling_groups_extra_signature_does_not_repair_an_incomplete_proof() {
     assert_eq!(receiver.load_incremental(&g_with_extra).unwrap(), 0);
     assert!(matches!(
         receiver.load_incremental(&f_incomplete),
-        Err(AutomergeError::Signing(SigningError::InvalidProof(
+        Err(AutomergeError::Signing(AttestationError::InvalidProof(
             ProofError::MissingSignature(h)
         ))) if h == a1
     ));
@@ -436,7 +444,7 @@ fn resident_evidence_does_not_repair_an_incomplete_proof() {
 
     assert!(matches!(
         with_resident.load_incremental(&f_incomplete),
-        Err(AutomergeError::Signing(SigningError::InvalidProof(
+        Err(AutomergeError::Signing(AttestationError::InvalidProof(
             ProofError::MissingSignature(h)
         ))) if h == a1
     ));
@@ -513,8 +521,8 @@ fn a_group_omitting_an_independent_ancestor_is_non_canonical() {
     .concat();
 
     assert!(matches!(
-        Automerge::load_with_options(&stream, signing_load()),
-        Err(AutomergeError::Signing(SigningError::InvalidFragment(
+        Automerge::load_with_options(&stream, attested_load()),
+        Err(AutomergeError::Signing(AttestationError::InvalidFragment(
             InvalidFragment::NonCanonicalMembership(h)
         ))) if h == c1
     ));
@@ -548,9 +556,9 @@ fn a_diamond_tip_restating_an_already_covered_ancestor_is_non_canonical() {
     assert!(matches!(
         Automerge::load_with_options(
             &[d.db1_group.as_slice(), dc1_stuffed.as_slice()].concat(),
-            signing_load(),
+            attested_load(),
         ),
-        Err(AutomergeError::Signing(SigningError::InvalidFragment(
+        Err(AutomergeError::Signing(AttestationError::InvalidFragment(
             InvalidFragment::NonCanonicalMembership(h)
         ))) if h == d.dc1
     ));
@@ -577,9 +585,9 @@ fn a_change_not_depending_on_its_own_actor_predecessor_breaks_the_actor_chain() 
     assert!(matches!(
         Automerge::load_with_options(
             &[d.db1_group.as_slice(), bad_bytes.as_slice()].concat(),
-            signing_load(),
+            attested_load(),
         ),
-        Err(AutomergeError::Signing(SigningError::InvalidFragment(
+        Err(AutomergeError::Signing(AttestationError::InvalidFragment(
             InvalidFragment::BrokenActorChain(h)
         ))) if h == unlinked.hash()
     ));
@@ -591,9 +599,10 @@ fn a_change_not_depending_on_its_own_actor_predecessor_breaks_the_actor_chain() 
 #[allow(deprecated)]
 fn signed_source() -> (Automerge, SigningKey, [ChangeHash; 4]) {
     let k1 = key(1);
-    let mut source = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]))
-        .unwrap();
+    let mut source =
+        Automerge::from_config(crate::Config::default().attested(author(&k1)).unwrap())
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     let root = append_at_level(&mut source, None, "root", 0, 1);
     let a1 = append_at_level(&mut source, None, "a1", 1, 0);
     source.set_actor(ActorId::from([2])).unwrap();
@@ -643,7 +652,7 @@ fn sibling_fragments_delivered_before_their_root_apply_once_it_arrives() {
         4
     );
     assert_eq!(receiver.get_heads(), source.get_heads());
-    assert!(!receiver.signing.has_pending_groups());
+    assert!(!receiver.attestation.has_pending_groups());
 }
 
 #[test]
@@ -671,18 +680,18 @@ fn a_forged_orphan_claiming_an_unknown_actor_is_purged_when_the_real_actor_arriv
         .load_incremental(&fragment_bytes(&source, root))
         .unwrap();
 
-    assert!(!receiver.signing.has_pending_groups());
-    assert!(!receiver.try_signing().unwrap().is_published(&forged_seq2));
+    assert!(!receiver.attestation.has_pending_groups());
+    assert!(!receiver.try_attested().unwrap().is_published(&forged_seq2));
 }
 
 #[test]
-fn fork_preserves_required_mode_and_published_history() {
+fn fork_preserves_attestation_and_published_history() {
     let (source, _, [root, ..]) = signed_source();
 
     let mut forked = source.fork();
 
-    assert!(forked.signing.is_required());
-    assert!(forked.try_signing().unwrap().is_published(&root));
+    assert!(forked.attestation.is_attested());
+    assert!(forked.try_attested().unwrap().is_published(&root));
 }
 
 #[test]
@@ -693,7 +702,7 @@ fn a_partial_load_withholds_bare_content_preceding_a_truncated_prefix() {
 
     let recovered = Automerge::load_with_options(
         &bare_truncated,
-        signing_load().on_partial_load(OnPartialLoad::Ignore),
+        attested_load().on_partial_load(OnPartialLoad::Ignore),
     )
     .unwrap();
 

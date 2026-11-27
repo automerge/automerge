@@ -60,20 +60,20 @@ pub enum ProofError {
     },
 }
 
-/// Failure to import or apply history in required signing mode.
+/// Failure to import or apply history in an attested document.
 #[derive(Debug, thiserror::Error)]
-pub enum SigningError {
-    #[error("unauthenticated changes cannot be imported in signing mode")]
+pub enum AttestationError {
+    #[error("unauthenticated changes cannot be imported into an attested document")]
     UnauthenticatedChanges,
-    #[error("fork_at is not supported in signing mode")]
+    #[error("fork_at is not supported by an attested document")]
     ForkAtNotSupported,
-    #[error("arbitrary bundling is not supported in signing mode; use fragment export")]
+    #[error("arbitrary bundling is not supported by an attested document; use fragment export")]
     BundleNotSupported,
-    #[error("merge requires both documents to be in the same signing mode")]
+    #[error("merge requires both documents to be attested or both unattested")]
     MergeModeMismatch,
-    #[error("the sync protocol is not supported in signing mode; transfer published history with save/load or merge")]
+    #[error("the sync protocol is not supported by an attested document; transfer published history with save/load or merge")]
     SyncNotSupported,
-    #[error("rescue cannot evaluate signed data; load it in signing mode instead")]
+    #[error("rescue cannot evaluate signed data; load it as an attested document instead")]
     RescueNotSupported,
     #[error("local changes are still unpublished; publish or keep the current author before forking with a different author")]
     UnpublishedLocalChanges,
