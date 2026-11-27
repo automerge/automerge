@@ -48,6 +48,7 @@ optional = true
 
 [dev-dependencies]
 automerge-test = { path = "../automerge-test" }
+ciborium = "0.2.2"
 maplit = { version = "^1.0" }
 pretty_assertions = "1.0.0"
 prettytable = "0.10.0"

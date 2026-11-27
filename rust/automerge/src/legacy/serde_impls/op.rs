@@ -665,4 +665,93 @@ mod tests {
             assert_eq!(testcase, &deserialized, "Testcase {} failed", testcase_num);
         }
     }
+
+    #[test]
+    fn cbor_del_op_round_trip_fails() {
+        let del = Op {
+            action: OpType::Delete,
+            obj: ObjectId::Root,
+            key: "foo".into(),
+            insert: false,
+            pred: SortedVec::new(),
+        };
+        let set = Op {
+            action: OpType::Put("bar".into()),
+            obj: ObjectId::Root,
+            key: "foo".into(),
+            insert: false,
+            pred: SortedVec::new(),
+        };
+
+        let json = serde_json::to_vec(&del).expect("del json encode");
+        let _: Op = serde_json::from_slice(&json).expect("del json decode");
+
+        let mut set_cbor = Vec::new();
+        ciborium::into_writer(&set, &mut set_cbor).expect("set cbor encode");
+        assert_eq!(set_cbor[0], 0xa5, "set map length 5");
+        let _: Op = ciborium::from_reader(set_cbor.as_slice()).expect("set cbor decode");
+
+        let mut del_cbor = Vec::new();
+        ciborium::into_writer(&del, &mut del_cbor).expect("del cbor encode");
+        // Correct length is 4 (`0xa4`). The serializer declares 5 (`0xa5`).
+        assert_eq!(del_cbor[0], 0xa5, "del map length wrongly 5");
+
+        // Deserialization fails due to incorrect length
+        ciborium::from_reader::<Op, _>(del_cbor.as_slice())
+            .expect_err("del declares five CBOR map fields and writes four");
+    }
+
+    #[test]
+    fn cbor_mark_begin_op_round_trip_fails() {
+        let mark_begin = Op {
+            action: OpType::MarkBegin(MarkData {
+                name: "bold".into(),
+                value: ScalarValue::Boolean(true),
+                expand: false,
+            }),
+            obj: ObjectId::Root,
+            key: "foo".into(),
+            insert: false,
+            pred: SortedVec::new(),
+        };
+        let mark_end = Op {
+            action: OpType::MarkEnd(false),
+            obj: ObjectId::Root,
+            key: "foo".into(),
+            insert: false,
+            pred: SortedVec::new(),
+        };
+
+        let json = serde_json::to_vec(&mark_begin).expect("markBegin json encode");
+        let _: Op = serde_json::from_slice(&json).expect("markBegin json decode");
+        assert_eq!(
+            serde_json::to_value(&mark_begin)
+                .expect("markBegin json value")
+                .as_object()
+                .expect("object")
+                .len(),
+            7,
+            "markBegin JSON writes seven fields"
+        );
+
+        let mut end_cbor = Vec::new();
+        ciborium::into_writer(&mark_end, &mut end_cbor).expect("markEnd cbor encode");
+        assert_eq!(end_cbor[0], 0xa5, "markEnd map length 5");
+        let _: Op = ciborium::from_reader(end_cbor.as_slice()).expect("markEnd cbor decode");
+
+        let mut begin_cbor = Vec::new();
+        ciborium::into_writer(&mark_begin, &mut begin_cbor).expect("markBegin cbor encode");
+        // Correct length is 7 (`0xa7`). The serializer declares 5 (`0xa5`), then still
+        // writes `expand` and `pred` as trailing bytes after the map.
+        assert_eq!(begin_cbor[0], 0xa5, "markBegin map length wrongly 5");
+        let mut trailing = begin_cbor.as_slice();
+        let _: ciborium::value::Value =
+            ciborium::from_reader(&mut trailing).expect("markBegin map value");
+        assert!(
+            !trailing.is_empty(),
+            "expand and pred must trail after the undersized map"
+        );
+        ciborium::from_reader::<Op, _>(begin_cbor.as_slice())
+            .expect_err("markBegin declares five CBOR map fields and writes seven");
+    }
 }
