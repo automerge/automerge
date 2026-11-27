@@ -14,23 +14,27 @@ impl Serialize for Op {
     where
         S: Serializer,
     {
-        let mut fields = 4;
-
-        if self.insert {
-            fields += 1
-        }
-
+        // A bare number doesn't say which numeric `ScalarValue` it was, so numeric `Put` and
+        // `MarkBegin` values get a `datatype` field the deserializer uses to restore it.
         let numerical_datatype = match &self.action {
-            OpType::Put(value) => value.as_numerical_datatype(),
+            OpType::Put(value) | OpType::MarkBegin(MarkData { value, .. }) => {
+                value.as_numerical_datatype()
+            }
             _ => None,
         };
 
-        if numerical_datatype.is_some() {
-            fields += 2
-        } else if !matches!(&self.action, OpType::Make(..)) {
-            fields += 1
+        let action_fields = match &self.action {
+            OpType::Make(_) | OpType::Delete => 0,
+            OpType::Increment(_) | OpType::Put(_) | OpType::MarkEnd(_) => 1,
+            OpType::MarkBegin(_) => 3,
         };
+        let fields = 4 // action, obj, key/elemId, pred
+            + usize::from(self.insert)
+            + usize::from(numerical_datatype.is_some())
+            + action_fields;
 
+        // `fields` must equal the number of fields serialized below: length-prefixed formats
+        // such as CBOR write it as the map length.
         let mut op = serializer.serialize_struct("Operation", fields)?;
         op.serialize_field("action", &self.action)?;
         op.serialize_field("obj", &self.obj)?;
@@ -58,7 +62,10 @@ impl Serialize for Op {
                 expand,
             }) => {
                 op.serialize_field("name", &name)?;
-                op.serialize_field("value", &value)?;
+                match value {
+                    ScalarValue::Counter(c) => op.serialize_field("value", &c.start)?,
+                    value => op.serialize_field("value", &value)?,
+                }
                 op.serialize_field("expand", &expand)?
             }
             OpType::MarkEnd(expand) => op.serialize_field("expand", &expand)?,
@@ -663,6 +670,165 @@ mod tests {
             let deserialized: Op = serde_json::from_str(&serialized)
                 .expect(format!("Failed to deserialize testcase {}", testcase_num).as_str());
             assert_eq!(testcase, &deserialized, "Testcase {} failed", testcase_num);
+        }
+    }
+
+    fn root_op(action: OpType) -> Op {
+        Op {
+            action,
+            obj: ObjectId::Root,
+            key: "foo".into(),
+            insert: false,
+            pred: SortedVec::new(),
+        }
+    }
+
+    /// Checks that `op` encodes to a CBOR map of `fields` entries and decodes back unchanged.
+    fn assert_cbor_round_trip(op: &Op, fields: u8) {
+        let mut cbor = Vec::new();
+        ciborium::into_writer(op, &mut cbor).expect("cbor encode");
+        // A map with fewer than 24 entries stores its length in the first byte: 0xa0 + length.
+        assert_eq!(cbor[0], 0xa0 + fields, "cbor map length of {op:?}");
+        let decoded: Op = ciborium::from_reader(cbor.as_slice()).expect("cbor decode");
+        assert_eq!(*op, decoded);
+    }
+
+    #[test]
+    fn cbor_del_op_round_trip() {
+        // action, obj, key, pred
+        assert_cbor_round_trip(&root_op(OpType::Delete), 4);
+    }
+
+    #[test]
+    fn cbor_mark_begin_op_round_trip() {
+        let mark_begin = root_op(OpType::MarkBegin(MarkData {
+            name: "bold".into(),
+            value: ScalarValue::Boolean(true),
+            expand: false,
+        }));
+        // action, obj, key, name, value, expand, pred
+        assert_cbor_round_trip(&mark_begin, 7);
+    }
+
+    #[test]
+    fn mark_begin_numeric_value_round_trip() {
+        // Without `datatype`, each of these decodes as a plain `Uint`.
+        for (value, datatype) in [
+            (ScalarValue::Counter(3.into()), "counter"),
+            (ScalarValue::Timestamp(3), "timestamp"),
+            (ScalarValue::Int(3), "int"),
+        ] {
+            let op = root_op(OpType::MarkBegin(MarkData {
+                name: "score".into(),
+                value,
+                expand: false,
+            }));
+
+            let json = serde_json::to_value(&op).expect("json encode");
+            assert_eq!(json["datatype"], datatype);
+            let decoded: Op = serde_json::from_value(json).expect("json decode");
+            assert_eq!(op, decoded, "json {datatype}");
+
+            // action, obj, key, datatype, name, value, expand, pred
+            assert_cbor_round_trip(&op, 8);
+        }
+    }
+
+    mod properties {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        fn actor_id() -> impl Strategy<Value = amp::ActorId> {
+            proptest::collection::vec(any::<u8>(), 0..16).prop_map(amp::ActorId::from)
+        }
+
+        fn op_id() -> impl Strategy<Value = OpId> {
+            (any::<u64>(), actor_id()).prop_map(|(counter, actor)| OpId(counter, actor))
+        }
+
+        fn object_id() -> impl Strategy<Value = ObjectId> {
+            prop_oneof![Just(ObjectId::Root), op_id().prop_map(ObjectId::Id)]
+        }
+
+        fn key() -> impl Strategy<Value = Key> {
+            prop_oneof![
+                any::<String>().prop_map(|s| Key::Map(s.into())),
+                Just(Key::head()),
+                op_id().prop_map(|id| Key::Seq(amp::ElementId::Id(id))),
+            ]
+        }
+
+        /// Every `ScalarValue` that the legacy encoding can round-trip:
+        ///
+        /// * `Bytes` and `Unknown` are left out. They serialize as a sequence and a map, and
+        ///   the `ScalarValue` deserializer only accepts numbers, strings, bools and null, so
+        ///   neither JSON nor CBOR can decode them.
+        /// * `any::<f64>()` only generates finite values, which JSON needs: it can't represent
+        ///   NaN or infinity (serde_json writes `null`).
+        fn scalar_value() -> impl Strategy<Value = ScalarValue> {
+            prop_oneof![
+                Just(ScalarValue::Null),
+                any::<bool>().prop_map(ScalarValue::Boolean),
+                any::<String>().prop_map(|s| ScalarValue::Str(s.into())),
+                any::<i64>().prop_map(ScalarValue::Int),
+                any::<u64>().prop_map(ScalarValue::Uint),
+                any::<f64>().prop_map(ScalarValue::F64),
+                any::<i64>().prop_map(|n| ScalarValue::Counter(n.into())),
+                any::<i64>().prop_map(ScalarValue::Timestamp),
+            ]
+        }
+
+        fn op_type() -> impl Strategy<Value = OpType> {
+            prop_oneof![
+                prop_oneof![
+                    Just(ObjType::Map),
+                    Just(ObjType::Table),
+                    Just(ObjType::List),
+                    Just(ObjType::Text),
+                ]
+                .prop_map(OpType::Make),
+                Just(OpType::Delete),
+                any::<i64>().prop_map(OpType::Increment),
+                scalar_value().prop_map(OpType::Put),
+                (any::<String>(), scalar_value(), any::<bool>()).prop_map(
+                    |(name, value, expand)| OpType::MarkBegin(MarkData {
+                        name: name.into(),
+                        value,
+                        expand,
+                    })
+                ),
+                any::<bool>().prop_map(OpType::MarkEnd),
+            ]
+        }
+
+        prop_compose! {
+            fn op()(
+                action in op_type(),
+                obj in object_id(),
+                key in key(),
+                pred in proptest::collection::vec(op_id(), 0..4),
+                insert in any::<bool>(),
+            ) -> Op {
+                Op { action, obj, key, pred: pred.into(), insert }
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn json_round_trip(op in op()) {
+                let json = serde_json::to_string(&op).expect("json encode");
+                let decoded: Op = serde_json::from_str(&json).expect("json decode");
+                prop_assert_eq!(op, decoded, "encoded as {}", json);
+            }
+
+            #[test]
+            fn cbor_round_trip(op in op()) {
+                let mut cbor = Vec::new();
+                ciborium::into_writer(&op, &mut cbor).expect("cbor encode");
+                let decoded: Op = ciborium::from_reader(cbor.as_slice()).expect("cbor decode");
+                prop_assert_eq!(op, decoded);
+            }
         }
     }
 }
