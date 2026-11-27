@@ -210,7 +210,12 @@ impl IndexBuilder {
         self.widths
             .push(op.width(SequenceType::Text, self.text_encoding) as u64);
 
-        let count = self.counters.remove(&op.id);
+        // Skip hashing when no counter is waiting for an increment.
+        let count = if self.counters.is_empty() {
+            None
+        } else {
+            self.counters.remove(&op.id)
+        };
 
         if let Some(i) = op.get_increment_value() {
             for (succ_idx, op_idx) in count.into_iter().flatten() {
