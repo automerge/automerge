@@ -29,7 +29,7 @@ async function makeSigner() {
 // A fixed author for receiving replicas that never sign anything: the
 // compressed Ed25519 base point, a valid non-weak public key.
 const RECEIVER_AUTHOR = "58" + "66".repeat(31)
-const RECEIVER = { signing: true as const, author: RECEIVER_AUTHOR }
+const RECEIVER = { attested: true as const, author: RECEIVER_AUTHOR }
 
 async function signRequests(
   requests: Automerge.SigningRequest[],
@@ -93,12 +93,12 @@ function wireOf<T>(doc: Automerge.Doc<T>): Uint8Array {
   )
 }
 
-/** One signing document with a single unsigned draft. */
+/** One attested document with a single unsigned draft. */
 async function draftDoc() {
   const alice = await makeSigner()
   let doc = Automerge.init<CounterDoc>({
     author: alice.author,
-    signing: true,
+    attested: true,
     actor: "01",
   })
   doc = Automerge.change(doc, d => {
@@ -120,7 +120,7 @@ async function draftWithInputs() {
 }
 
 /**
- * A signing document whose own draft `a` is unpublished and which already
+ * An attested document whose own draft `a` is unpublished and which already
  * holds a verified peer commit depending on `a`. Publishing `a` applies that
  * peer commit, which is what makes `insertSignatures` emit patches.
  */
@@ -129,7 +129,7 @@ async function pendingDependent() {
   const bob = await makeSigner()
   let aliceDoc = Automerge.init<CounterDoc>({
     author: alice.author,
-    signing: true,
+    attested: true,
     actor: "01",
   })
   aliceDoc = Automerge.change(aliceDoc, d => {
@@ -140,7 +140,7 @@ async function pendingDependent() {
   aliceDoc = await publishAll(aliceDoc, alice.sign)
 
   let bobDoc = Automerge.load<CounterDoc>(wireOf(aliceDoc), {
-    signing: true,
+    attested: true,
     author: bob.author,
     actor: "02",
   })
@@ -159,32 +159,32 @@ async function pendingDependent() {
 
 describe("fragment signing API", () => {
   describe("options", () => {
-    it("fixes the author when init is given signing and an author", async () => {
+    it("fixes the author when init is given attested and an author", async () => {
       const alice = await makeSigner()
       const doc = Automerge.init<CounterDoc>({
         author: alice.author,
-        signing: true,
+        attested: true,
       })
       assert.equal(Automerge.getAuthor(doc), alice.author)
     })
 
-    it("rejects init in signing mode without an author", () => {
+    it("rejects init of an attested document without an author", () => {
       assert.throws(
-        () => Automerge.init<CounterDoc>({ signing: true }),
+        () => Automerge.init<CounterDoc>({ attested: true }),
         RangeError,
       )
     })
 
-    it("rejects init in signing mode with a non-key author", () => {
+    it("rejects init of an attested document with a non-key author", () => {
       assert.throws(
-        () => Automerge.init<CounterDoc>({ signing: true, author: "010203" }),
+        () => Automerge.init<CounterDoc>({ attested: true, author: "010203" }),
         RangeError,
       )
     })
 
-    it("rejects load in signing mode without an author", () => {
+    it("rejects load of an attested document without an author", () => {
       assert.throws(
-        () => Automerge.load<CounterDoc>(new Uint8Array(0), { signing: true }),
+        () => Automerge.load<CounterDoc>(new Uint8Array(0), { attested: true }),
         RangeError,
       )
     })
@@ -202,7 +202,7 @@ describe("fragment signing API", () => {
       const alice = await makeSigner()
       let doc = Automerge.init<CounterDoc>({
         author: alice.author,
-        signing: true,
+        attested: true,
       })
       doc = Automerge.change(doc, d => {
         d.title = "v1"
@@ -226,7 +226,7 @@ describe("fragment signing API", () => {
       assert.deepEqual(Automerge.signingRequests(published), [])
     })
 
-    it("throws for an unsigned document", () => {
+    it("throws for an unattested document", () => {
       const doc = Automerge.change(Automerge.init<CounterDoc>(), d => {
         d.counter = 1
       })
@@ -272,7 +272,7 @@ describe("fragment signing API", () => {
       assert.equal(Automerge.signingRequests(next).length, 2)
     })
 
-    it("rejects a batch submitted to an unsigned document", async () => {
+    it("rejects a batch submitted to an unattested document", async () => {
       const { inputs } = await draftWithInputs()
       let unsigned = Automerge.init<CounterDoc>({ actor: "09" })
       unsigned = Automerge.change(unsigned, d => {
@@ -285,7 +285,7 @@ describe("fragment signing API", () => {
 
     // The `publicationFailed` arm needs two equivocating pending groups to
     // trigger; that scenario is pinned in Rust by
-    // `signing::tests::batch::simultaneously_admissible_pending_equivocation_fails_publication_but_retains_state`.
+    // `attestation::tests::batch::simultaneously_admissible_pending_equivocation_fails_publication_but_retains_state`.
   })
 
   describe("insertSignatures guards", () => {
@@ -498,9 +498,9 @@ describe("fragment signing API", () => {
   })
 
   describe("clone and author binding", () => {
-    it("rejects a clone that restates the signing mode", async () => {
+    it("rejects a clone that restates attestation", async () => {
       const { doc } = await draftDoc()
-      assert.throws(() => Automerge.clone(doc, { signing: false }), RangeError)
+      assert.throws(() => Automerge.clone(doc, { attested: false }), RangeError)
     })
 
     it("allows a clone keeping the same author", async () => {
@@ -536,7 +536,7 @@ describe("fragment signing API", () => {
   })
 
   describe("hasUnpublishedChanges", () => {
-    it("is false for an unsigned document", () => {
+    it("is false for an unattested document", () => {
       const doc = Automerge.change(Automerge.init<CounterDoc>(), d => {
         d.counter = 42
       })
@@ -563,7 +563,7 @@ describe("fragment signing API", () => {
       const receiver = Automerge.merge(
         Automerge.init<CounterDoc>({
           author: bob.author,
-          signing: true,
+          attested: true,
           patchCallback: (_p, info) => sources.push(info.source),
         }),
         source,
@@ -579,7 +579,7 @@ describe("fragment signing API", () => {
       const alice = await makeSigner()
       let doc = Automerge.init<CounterDoc>({
         author: alice.author,
-        signing: true,
+        attested: true,
         actor: "01",
       })
       for (let i = 1; i <= 3; i++) {

@@ -52,10 +52,10 @@ function messageFor(hash: string): Uint8Array {
   return new Uint8Array(Buffer.concat([prefix, Buffer.from(hash, "hex")]));
 }
 
-/** A signing document with `values.length` committed, unsigned local changes. */
+/** An attested document with `values.length` committed, unsigned local changes. */
 async function draftingDoc(values: number[], actor?: string) {
   const signer = await makeSigner();
-  const doc = create({ signing: true, author: signer.author, actor });
+  const doc = create({ attested: true, author: signer.author, actor });
   const heads: string[] = [];
   for (const value of values) {
     doc.put("/", `k${value}`, value);
@@ -71,23 +71,23 @@ async function publish(doc: Automerge, signer: Signer) {
   completed(doc.insertSignatures(await signAll(doc.signingRequests(), signer)));
 }
 
-/** A one-commit signing document plus a valid signature input for it. */
+/** A one-commit attested document plus a valid signature input for it. */
 async function docWithOneInput() {
   const { signer, doc, heads } = await draftingDoc([1]);
   const [good] = await signAll(doc.signingRequests(), signer);
   return { doc, good, head: heads[0] };
 }
 
-/** A fully published signing document with one commit. */
+/** A fully published attested document with one commit. */
 async function publishedDoc(): Promise<Automerge> {
   const { signer, doc } = await draftingDoc([1]);
   await publish(doc, signer);
   return doc;
 }
 
-/** An empty signing receiver with a fresh author. */
+/** An empty attested receiver with a fresh author. */
 async function receiverDoc(): Promise<Automerge> {
-  return create({ signing: true, author: (await makeSigner()).author });
+  return create({ attested: true, author: (await makeSigner()).author });
 }
 
 /** `{...meta, bytes}` fragments, optionally restricted to one level. */
@@ -103,37 +103,37 @@ function exportCommits(doc: Automerge) {
   return fs.map((f) => ({ head: f.head, parents: f.boundary, bytes: f.bytes }));
 }
 
-describe("signing option plumbing", () => {
-  it("create rejects signing mode without an author", () => {
-    assert.throws(() => create({ signing: true }), RangeError);
+describe("attested option plumbing", () => {
+  it("create rejects attestation without an author", () => {
+    assert.throws(() => create({ attested: true }), RangeError);
   });
 
   it("create rejects an author that is not a usable key", () => {
     assert.throws(
-      () => create({ signing: true, author: "010203" }),
+      () => create({ attested: true, author: "010203" }),
       RangeError,
     );
   });
 
   it("create accepts a usable author and fixes it on the document", async () => {
     const { author } = await makeSigner();
-    assert.equal(create({ signing: true, author }).getAuthor(), author);
+    assert.equal(create({ attested: true, author }).getAuthor(), author);
   });
 
-  it("create rejects a non-boolean signing option", () => {
+  it("create rejects a non-boolean attested option", () => {
     assert.throws(
-      () => create({ signing: "yes" as unknown as boolean }),
+      () => create({ attested: "yes" as unknown as boolean }),
       RangeError,
     );
   });
 
-  it("load rejects signing mode without an author", () => {
-    assert.throws(() => load(new Uint8Array(0), { signing: true }), RangeError);
+  it("load rejects attestation without an author", () => {
+    assert.throws(() => load(new Uint8Array(0), { attested: true }), RangeError);
   });
 
   it("load accepts a usable author and fixes it on the document", async () => {
     const { author } = await makeSigner();
-    const doc = load(new Uint8Array(0), { signing: true, author });
+    const doc = load(new Uint8Array(0), { attested: true, author });
     assert.equal(doc.getAuthor(), author);
   });
 });
@@ -168,11 +168,11 @@ describe("signingRequests()", () => {
     assert.equal(doc.signingRequests().length, 2);
   });
 
-  it("throws on an unsigned document without closing the pending transaction", () => {
-    const unsigned = create({ actor: "09" });
-    unsigned.put("/", "u", 99);
-    assert.throws(() => unsigned.signingRequests(), RangeError);
-    assert.equal(unsigned.pendingOps(), 1);
+  it("throws on an unattested document without closing the pending transaction", () => {
+    const unattested = create({ actor: "09" });
+    unattested.put("/", "u", 99);
+    assert.throws(() => unattested.signingRequests(), RangeError);
+    assert.equal(unattested.pendingOps(), 1);
   });
 });
 
@@ -298,13 +298,13 @@ describe("insertSignatures()", () => {
     assert.equal(doc.hasUnpublishedChanges(), true);
   });
 
-  it("rejects a batch on an unsigned document without closing the transaction", async () => {
+  it("rejects a batch on an unattested document without closing the transaction", async () => {
     const { good } = await docWithOneInput();
-    const unsigned = create({ actor: "09" });
-    unsigned.put("/", "u", 99);
-    assert.equal(unsigned.insertSignatures([good]).status, "rejected");
-    assert.equal(unsigned.pendingOps(), 1);
-    assert.equal(unsigned.hasUnpublishedChanges(), false);
+    const unattested = create({ actor: "09" });
+    unattested.put("/", "u", 99);
+    assert.equal(unattested.insertSignatures([good]).status, "rejected");
+    assert.equal(unattested.pendingOps(), 1);
+    assert.equal(unattested.hasUnpublishedChanges(), false);
   });
 
   // Only the marshalled shape of the `publicationFailed` arm belongs here; the
@@ -312,21 +312,21 @@ describe("insertSignatures()", () => {
   // simultaneously_admissible_pending_equivocation_fails_publication_but_retains_state.
   // The `publicationFailed` arm needs two equivocating pending groups to
   // trigger; that scenario is pinned in Rust by
-  // `signing::tests::batch::simultaneously_admissible_pending_equivocation_fails_publication_but_retains_state`.
+  // `attestation::tests::batch::simultaneously_admissible_pending_equivocation_fails_publication_but_retains_state`.
 });
 
-describe("entry points on a signing document", () => {
+describe("entry points on an attested document", () => {
   let doc: Automerge;
   let head: string;
-  let unsignedPeer: Automerge;
+  let unattestedPeer: Automerge;
 
   before(async () => {
     const drafting = await draftingDoc([1]);
     doc = drafting.doc;
     head = drafting.heads[0];
     await publish(doc, drafting.signer);
-    unsignedPeer = create({ actor: "09" });
-    unsignedPeer.applyChanges(doc.getChanges([]));
+    unattestedPeer = create({ actor: "09" });
+    unattestedPeer.applyChanges(doc.getChanges([]));
   });
 
   it("applyChanges rejects a bare change", () => {
@@ -341,11 +341,11 @@ describe("entry points on a signing document", () => {
     assert.throws(() => doc.loadIncremental(raw), RangeError);
   });
 
-  it("merge rejects an unsigned document", () => {
-    assert.throws(() => doc.merge(unsignedPeer), RangeError);
+  it("merge rejects an unattested document", () => {
+    assert.throws(() => doc.merge(unattestedPeer), RangeError);
   });
 
-  it("merge accepts another signing document and returns the new heads", async () => {
+  it("merge accepts another attested document and returns the new heads", async () => {
     const { signer, doc: peer } = await draftingDoc([7], "02");
     await publish(peer, signer);
     const merged = peer.merge(doc);
@@ -353,12 +353,12 @@ describe("entry points on a signing document", () => {
     assert.ok(merged.includes(head));
   });
 
-  it("generateSyncMessage rejects a signing document", () => {
+  it("generateSyncMessage rejects an attested document", () => {
     assert.throws(() => doc.generateSyncMessage(initSyncState()), RangeError);
   });
 
-  it("receiveSyncMessage rejects a signing document", () => {
-    const msg = unsignedPeer.generateSyncMessage(initSyncState());
+  it("receiveSyncMessage rejects an attested document", () => {
+    const msg = unattestedPeer.generateSyncMessage(initSyncState());
     assert.ok(msg != null);
     assert.throws(
       () => doc.receiveSyncMessage(initSyncState(), msg),
@@ -370,11 +370,11 @@ describe("entry points on a signing document", () => {
     assert.throws(() => doc.fork(undefined, [head]), RangeError);
   });
 
-  it("fork at current heads inherits signing mode", () => {
+  it("fork at current heads inherits attestation", () => {
     assert.deepEqual(doc.fork("02").signingRequests(), []);
   });
 
-  it("load rejects a signed snapshot without signing options", () => {
+  it("load rejects a signed snapshot without attested options", () => {
     assert.throws(() => load(doc.save()), RangeError);
   });
 });
@@ -400,7 +400,7 @@ describe("end to end", () => {
     assert.deepEqual(viaFragments.materialize("/"), content);
 
     const wire = Buffer.concat(exportFragments(doc).map((f) => f.bytes));
-    const loaded = load(wire, { signing: true, author: signer.author });
+    const loaded = load(wire, { attested: true, author: signer.author });
     assert.deepEqual(loaded.getHeads(), doc.getHeads());
     assert.deepEqual(loaded.materialize("/"), content);
   });

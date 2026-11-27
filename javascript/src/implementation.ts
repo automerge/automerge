@@ -214,20 +214,20 @@ export function use(api: API) {
 export type InitOptions<T> = {
   /**
    * The actor ID to use for this document, a random one will be generated if
-   * `null` is passed. In signing mode an actor already bound to a different
+   * `null` is passed. In an attested document an actor already bound to a different
    * author than `author` is rejected with a `RangeError` (on `load` and
-   * `clone`); a signing document only writes through actors its fixed author
+   * `clone`); an attested document only writes through actors its fixed author
    * owns.
    */
   actor?: ActorId
-  /** The author for this document. Required when `signing` is enabled. */
+  /** The author for this document. Required when `attested` is enabled. */
   author?: Author
   /**
    * Require valid attached Ed25519 proofs on incoming history and sign
-   * outgoing fragments. A signing document always has a current `author`,
+   * outgoing fragments. An attested document always has a current `author`,
    * whose bytes must form a usable Ed25519 public key.
    */
-  signing?: boolean
+  attested?: boolean
   freeze?: boolean
   /** A callback which will be called with the initial patch once the document has finished loading */
   patchCallback?: PatchCallback<T>
@@ -301,7 +301,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   // The author is fixed at construction in both modes.
   const handle = ApiHandler.create({
     actor,
-    signing: opts.signing,
+    attested: opts.attested,
     author: opts.author,
   })
   handle.enableFreeze(!!opts.freeze)
@@ -368,16 +368,16 @@ export function clone<T>(
   const state = _state(doc)
   const heads = state.heads
   const opts = importOpts(_opts)
-  if (opts.signing !== undefined) {
+  if (opts.attested !== undefined) {
     throw new RangeError(
-      "The signing mode is fixed when a document is created and inherited by clones",
+      "Attestation is fixed when a document is created and inherited by clones",
     )
   }
   // A clone inherits the author unless one is requested. A new author goes
-  // through the guarded full fork: in signing mode a different author is
+  // through the guarded full fork: in an attested document a different author is
   // permitted only when no local change is unpublished, and a signed
   // historical view cannot be cloned at all (historical forks are
-  // unsupported there). Unsigned historical views keep their semantics: fork
+  // unsupported there). Unattested historical views keep their semantics: fork
   // the view first, then take the authored full fork of that copy.
   let handle
   if (typeof opts.author == "string") {
@@ -416,10 +416,10 @@ export function clone<T>(
  * no longer correspond to those of the input document.
  *
  * This is a diagnostic transformation, not a mode conversion. The copy is
- * always a new **unsigned** document: its change hashes are rewritten, and it
+ * always a new **unattested** document: its change hashes are rewritten, and it
  * carries no authors, signatures, publication state or signing requests, even
- * when `doc` is a signing document. It therefore has no signature or
- * publication guarantee and cannot be merged or loaded into a signing
+ * when `doc` is an attested document. It therefore has no signature or
+ * publication guarantee and cannot be merged or loaded into an attested
  * document. `doc` itself is unchanged, unpublished drafts included.
  */
 export function anonymize<T>(doc: Doc<T>): Doc<Record<string, unknown>> {
@@ -839,7 +839,7 @@ export function load<T>(
     unchecked,
     allowMissingDeps,
     convertImmutableStringsToText,
-    signing: opts.signing,
+    attested: opts.attested,
     author: opts.author,
   })
   handle.enableFreeze(!!opts.freeze)
@@ -1015,9 +1015,9 @@ function applyVisibilityMutation<T>(
  * overcome this call {@link clone} on the argument before passing it to {@link
  * merge}.
  *
- * Between two signing documents only `remote`'s *published* history (with its
+ * Between two attested documents only `remote`'s *published* history (with its
  * complete proofs) is merged; `remote`'s unpublished drafts are left out and
- * `local`'s own drafts are kept. Merging a signing document with an unsigned
+ * `local`'s own drafts are kept. Merging an attested document with an unattested
  * one throws in either direction before anything is changed.
  */
 export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
@@ -2260,7 +2260,7 @@ export function readBundle(bundle: Uint8Array): {
  * harmless. An empty result does not mean everything is published; see
  * {@link hasUnpublishedChanges}.
  *
- * Throws if `doc` is not a signing document.
+ * Throws if `doc` is not an attested document.
  *
  * @example
  * ```ts
@@ -2285,7 +2285,7 @@ export function signingRequests<T>(doc: Doc<T>): SigningRequest[] {
  * insertion results. Cannot run inside an active change callback.
  *
  * The whole batch is parsed before anything changes: if any entry is
- * malformed, or `doc` is not a signing document, the outcome is `rejected`
+ * malformed, or `doc` is not an attested document, the outcome is `rejected`
  * (with the offending index in `reason`), nothing is processed and the
  * original `doc` is returned unchanged and still usable. Otherwise every
  * entry, duplicates included, gets an owned {@link SignatureInsertion} in
@@ -2377,7 +2377,7 @@ export function insertSignatures<T>(
 
 /**
  * EXPERIMENTAL: Whether any locally committed draft awaits publication.
- * Always `false` for unsigned documents; excludes unapplied incoming groups.
+ * Always `false` for unattested documents; excludes unapplied incoming groups.
  *
  * Read-only: it never commits or triggers publication, and it is not the
  * same as having signing requests. History blocked on missing proof from

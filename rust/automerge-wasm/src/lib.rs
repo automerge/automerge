@@ -46,9 +46,9 @@ use std::ops::{Bound, RangeBounds};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+mod attestation;
 mod export_cache;
 mod interop;
-mod signing;
 mod sync;
 mod value;
 
@@ -343,8 +343,8 @@ export type Mark = {
 interface Automerge {
 
     fork(actor?: string, heads?: Heads): Automerge;
-    // Full fork writing as `author` (null removes the author in unsigned
-    // documents). In required signing mode a different author is permitted
+    // Full fork writing as `author` (null removes the author in unattested
+    // documents). In an attested document a different author is permitted
     // only once every local draft is published.
     forkWithAuthor(author: string | null, actor?: string): Automerge;
 
@@ -404,13 +404,13 @@ interface Automerge {
     addFragments(fragments: Fragment[]): void;
 
     // Owned snapshot of the signatures the fixed author should produce next.
-    // Commits any pending transaction first (after the signing-mode check).
+    // Commits any pending transaction first (after the attestation check).
     signingRequests(): SigningRequest[];
     // Verify and attach signatures, then complete publication once. The whole
     // batch is parsed before anything is committed or mutated.
     insertSignatures(inputs: SignatureInput[]): SignatureBatchOutcome;
     // Whether any applied history is still unpublished (always false when
-    // unsigned). Read-only: never commits a pending transaction.
+    // unattested). Read-only: never commits a pending transaction.
     hasUnpublishedChanges(): boolean;
 
     getBlock(obj: ObjID, index: number, heads?: Heads): { [key: string]: MaterializeValue } | null;
@@ -429,8 +429,8 @@ export type LoadOptions = {
   allowMissingDeps?: boolean;
   /** @deprecated Migrate legacy scalar strings explicitly in application code. */
   convertImmutableStringsToText?: boolean;
-  // Load in required signing mode. Requires `author`.
-  signing?: boolean;
+  // Load as an attested document. Requires `author`.
+  attested?: boolean;
   // The fixed local author of the loaded document.
   author?: Author;
 };
@@ -442,8 +442,8 @@ export type DiffOptions = {
 
 export type InitOptions = {
   actor?: Actor;
-  // Create in required signing mode. Requires `author`.
-  signing?: boolean;
+  // Create an attested document. Requires `author`.
+  attested?: boolean;
   // The fixed local author of the new document.
   author?: Author;
 };
@@ -520,10 +520,10 @@ pub struct Automerge {
 #[wasm_bindgen]
 impl Automerge {
     pub fn new(actor: Option<String>) -> Result<Automerge, error::Create> {
-        Self::new_with_author(actor, DocumentAuthor::Unsigned(None))
+        Self::new_with_author(actor, DocumentAuthor::Unattested(None))
     }
 
-    /// Create a document with the given fixed author and signing mode.
+    /// Create a document with the given fixed author and attestation.
     #[allow(deprecated)]
     fn new_with_author(
         actor: Option<String>,
@@ -531,8 +531,8 @@ impl Automerge {
     ) -> Result<Automerge, error::Create> {
         let config = am::Config::default().text_encoding(TextEncoding::Utf16CodeUnit);
         let config = match author {
-            DocumentAuthor::Signing(author) => config.attested(author)?,
-            DocumentAuthor::Unsigned(author) => config.author(author),
+            DocumentAuthor::Attested(author) => config.attested(author)?,
+            DocumentAuthor::Unattested(author) => config.author(author),
         };
         let mut doc = AutoCommit::from_config(config);
         if let Some(a) = actor {
@@ -576,7 +576,7 @@ impl Automerge {
     #[allow(clippy::should_implement_trait)]
     #[allow(deprecated)]
     pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::Fork> {
-        // Parse and check the actor before cloning: in signing mode an actor
+        // Parse and check the actor before cloning: in an attested document an actor
         // bound to another author is rejected without touching the source.
         let actor = actor
             .map(|s| hex::decode(s).map(automerge::ActorId::from))
@@ -608,7 +608,7 @@ impl Automerge {
             .map_err(error::BadActorId::from)?;
         let heads: Result<Vec<am::ChangeHash>, _> = JS(heads).try_into();
         let doc = if let Ok(heads) = heads {
-            // Historical forking retains its existing unsigned-only contract.
+            // Historical forking retains its existing unattested-only contract.
             if let Some(actor) = &actor {
                 self.doc.check_actor_binding(actor)?;
             }
@@ -1607,12 +1607,12 @@ impl Automerge {
     /// Owned snapshot of the signatures the fixed local author should
     /// produce next. Typed in the `interface Automerge` custom section.
     ///
-    /// The signing-mode check runs before the pending transaction is
-    /// committed, so an unsigned document keeps its open transaction.
+    /// The attestation check runs before the pending transaction is
+    /// committed, so an unattested document keeps its open transaction.
     #[wasm_bindgen(js_name = signingRequests, skip_typescript)]
-    pub fn signing_requests(&mut self) -> Result<Array, error::SigningMode> {
+    pub fn signing_requests(&mut self) -> Result<Array, error::NotAttested> {
         let requests = self.doc.signing_requests()?;
-        Ok(requests.iter().map(signing::request_to_js).collect())
+        Ok(requests.iter().map(attestation::request_to_js).collect())
     }
 
     /// Verify and attach a batch of `{message, signature}` entries, then run
@@ -1624,18 +1624,18 @@ impl Automerge {
     /// without closing the transaction.
     #[wasm_bindgen(js_name = insertSignatures, skip_typescript)]
     pub fn insert_signatures(&mut self, inputs: JsValue) -> JsValue {
-        let inputs = match signing::parse_batch(&inputs) {
+        let inputs = match attestation::parse_batch(&inputs) {
             Ok(inputs) => inputs,
-            Err(error) => return signing::rejected_to_js(&error),
+            Err(error) => return attestation::rejected_to_js(&error),
         };
         let outcome = self
             .doc
             .insert_signatures(inputs.iter().map(|input| input.pair()));
-        signing::outcome_to_js(outcome)
+        attestation::outcome_to_js(outcome)
     }
 
     /// Whether any applied history is still unpublished. Read-only: never
-    /// commits a pending transaction. Always `false` when unsigned.
+    /// commits a pending transaction. Always `false` when unattested.
     #[wasm_bindgen(js_name = hasUnpublishedChanges, skip_typescript)]
     pub fn has_unpublished_changes(&self) -> bool {
         self.doc.has_unpublished_changes()
@@ -2058,43 +2058,43 @@ fn on_start() {
     let _ = wasm_bindgen::__rt::set_on_abort(log_abort);
 }
 
-fn signing_option(options: &JsValue) -> Result<bool, error::BadSigningOption> {
+fn attested_option(options: &JsValue) -> Result<bool, error::BadAttestedOption> {
     if options.is_null() || options.is_undefined() {
         return Ok(false);
     }
-    let Ok(value) = js_get(options, "signing") else {
+    let Ok(value) = js_get(options, "attested") else {
         return Ok(false);
     };
     if value.0.is_undefined() {
         return Ok(false);
     }
-    value.0.as_bool().ok_or(error::BadSigningOption)
+    value.0.as_bool().ok_or(error::BadAttestedOption)
 }
 
-/// The fixed author and signing mode requested by `create`/`load` options.
+/// The fixed author and attestation requested by `create`/`load` options.
 enum DocumentAuthor {
-    Unsigned(Option<Author<'static>>),
-    Signing(Author<'static>),
+    Unattested(Option<Author<'static>>),
+    Attested(Author<'static>),
 }
 
 /// Resolve the author a document is created or loaded with.
 ///
-/// Unsigned documents take any `author` option, or none. In signing mode an
-/// `author` option is required, and the author's bytes must form a usable
+/// Unattested documents take any `author` option, or none. An attested document
+/// requires an `author` option, and the author's bytes must form a usable
 /// Ed25519 key.
-fn document_author(options: &JsValue) -> Result<DocumentAuthor, error::SigningAuthor> {
-    let signing = signing_option(options)?;
+fn document_author(options: &JsValue) -> Result<DocumentAuthor, error::AttestedAuthor> {
+    let attested = attested_option(options)?;
     let author = js_get(options, "author")
         .ok()
         .and_then(|a| a.as_string())
         .map(Author::try_from)
         .transpose()
         .map_err(error::BadAuthor::from)?;
-    if !signing {
-        return Ok(DocumentAuthor::Unsigned(author));
+    if !attested {
+        return Ok(DocumentAuthor::Unattested(author));
     }
-    Ok(DocumentAuthor::Signing(
-        author.ok_or(error::SigningAuthor::Missing)?,
+    Ok(DocumentAuthor::Attested(
+        author.ok_or(error::AttestedAuthor::Missing)?,
     ))
 }
 
@@ -2148,11 +2148,11 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
         .migrate_strings(string_migration)
         .text_encoding(TextEncoding::Utf16CodeUnit);
     load_options = match author {
-        DocumentAuthor::Signing(author) => load_options
+        DocumentAuthor::Attested(author) => load_options
             .attested(author)
-            .map_err(error::SigningAuthor::from)?,
-        DocumentAuthor::Unsigned(Some(author)) => load_options.author(author),
-        DocumentAuthor::Unsigned(None) => load_options,
+            .map_err(error::AttestedAuthor::from)?,
+        DocumentAuthor::Unattested(Some(author)) => load_options.author(author),
+        DocumentAuthor::Unattested(None) => load_options,
     };
     let mut doc = am::AutoCommit::load_with_options(&data, load_options)?;
     if let Some(s) = actor {
@@ -2637,30 +2637,30 @@ pub mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
-    #[error("signing option must be a boolean")]
-    pub struct BadSigningOption;
+    #[error("attested option must be a boolean")]
+    pub struct BadAttestedOption;
 
-    /// A signing document was created, loaded, or updated without a usable author.
+    /// An attested document was created, loaded, or updated without a usable author.
     #[derive(Debug, thiserror::Error)]
-    pub enum SigningAuthor {
+    pub enum AttestedAuthor {
         #[error(transparent)]
-        BadSigning(#[from] BadSigningOption),
+        BadAttested(#[from] BadAttestedOption),
         #[error(transparent)]
         BadAuthor(#[from] BadAuthor),
-        #[error("signing documents require an author option")]
+        #[error("attested documents require an author option")]
         Missing,
         #[error(transparent)]
         Invalid(#[from] automerge::AttestationAuthorError),
     }
 
-    impl From<SigningAuthor> for JsValue {
-        fn from(e: SigningAuthor) -> Self {
+    impl From<AttestedAuthor> for JsValue {
+        fn from(e: AttestedAuthor) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }
 
-    impl From<BadSigningOption> for JsValue {
-        fn from(e: BadSigningOption) -> Self {
+    impl From<BadAttestedOption> for JsValue {
+        fn from(e: BadAttestedOption) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }
@@ -2670,15 +2670,15 @@ pub mod error {
         #[error(transparent)]
         BadActor(#[from] BadActorId),
         #[error(transparent)]
-        SigningAuthor(#[from] SigningAuthor),
-        /// The configured actor is bound to another author in signing mode.
+        AttestedAuthor(#[from] AttestedAuthor),
+        /// The configured actor is bound to another author in an attested document.
         #[error(transparent)]
         Actor(#[from] AutomergeError),
     }
 
     impl From<automerge::AttestationAuthorError> for Create {
         fn from(e: automerge::AttestationAuthorError) -> Self {
-            Self::SigningAuthor(SigningAuthor::Invalid(e))
+            Self::AttestedAuthor(AttestedAuthor::Invalid(e))
         }
     }
 
@@ -2690,10 +2690,10 @@ pub mod error {
 
     #[derive(Debug, thiserror::Error)]
     #[error(transparent)]
-    pub struct SigningMode(#[from] automerge::attestation::error::NotAttested);
+    pub struct NotAttested(#[from] automerge::attestation::error::NotAttested);
 
-    impl From<SigningMode> for JsValue {
-        fn from(e: SigningMode) -> Self {
+    impl From<NotAttested> for JsValue {
+        fn from(e: NotAttested) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }
@@ -3171,7 +3171,7 @@ pub mod error {
         #[error(transparent)]
         BadActor(#[from] BadActorId),
         #[error(transparent)]
-        SigningAuthor(#[from] SigningAuthor),
+        AttestedAuthor(#[from] AttestedAuthor),
     }
 
     impl From<Load> for JsValue {
